@@ -232,11 +232,6 @@ pub enum CipherRepromptType {
     Password = 1,
 }
 
-#[derive(serde::Serialize, Debug)]
-struct PreloginReq {
-    email: String,
-}
-
 #[derive(serde::Deserialize, Debug)]
 struct PreloginRes {
     #[serde(rename = "Kdf", alias = "kdf")]
@@ -796,7 +791,7 @@ const BITWARDEN_CLIENT: &str = "cli";
 const DEVICE_TYPE: u8 = 8;
 
 enum ClientRequest<'a> {
-    Prelogin(PreloginReq),
+    Prelogin(&'a str),
     ConnectToken(ConnectTokenReq),
     Login(ConnectTokenReq, &'a str),
     SendEmailLogin(SendEmailLoginReq, &'a str),
@@ -809,9 +804,9 @@ impl<'a> ClientRequest<'a> {
         let http_client = client.reqwest_client().await?;
 
         let rb = match self {
-            Self::Prelogin(r) => http_client
+            Self::Prelogin(email) => http_client
                 .post(client.identity_url("/accounts/prelogin"))
-                .json(&r),
+                .json(&serde_json::json!({"email": email})),
             Self::ConnectToken(r) => http_client
                 .post(client.identity_url("/connect/token"))
                 .form(&r),
@@ -955,13 +950,11 @@ impl Client {
     }
 
     pub async fn prelogin(&self, email: &str) -> Result<(KdfType, u32, Option<u32>, Option<u32>)> {
-        let res: PreloginRes = ClientRequest::Prelogin(PreloginReq {
-            email: email.to_string(),
-        })
-        .req(self)
-        .await?
-        .json_with_path()
-        .await?;
+        let res: PreloginRes = ClientRequest::Prelogin(email)
+            .req(self)
+            .await?
+            .json_with_path()
+            .await?;
 
         Ok((
             res.kdf,
