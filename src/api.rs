@@ -1050,7 +1050,7 @@ impl Client {
                 grant_type: "password".to_string(),
                 scope: "api offline_access".to_string(),
                 client_id: "cli".to_string(),
-                device_type: 8,
+                device_type: u32::from(DEVICE_TYPE),
                 device_identifier: device_id.to_string(),
                 device_name: "rbw".to_string(),
                 device_push_token: String::new(),
