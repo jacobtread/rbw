@@ -863,19 +863,13 @@ impl Client {
             env!("CARGO_PKG_VERSION")
         );
         if let Some(client_cert_path) = self.client_cert_path.as_ref() {
-            let mut buf = Vec::new();
-            let mut f = tokio::fs::File::open(client_cert_path)
-                .await
-                .map_err(|e| Error::LoadClientCert {
-                    source: e,
-                    file: client_cert_path.clone(),
+            let buf =
+                tokio::fs::read(client_cert_path).await.map_err(|e| {
+                    Error::LoadClientCert {
+                        source: e,
+                        file: client_cert_path.clone(),
+                    }
                 })?;
-            f.read_to_end(&mut buf).await.map_err(|e| {
-                Error::LoadClientCert {
-                    source: e,
-                    file: client_cert_path.clone(),
-                }
-            })?;
             let pem = reqwest::Identity::from_pem(&buf)
                 .map_err(|e| Error::CreateReqwestClient { source: e })?;
             Ok(reqwest::Client::builder()
