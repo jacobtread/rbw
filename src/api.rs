@@ -727,36 +727,26 @@ struct SyncResPasswordHistory {
 }
 
 #[derive(Serialize, Debug)]
-struct CiphersPostReq {
-    #[serde(rename = "type")]
-    ty: u32, // XXX what are the valid types?
+struct CiphersPostReq<'a> {
     #[serde(rename = "folderId")]
     folder_id: Option<String>,
     name: String,
     notes: Option<String>,
-    login: Option<CipherLogin>,
-    card: Option<CipherCard>,
-    identity: Option<CipherIdentity>,
-    #[serde(rename = "secureNote")]
-    secure_note: Option<CipherSecureNote>,
+    #[serde(flatten)]
+    data: EntryDataWire<'a>, // use lifetime parameter on the struct instead
 }
 
 #[derive(Serialize, Debug)]
-struct CiphersPutReq {
-    #[serde(rename = "type")]
-    ty: u32, // XXX what are the valid types?
+struct CiphersPutReq<'a> {
     #[serde(rename = "folderId")]
     folder_id: Option<String>,
     #[serde(rename = "organizationId")]
     organization_id: Option<String>,
     name: String,
     notes: Option<String>,
-    login: Option<CipherLogin>,
-    card: Option<CipherCard>,
-    identity: Option<CipherIdentity>,
+    #[serde(flatten)]
+    data: EntryDataWire<'a>,
     fields: Vec<CipherField>,
-    #[serde(rename = "secureNote")]
-    secure_note: Option<CipherSecureNote>,
     #[serde(rename = "passwordHistory")]
     password_history: Vec<CiphersPutReqHistory>,
 }
@@ -769,45 +759,45 @@ struct CiphersPutReqHistory {
     password: String,
 }
 
-struct CipherDataFields {
-    ty: u32,
-    login: Option<CipherLogin>,
-    card: Option<CipherCard>,
-    identity: Option<CipherIdentity>,
-    secure_note: Option<CipherSecureNote>,
-}
+#[derive(Debug)]
+struct EntryDataWire<'a>(&'a crate::db::EntryData);
 
-impl From<&crate::db::EntryData> for CipherDataFields {
-    fn from(data: &crate::db::EntryData) -> Self {
-        match data {
+impl Serialize for EntryDataWire<'_> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        match self.0.clone() {
             crate::db::EntryData::Login {
                 username,
                 password,
                 totp,
                 uris,
-            } => Self {
-                ty: 1,
-                login: Some(CipherLogin {
-                    username: username.clone(),
-                    password: password.clone(),
-                    totp: totp.clone(),
-                    uris: if uris.is_empty() {
-                        None
-                    } else {
-                        Some(
-                            uris.iter()
-                                .map(|s| CipherLoginUri {
-                                    uri: Some(s.uri.clone()),
-                                    match_type: s.match_type,
-                                })
-                                .collect(),
-                        )
+            } => {
+                map.serialize_entry("type", &1u32)?;
+                map.serialize_entry(
+                    "login",
+                    &CipherLogin {
+                        username,
+                        password,
+                        totp,
+                        uris: if uris.is_empty() {
+                            None
+                        } else {
+                            Some(
+                                uris.iter()
+                                    .map(|s| CipherLoginUri {
+                                        uri: Some(s.uri.clone()),
+                                        match_type: s.match_type,
+                                    })
+                                    .collect(),
+                            )
+                        },
                     },
-                }),
-                card: None,
-                identity: None,
-                secure_note: None,
-            },
+                )?;
+            }
             crate::db::EntryData::Card {
                 cardholder_name,
                 number,
@@ -815,20 +805,20 @@ impl From<&crate::db::EntryData> for CipherDataFields {
                 exp_month,
                 exp_year,
                 code,
-            } => Self {
-                ty: 3,
-                login: None,
-                card: Some(CipherCard {
-                    cardholder_name: cardholder_name.clone(),
-                    number: number.clone(),
-                    brand: brand.clone(),
-                    exp_month: exp_month.clone(),
-                    exp_year: exp_year.clone(),
-                    code: code.clone(),
-                }),
-                identity: None,
-                secure_note: None,
-            },
+            } => {
+                map.serialize_entry("type", &3u32)?;
+                map.serialize_entry(
+                    "card",
+                    &CipherCard {
+                        cardholder_name,
+                        number,
+                        brand,
+                        exp_month,
+                        exp_year,
+                        code,
+                    },
+                )?;
+            }
             crate::db::EntryData::Identity {
                 title,
                 first_name,
@@ -847,40 +837,40 @@ impl From<&crate::db::EntryData> for CipherDataFields {
                 license_number,
                 passport_number,
                 username,
-            } => Self {
-                ty: 4,
-                login: None,
-                card: None,
-                identity: Some(CipherIdentity {
-                    title: title.clone(),
-                    first_name: first_name.clone(),
-                    middle_name: middle_name.clone(),
-                    last_name: last_name.clone(),
-                    address1: address1.clone(),
-                    address2: address2.clone(),
-                    address3: address3.clone(),
-                    city: city.clone(),
-                    state: state.clone(),
-                    postal_code: postal_code.clone(),
-                    country: country.clone(),
-                    phone: phone.clone(),
-                    email: email.clone(),
-                    ssn: ssn.clone(),
-                    license_number: license_number.clone(),
-                    passport_number: passport_number.clone(),
-                    username: username.clone(),
-                }),
-                secure_note: None,
-            },
-            crate::db::EntryData::SecureNote => Self {
-                ty: 2,
-                login: None,
-                card: None,
-                identity: None,
-                secure_note: Some(CipherSecureNote {}),
-            },
-            crate::db::EntryData::SshKey { .. } => unreachable!(),
+            } => {
+                map.serialize_entry("type", &4u32)?;
+                map.serialize_entry(
+                    "identity",
+                    &CipherIdentity {
+                        title,
+                        first_name,
+                        middle_name,
+                        last_name,
+                        address1,
+                        address2,
+                        address3,
+                        city,
+                        state,
+                        postal_code,
+                        country,
+                        phone,
+                        email,
+                        ssn,
+                        license_number,
+                        passport_number,
+                        username,
+                    },
+                )?;
+            }
+            crate::db::EntryData::SecureNote => {
+                map.serialize_entry("type", &2u32)?;
+                map.serialize_entry("secureNote", &CipherSecureNote {})?;
+            }
+            crate::db::EntryData::SshKey { .. } => {
+                return Err(serde::ser::Error::custom("SshKey not supported"));
+            }
         }
+        map.end()
     }
 }
 
@@ -955,8 +945,8 @@ impl<'a> ClientRequest<'a> {
 }
 
 enum ClientBlockingRequest<'a> {
-    Add(&'a str, CiphersPostReq),
-    Edit(&'a str, &'a str, CiphersPutReq),
+    Add(&'a str, CiphersPostReq<'a>),
+    Edit(&'a str, &'a str, CiphersPutReq<'a>),
     Remove(&'a str, &'a str),
     Folders(&'a str),
     CreateFolder(&'a str, &'a str),
@@ -1320,17 +1310,11 @@ impl Client {
         notes: Option<&str>,
         folder_id: Option<&str>,
     ) -> Result<()> {
-        let fields = CipherDataFields::from(data);
-
         let req = CiphersPostReq {
-            ty: 1, // TODO: Bug?
             folder_id: folder_id.map(std::string::ToString::to_string),
             name: name.to_string(),
             notes: notes.map(std::string::ToString::to_string),
-            login: fields.login,
-            card: fields.card,
-            identity: fields.identity,
-            secure_note: fields.secure_note,
+            data: EntryDataWire(data),
         };
 
         let res = ClientBlockingRequest::Add(access_token, req).req(self)?;
@@ -1356,18 +1340,12 @@ impl Client {
         folder_uuid: Option<&str>,
         history: &[crate::db::HistoryEntry],
     ) -> Result<()> {
-        let cipher_fields = CipherDataFields::from(data);
-
         let req = CiphersPutReq {
-            ty: cipher_fields.ty,
             folder_id: folder_uuid.map(std::string::ToString::to_string),
             organization_id: org_id.map(std::string::ToString::to_string),
             name: name.to_string(),
             notes: notes.map(std::string::ToString::to_string),
-            login: cipher_fields.login,
-            card: cipher_fields.card,
-            identity: cipher_fields.identity,
-            secure_note: cipher_fields.secure_note,
+            data: EntryDataWire(data),
             fields: fields
                 .iter()
                 .map(|field| CipherField {
