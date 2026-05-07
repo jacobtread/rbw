@@ -356,7 +356,7 @@ struct ConnectErrorRes {
 }
 
 impl TryFrom<ConnectErrorRes> for Error {
-    type Error = ();
+    type Error = ConnectErrorRes;
 
     fn try_from(
         value: ConnectErrorRes,
@@ -417,7 +417,7 @@ impl TryFrom<ConnectErrorRes> for Error {
             _ => {}
         }
 
-        Err(())
+        Err(value)
     }
 }
 
@@ -1096,8 +1096,8 @@ impl Client {
             match res.text().await {
                 Ok(body) => {
                     match body.clone().json_with_path::<ConnectErrorRes>() {
-                        Ok(err) => Err(err.try_into().unwrap_or_else(|_| {
-                            log::warn!("unexpected error received during login: {self:?}");
+                        Ok(err) => Err(err.try_into().unwrap_or_else(|err| {
+                            log::warn!("unexpected error received during login: {err:?}");
                             Error::RequestFailed { status: code }
                         })),
                         Err(e) => {
@@ -1180,8 +1180,8 @@ impl Client {
             match res.text().await {
                 Ok(body) => {
                     match body.clone().json_with_path::<ConnectErrorRes>() {
-                        Ok(err) => Err(err.try_into().unwrap_or_else(|_| {
-                            log::warn!("unexpected error received during login: {self:?}");
+                        Ok(err) => Err(err.try_into().unwrap_or_else(|err| {
+                            log::warn!("unexpected error received during login: {err:?}");
                             Error::RequestFailed { status: code }
                         })),
                         Err(e) => {
