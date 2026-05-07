@@ -351,7 +351,7 @@ impl TryFrom<ConnectErrorRes> for Error {
                 // this case, for some reason
                 if error_desc.is_none() || error_desc == Some("") {
                     if let Some(error_model) = value.error_model.as_ref() {
-                        let message = error_model.message.as_str().to_string();
+                        let message = error_model.message.clone();
                         match message.as_str() {
                             "Username or password is incorrect. Try again"
                             | "TOTP code is not a number" => {
