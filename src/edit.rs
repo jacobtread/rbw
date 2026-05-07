@@ -1,8 +1,6 @@
 use crate::prelude::*;
 
-use std::io::{Read as _, Write as _};
-
-use is_terminal::IsTerminal as _;
+use std::io::{IsTerminal as _, Read as _, Write as _};
 
 pub fn edit(contents: &str, help: &str) -> Result<String> {
     if !std::io::stdin().is_terminal() {
