@@ -6,7 +6,6 @@ use crate::prelude::*;
 
 use rand::distr::SampleString as _;
 use sha2::Digest as _;
-use tokio::io::AsyncReadExt as _;
 
 use crate::json::{
     DeserializeJsonWithPath as _, DeserializeJsonWithPathAsync as _,
@@ -360,13 +359,6 @@ struct ConnectErrorRes {
 struct ConnectErrorResErrorModel {
     #[serde(rename = "Message", alias = "message")]
     message: String,
-}
-
-#[derive(serde::Serialize, Debug)]
-struct ConnectRefreshTokenReq {
-    grant_type: String,
-    client_id: String,
-    refresh_token: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -804,17 +796,112 @@ struct FoldersResData {
     name: String,
 }
 
-#[derive(serde::Serialize, Debug)]
-struct FoldersPostReq {
-    name: String,
-}
-
 // Used for the Bitwarden-Client-Name header. Accepted values:
 // https://github.com/bitwarden/server/blob/main/src/Core/Enums/BitwardenClient.cs
 const BITWARDEN_CLIENT: &str = "cli";
 
 // DeviceType.LinuxDesktop, as per Bitwarden API device types.
 const DEVICE_TYPE: u8 = 8;
+
+enum ClientRequest<'a> {
+    Prelogin(PreloginReq),
+    ConnectToken(ConnectTokenReq),
+    Login(ConnectTokenReq, &'a str),
+    SendEmailLogin(SendEmailLoginReq, &'a str),
+    Sync(&'a str),
+    ExchangeRefreshToken(&'a str),
+}
+
+impl<'a> ClientRequest<'a> {
+    async fn req(self, client: &Client) -> Result<reqwest::Response> {
+        let http_client = client.reqwest_client().await?;
+
+        let rb = match self {
+            Self::Prelogin(r) => http_client
+                .post(client.identity_url("/accounts/prelogin"))
+                .json(&r),
+            Self::ConnectToken(r) => http_client
+                .post(client.identity_url("/connect/token"))
+                .form(&r),
+            Self::Login(r, email) => http_client
+                .post(client.identity_url("/connect/token"))
+                .form(&r)
+                .header(
+                    "auth-email",
+                    crate::base64::encode_url_safe_no_pad(email),
+                ),
+            Self::SendEmailLogin(r, email) => http_client
+                .post(client.api_url("/two-factor/send-email-login"))
+                .json(&r)
+                .header(
+                    "auth-email",
+                    crate::base64::encode_url_safe_no_pad(email),
+                ),
+            Self::Sync(access_token) => http_client
+                .get(client.api_url("/sync"))
+                .header("Authorization", format!("Bearer {access_token}"))
+                // This is necessary for vaultwarden to include the ssh keys in the response
+                .header("Bitwarden-Client-Version", "2024.12.0"),
+            Self::ExchangeRefreshToken(refresh_token) => http_client
+                .post(client.identity_url("/connect/token"))
+                .form(&[
+                    ("grant_type", "refresh_token"),
+                    ("client_id", "cli"),
+                    ("refresh_token", refresh_token),
+                ]),
+        };
+
+        Ok(rb
+            .send()
+            .await
+            .map_err(|source| Error::Reqwest { source })?)
+    }
+}
+
+enum ClientBlockingRequest<'a> {
+    Add(&'a str, CiphersPostReq),
+    Edit(&'a str, &'a str, CiphersPutReq),
+    Remove(&'a str, &'a str),
+    Folders(&'a str),
+    CreateFolder(&'a str, &'a str),
+    ExchangeRefreshToken(&'a str),
+}
+
+impl<'a> ClientBlockingRequest<'a> {
+    fn req(self, client: &Client) -> Result<reqwest::blocking::Response> {
+        let http_client = reqwest::blocking::Client::new();
+
+        let rb = match self {
+            Self::Add(access_token, r) => http_client
+                .post(client.api_url("/ciphers"))
+                .header("Authorization", format!("Bearer {access_token}"))
+                .json(&r),
+            Self::Edit(access_token, id, r) => http_client
+                .put(client.api_url(&format!("/ciphers/{id}")))
+                .header("Authorization", format!("Bearer {access_token}"))
+                .json(&r),
+            Self::Remove(access_token, id) => http_client
+                .delete(client.api_url(&format!("/ciphers/{id}")))
+                .header("Authorization", format!("Bearer {access_token}")),
+            Self::Folders(access_token) => http_client
+                .get(client.api_url("/folders"))
+                .header("Authorization", format!("Bearer {access_token}")),
+            Self::CreateFolder(access_token, name) => http_client
+                .post(client.api_url("/folders"))
+                .header("Authorization", format!("Bearer {access_token}"))
+                .json(&serde_json::json!({"name": name})),
+            Self::ExchangeRefreshToken(refresh_token) => http_client
+                .post(client.identity_url("/connect/token"))
+                .form(&[
+                    ("grant_type", "refresh_token"),
+                    ("client_id", "cli"),
+                    ("refresh_token", refresh_token),
+                ]),
+        };
+
+        Ok(rb.send().map_err(|source| Error::Reqwest { source })?)
+    }
+}
 
 #[derive(Debug)]
 pub struct Client {
@@ -891,22 +978,19 @@ impl Client {
         &self,
         email: &str,
     ) -> Result<(KdfType, u32, Option<u32>, Option<u32>)> {
-        let prelogin = PreloginReq {
+        let res: PreloginRes = ClientRequest::Prelogin(PreloginReq {
             email: email.to_string(),
-        };
-        let client = self.reqwest_client().await?;
-        let res = client
-            .post(self.identity_url("/accounts/prelogin"))
-            .json(&prelogin)
-            .send()
-            .await
-            .map_err(|source| Error::Reqwest { source })?;
-        let prelogin_res: PreloginRes = res.json_with_path().await?;
+        })
+        .req(self)
+        .await?
+        .json_with_path()
+        .await?;
+
         Ok((
-            prelogin_res.kdf,
-            prelogin_res.kdf_iterations,
-            prelogin_res.kdf_memory,
-            prelogin_res.kdf_parallelism,
+            res.kdf,
+            res.kdf_iterations,
+            res.kdf_memory,
+            res.kdf_parallelism,
         ))
     }
 
@@ -938,13 +1022,7 @@ impl Client {
             two_factor_token: None,
             two_factor_provider: None,
         };
-        let client = self.reqwest_client().await?;
-        let res = client
-            .post(self.identity_url("/connect/token"))
-            .form(&connect_req)
-            .send()
-            .await
-            .map_err(|source| Error::Reqwest { source })?;
+        let res = ClientRequest::ConnectToken(connect_req).req(self).await?;
         if res.status() == reqwest::StatusCode::OK {
             Ok(())
         } else {
@@ -1017,17 +1095,7 @@ impl Client {
             },
         };
 
-        let client = self.reqwest_client().await?;
-        let res = client
-            .post(self.identity_url("/connect/token"))
-            .form(&connect_req)
-            .header(
-                "auth-email",
-                crate::base64::encode_url_safe_no_pad(email),
-            )
-            .send()
-            .await
-            .map_err(|source| Error::Reqwest { source })?;
+        let res = ClientRequest::Login(connect_req, email).req(self).await?;
 
         if res.status() == reqwest::StatusCode::OK {
             let connect_res: ConnectTokenRes = res.json_with_path().await?;
@@ -1060,24 +1128,17 @@ impl Client {
         device_id: &str,
         sso_email_2fa_session_token: &str,
     ) -> Result<()> {
-        let send_email_login_req = SendEmailLoginReq {
-            email: email.to_string(),
-            device_identifier: device_id.to_string(),
-            sso_email_2fa_session_token: sso_email_2fa_session_token
-                .to_string(),
-        };
-
-        let client = self.reqwest_client().await?;
-        let res = client
-            .post(self.api_url("/two-factor/send-email-login"))
-            .json(&send_email_login_req)
-            .header(
-                "auth-email",
-                crate::base64::encode_url_safe_no_pad(email),
-            )
-            .send()
-            .await
-            .map_err(|source| Error::Reqwest { source })?;
+        let res = ClientRequest::SendEmailLogin(
+            SendEmailLoginReq {
+                email: email.to_string(),
+                device_identifier: device_id.to_string(),
+                sso_email_2fa_session_token: sso_email_2fa_session_token
+                    .to_string(),
+            },
+            email,
+        )
+        .req(self)
+        .await?;
 
         if res.status() == reqwest::StatusCode::OK {
             Ok(())
@@ -1148,15 +1209,7 @@ impl Client {
         std::collections::HashMap<String, String>,
         Vec<crate::db::Entry>,
     )> {
-        let client = self.reqwest_client().await?;
-        let res = client
-            .get(self.api_url("/sync"))
-            .header("Authorization", format!("Bearer {access_token}"))
-            // This is necessary for vaultwarden to include the ssh keys in the response
-            .header("Bitwarden-Client-Version", "2024.12.0")
-            .send()
-            .await
-            .map_err(|source| Error::Reqwest { source })?;
+        let res = ClientRequest::Sync(access_token).req(self).await?;
         match res.status() {
             reqwest::StatusCode::OK => {
                 let sync_res: SyncRes = res.json_with_path().await?;
@@ -1293,13 +1346,8 @@ impl Client {
             }
             crate::db::EntryData::SshKey { .. } => unreachable!(),
         }
-        let client = reqwest::blocking::Client::new();
-        let res = client
-            .post(self.api_url("/ciphers"))
-            .header("Authorization", format!("Bearer {access_token}"))
-            .json(&req)
-            .send()
-            .map_err(|source| Error::Reqwest { source })?;
+
+        let res = ClientBlockingRequest::Add(access_token, req).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => Ok(()),
             reqwest::StatusCode::UNAUTHORIZED => {
@@ -1443,13 +1491,9 @@ impl Client {
             }
             crate::db::EntryData::SshKey { .. } => unreachable!(),
         }
-        let client = reqwest::blocking::Client::new();
-        let res = client
-            .put(self.api_url(&format!("/ciphers/{id}")))
-            .header("Authorization", format!("Bearer {access_token}"))
-            .json(&req)
-            .send()
-            .map_err(|source| Error::Reqwest { source })?;
+
+        let res =
+            ClientBlockingRequest::Edit(access_token, id, req).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => Ok(()),
             reqwest::StatusCode::UNAUTHORIZED => {
@@ -1462,12 +1506,8 @@ impl Client {
     }
 
     pub fn remove(&self, access_token: &str, id: &str) -> Result<()> {
-        let client = reqwest::blocking::Client::new();
-        let res = client
-            .delete(self.api_url(&format!("/ciphers/{id}")))
-            .header("Authorization", format!("Bearer {access_token}"))
-            .send()
-            .map_err(|source| Error::Reqwest { source })?;
+        let res =
+            ClientBlockingRequest::Remove(access_token, id).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => Ok(()),
             reqwest::StatusCode::UNAUTHORIZED => {
@@ -1483,12 +1523,7 @@ impl Client {
         &self,
         access_token: &str,
     ) -> Result<Vec<(String, String)>> {
-        let client = reqwest::blocking::Client::new();
-        let res = client
-            .get(self.api_url("/folders"))
-            .header("Authorization", format!("Bearer {access_token}"))
-            .send()
-            .map_err(|source| Error::Reqwest { source })?;
+        let res = ClientBlockingRequest::Folders(access_token).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => {
                 let folders_res: FoldersRes = res.json_with_path()?;
@@ -1512,16 +1547,8 @@ impl Client {
         access_token: &str,
         name: &str,
     ) -> Result<String> {
-        let req = FoldersPostReq {
-            name: name.to_string(),
-        };
-        let client = reqwest::blocking::Client::new();
-        let res = client
-            .post(self.api_url("/folders"))
-            .header("Authorization", format!("Bearer {access_token}"))
-            .json(&req)
-            .send()
-            .map_err(|source| Error::Reqwest { source })?;
+        let res = ClientBlockingRequest::CreateFolder(access_token, name)
+            .req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => {
                 let folders_res: FoldersResData = res.json_with_path()?;
@@ -1540,17 +1567,8 @@ impl Client {
         &self,
         refresh_token: &str,
     ) -> Result<String> {
-        let connect_req = ConnectRefreshTokenReq {
-            grant_type: "refresh_token".to_string(),
-            client_id: "cli".to_string(),
-            refresh_token: refresh_token.to_string(),
-        };
-        let client = reqwest::blocking::Client::new();
-        let res = client
-            .post(self.identity_url("/connect/token"))
-            .form(&connect_req)
-            .send()
-            .map_err(|source| Error::Reqwest { source })?;
+        let res = ClientBlockingRequest::ExchangeRefreshToken(refresh_token)
+            .req(self)?;
         let connect_res: ConnectRefreshTokenRes = res.json_with_path()?;
         Ok(connect_res.access_token)
     }
@@ -1559,18 +1577,9 @@ impl Client {
         &self,
         refresh_token: &str,
     ) -> Result<String> {
-        let connect_req = ConnectRefreshTokenReq {
-            grant_type: "refresh_token".to_string(),
-            client_id: "cli".to_string(),
-            refresh_token: refresh_token.to_string(),
-        };
-        let client = self.reqwest_client().await?;
-        let res = client
-            .post(self.identity_url("/connect/token"))
-            .form(&connect_req)
-            .send()
-            .await
-            .map_err(|source| Error::Reqwest { source })?;
+        let res = ClientRequest::ExchangeRefreshToken(refresh_token)
+            .req(self)
+            .await?;
         let connect_res: ConnectRefreshTokenRes =
             res.json_with_path().await?;
         Ok(connect_res.access_token)
