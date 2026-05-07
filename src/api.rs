@@ -355,6 +355,72 @@ struct ConnectErrorRes {
     sso_email_2fa_session_token: Option<String>,
 }
 
+impl TryFrom<ConnectErrorRes> for Error {
+    type Error = ();
+
+    fn try_from(
+        value: ConnectErrorRes,
+    ) -> std::result::Result<Self, Self::Error> {
+        let error_desc = value.error_description.as_deref();
+        match value.error.as_str() {
+            "invalid_grant" => match error_desc {
+                Some("invalid_username_or_password") => {
+                    if let Some(error_model) = value.error_model.as_ref() {
+                        let message =
+                            error_model.message.as_str().to_string();
+                        return Ok(Error::IncorrectPassword { message });
+                    }
+                }
+                Some("Two factor required.") => {
+                    if let Some(providers) =
+                        value.two_factor_providers.as_ref()
+                    {
+                        return Ok(Error::TwoFactorRequired {
+                            providers: providers.clone(),
+                            sso_email_2fa_session_token: value
+                                .sso_email_2fa_session_token
+                                .clone(),
+                        });
+                    }
+                }
+                Some("Captcha required.") => {
+                    return Ok(Error::RegistrationRequired);
+                }
+                _ => {}
+            },
+            "invalid_client" => {
+                return Ok(Error::IncorrectApiKey);
+            }
+            "" => {
+                // bitwarden_rs returns an empty error and error_description for
+                // this case, for some reason
+                if error_desc.is_none() || error_desc == Some("") {
+                    if let Some(error_model) = value.error_model.as_ref() {
+                        let message =
+                            error_model.message.as_str().to_string();
+                        match message.as_str() {
+                        "Username or password is incorrect. Try again"
+                        | "TOTP code is not a number" => {
+                            return Ok(Error::IncorrectPassword { message });
+                        }
+                        s => {
+                            if s.starts_with(
+                                "Invalid TOTP code! Server time: ",
+                            ) {
+                                return Ok(Error::IncorrectPassword { message });
+                            }
+                        }
+                    }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Err(())
+    }
+}
+
 #[derive(serde::Deserialize, Debug)]
 struct ConnectErrorResErrorModel {
     #[serde(rename = "Message", alias = "message")]
@@ -1028,13 +1094,18 @@ impl Client {
         } else {
             let code = res.status().as_u16();
             match res.text().await {
-                Ok(body) => match body.clone().json_with_path() {
-                    Ok(json) => Err(classify_login_error(&json, code)),
-                    Err(e) => {
-                        log::warn!("{e}: {body}");
-                        Err(Error::RequestFailed { status: code })
+                Ok(body) => {
+                    match body.clone().json_with_path::<ConnectErrorRes>() {
+                        Ok(err) => Err(err.try_into().unwrap_or_else(|_| {
+                            log::warn!("unexpected error received during login: {self:?}");
+                            Error::RequestFailed { status: code }
+                        })),
+                        Err(e) => {
+                            log::warn!("{e}: {body}");
+                            Err(Error::RequestFailed { status: code })
+                        }
                     }
-                },
+                }
                 Err(e) => {
                     log::warn!("failed to read response body: {e}");
                     Err(Error::RequestFailed { status: code })
@@ -1107,13 +1178,18 @@ impl Client {
         } else {
             let code = res.status().as_u16();
             match res.text().await {
-                Ok(body) => match body.clone().json_with_path() {
-                    Ok(json) => Err(classify_login_error(&json, code)),
-                    Err(e) => {
-                        log::warn!("{e}: {body}");
-                        Err(Error::RequestFailed { status: code })
+                Ok(body) => {
+                    match body.clone().json_with_path::<ConnectErrorRes>() {
+                        Ok(err) => Err(err.try_into().unwrap_or_else(|_| {
+                            log::warn!("unexpected error received during login: {self:?}");
+                            Error::RequestFailed { status: code }
+                        })),
+                        Err(e) => {
+                            log::warn!("{e}: {body}");
+                            Err(Error::RequestFailed { status: code })
+                        }
                     }
-                },
+                }
                 Err(e) => {
                     log::warn!("failed to read response body: {e}");
                     Err(Error::RequestFailed { status: code })
@@ -1708,64 +1784,4 @@ fn sso_query_code(
     }
 
     Ok(sso_code.clone())
-}
-
-fn classify_login_error(error_res: &ConnectErrorRes, code: u16) -> Error {
-    let error_desc = error_res.error_description.clone();
-    let error_desc = error_desc.as_deref();
-    match error_res.error.as_str() {
-        "invalid_grant" => match error_desc {
-            Some("invalid_username_or_password") => {
-                if let Some(error_model) = error_res.error_model.as_ref() {
-                    let message = error_model.message.as_str().to_string();
-                    return Error::IncorrectPassword { message };
-                }
-            }
-            Some("Two factor required.") => {
-                if let Some(providers) =
-                    error_res.two_factor_providers.as_ref()
-                {
-                    return Error::TwoFactorRequired {
-                        providers: providers.clone(),
-                        sso_email_2fa_session_token: error_res
-                            .sso_email_2fa_session_token
-                            .clone(),
-                    };
-                }
-            }
-            Some("Captcha required.") => {
-                return Error::RegistrationRequired;
-            }
-            _ => {}
-        },
-        "invalid_client" => {
-            return Error::IncorrectApiKey;
-        }
-        "" => {
-            // bitwarden_rs returns an empty error and error_description for
-            // this case, for some reason
-            if error_desc.is_none() || error_desc == Some("") {
-                if let Some(error_model) = error_res.error_model.as_ref() {
-                    let message = error_model.message.as_str().to_string();
-                    match message.as_str() {
-                        "Username or password is incorrect. Try again"
-                        | "TOTP code is not a number" => {
-                            return Error::IncorrectPassword { message };
-                        }
-                        s => {
-                            if s.starts_with(
-                                "Invalid TOTP code! Server time: ",
-                            ) {
-                                return Error::IncorrectPassword { message };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-
-    log::warn!("unexpected error received during login: {error_res:?}");
-    Error::RequestFailed { status: code }
 }
