@@ -277,28 +277,19 @@ struct ConnectTokenReq {
 #[derive(Serialize, Debug)]
 #[serde(untagged)]
 enum ConnectTokenAuth {
-    Password(ConnectTokenPassword),
-    AuthCode(ConnectTokenAuthCode),
-    ClientCredentials(ConnectTokenClientCredentials),
-}
-
-#[derive(Serialize, Debug)]
-struct ConnectTokenPassword {
-    username: String,
-    password: String,
-}
-
-#[derive(Serialize, Debug)]
-struct ConnectTokenAuthCode {
-    code: String,
-    code_verifier: String,
-    redirect_uri: String,
-}
-
-#[derive(Serialize, Debug)]
-struct ConnectTokenClientCredentials {
-    username: String,
-    client_secret: String,
+    Password {
+        username: String,
+        password: String,
+    },
+    AuthCode {
+        code: String,
+        code_verifier: String,
+        redirect_uri: String,
+    },
+    ClientCredentials {
+        username: String,
+        client_secret: String,
+    },
 }
 
 #[derive(Deserialize, Debug)]
@@ -980,10 +971,10 @@ impl Client {
         apikey: &crate::locked::ApiKey,
     ) -> Result<()> {
         let connect_req = ConnectTokenReq {
-            auth: ConnectTokenAuth::ClientCredentials(ConnectTokenClientCredentials {
+            auth: ConnectTokenAuth::ClientCredentials {
                 username: email.to_string(),
                 client_secret: String::from_utf8(apikey.client_secret().to_vec()).unwrap(),
-            }),
+            },
             grant_type: "client_credentials".to_string(),
             scope: "api".to_string(),
             // XXX unwraps here are not necessarily safe
@@ -1034,11 +1025,11 @@ impl Client {
                     self.obtain_sso_code(sso_id).await?;
 
                 ConnectTokenReq {
-                    auth: ConnectTokenAuth::AuthCode(ConnectTokenAuthCode {
+                    auth: ConnectTokenAuth::AuthCode {
                         code: sso_code,
                         code_verifier: sso_code_verifier,
                         redirect_uri: callback_url,
-                    }),
+                    },
                     grant_type: "authorization_code".to_string(),
                     scope: "api offline_access".to_string(),
                     client_id: "cli".to_string(),
@@ -1051,10 +1042,10 @@ impl Client {
                 }
             }
             None => ConnectTokenReq {
-                auth: ConnectTokenAuth::Password(ConnectTokenPassword {
+                auth: ConnectTokenAuth::Password {
                     username: email.to_string(),
                     password: crate::base64::encode(password_hash.hash()),
-                }),
+                },
 
                 grant_type: "password".to_string(),
                 scope: "api offline_access".to_string(),
