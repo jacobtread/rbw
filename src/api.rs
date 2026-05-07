@@ -1120,7 +1120,7 @@ impl Client {
         let sso_code_verifier = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 64);
 
         let mut hasher = sha2::Sha256::new();
-        hasher.update(sso_code_verifier.clone());
+        hasher.update(&sso_code_verifier);
         let code_challenge = crate::base64::encode_url_safe_no_pad(hasher.finalize());
 
         let port = find_free_port(8065, 8070).await?;
