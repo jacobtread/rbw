@@ -19,9 +19,7 @@ pub struct SshAgent {
 }
 
 impl SshAgent {
-    pub fn new(
-        state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
-    ) -> Self {
+    pub fn new(state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>) -> Self {
         Self { state }
     }
 
@@ -41,10 +39,7 @@ impl SshAgent {
 impl ssh_agent_lib::agent::Session for SshAgent {
     async fn request_identities(
         &mut self,
-    ) -> Result<
-        Vec<ssh_agent_lib::proto::Identity>,
-        ssh_agent_lib::error::AgentError,
-    > {
+    ) -> Result<Vec<ssh_agent_lib::proto::Identity>, ssh_agent_lib::error::AgentError> {
         crate::actions::get_ssh_public_keys(self.state.clone())
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?
@@ -63,24 +58,15 @@ impl ssh_agent_lib::agent::Session for SshAgent {
     async fn sign(
         &mut self,
         request: ssh_agent_lib::proto::SignRequest,
-    ) -> Result<
-        ssh_agent_lib::ssh_key::Signature,
-        ssh_agent_lib::error::AgentError,
-    > {
-        let pubkey =
-            ssh_agent_lib::ssh_key::PublicKey::new(request.pubkey, "");
+    ) -> Result<ssh_agent_lib::ssh_key::Signature, ssh_agent_lib::error::AgentError> {
+        let pubkey = ssh_agent_lib::ssh_key::PublicKey::new(request.pubkey, "");
 
-        let private_key =
-            crate::actions::find_ssh_private_key(self.state.clone(), pubkey)
-                .await
-                .map_err(|e| {
-                    ssh_agent_lib::error::AgentError::Other(e.into())
-                })?;
+        let private_key = crate::actions::find_ssh_private_key(self.state.clone(), pubkey)
+            .await
+            .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
 
         if config_confirm_ssh().await.map_err(|_| {
-            ssh_agent_lib::error::AgentError::Other(
-                "Unable to load configuration".into(),
-            )
+            ssh_agent_lib::error::AgentError::Other("Unable to load configuration".into())
         })? {
             let confirmed = rbw::pinentry::confirm(
                 &config_pinentry()
@@ -114,31 +100,23 @@ impl ssh_agent_lib::agent::Session for SshAgent {
 
                 let mut rng = rand_8::rngs::OsRng;
 
-                let (algorithm, sig_bytes) = if request.flags
-                    & SSH_AGENT_RSA_SHA2_512
-                    != 0
-                {
-                    let signing_key =
-                        rsa::pkcs1v15::SigningKey::<sha2::Sha512>::new(
-                            rsa_key,
-                        );
+                let (algorithm, sig_bytes) = if request.flags & SSH_AGENT_RSA_SHA2_512 != 0 {
+                    let signing_key = rsa::pkcs1v15::SigningKey::<sha2::Sha512>::new(rsa_key);
                     let signature = signing_key
                         .try_sign_with_rng(&mut rng, &request.data)
                         .map_err(ssh_agent_lib::error::AgentError::other)?;
 
                     ("rsa-sha2-512", signature.to_bytes())
                 } else if request.flags & SSH_AGENT_RSA_SHA2_256 != 0 {
-                    let signing_key =
-                        rsa::pkcs1v15::SigningKey::<sha2::Sha256>::new(
-                            rsa_key,
-                        );
+                    let signing_key = rsa::pkcs1v15::SigningKey::<sha2::Sha256>::new(rsa_key);
                     let signature = signing_key
                         .try_sign_with_rng(&mut rng, &request.data)
                         .map_err(ssh_agent_lib::error::AgentError::other)?;
 
                     ("rsa-sha2-256", signature.to_bytes())
                 } else {
-                    let signing_key = rsa::pkcs1v15::SigningKey::<sha1::Sha1>::new_unprefixed(rsa_key);
+                    let signing_key =
+                        rsa::pkcs1v15::SigningKey::<sha1::Sha1>::new_unprefixed(rsa_key);
                     let signature = signing_key
                         .try_sign_with_rng(&mut rng, &request.data)
                         .map_err(ssh_agent_lib::error::AgentError::other)?;

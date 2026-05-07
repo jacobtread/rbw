@@ -13,7 +13,9 @@ pub fn disable_tracing() -> anyhow::Result<()> {
         Ok(())
     } else {
         let e = std::io::Error::last_os_error();
-        Err(anyhow::anyhow!("failed to disable PTRACE_ATTACH, agent memory may be dumpable by other processes: {e}"))
+        Err(anyhow::anyhow!(
+            "failed to disable PTRACE_ATTACH, agent memory may be dumpable by other processes: {e}"
+        ))
     }
 }
 
@@ -21,13 +23,12 @@ pub fn disable_tracing() -> anyhow::Result<()> {
 pub fn disable_tracing() -> anyhow::Result<()> {
     // safety: correct arguments to ptrace
     // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/ptrace.2.html
-    let ret = unsafe {
-        libc::ptrace(libc::PT_DENY_ATTACH, 0, std::ptr::null_mut(), 0)
-    };
+    let ret = unsafe { libc::ptrace(libc::PT_DENY_ATTACH, 0, std::ptr::null_mut(), 0) };
     if ret != 0 {
         let e = std::io::Error::last_os_error();
         return Err(anyhow::anyhow!(
-            "failed to deny debugger attach, agent memory may be readable by other processes: {}", e
+            "failed to deny debugger attach, agent memory may be readable by other processes: {}",
+            e
         ));
     }
 
@@ -42,7 +43,8 @@ pub fn disable_tracing() -> anyhow::Result<()> {
     if ret != 0 {
         let e = std::io::Error::last_os_error();
         return Err(anyhow::anyhow!(
-            "failed to disable core dumps, agent memory may be dumped to disk: {}", e
+            "failed to disable core dumps, agent memory may be dumped to disk: {}",
+            e
         ));
     }
 

@@ -205,10 +205,9 @@ struct DecryptedSearchCipher {
 
 impl DecryptedSearchCipher {
     fn display_name(&self) -> String {
-        self.user.as_ref().map_or_else(
-            || self.name.clone(),
-            |user| format!("{user}@{}", self.name),
-        )
+        self.user
+            .as_ref()
+            .map_or_else(|| self.name.clone(), |user| format!("{user}@{}", self.name))
     }
 
     fn matches(
@@ -222,18 +221,14 @@ impl DecryptedSearchCipher {
         exact: bool,
     ) -> bool {
         let match_str = match (ignore_case, exact) {
-            (true, true) => |field: &str, search_term: &str| {
-                field.to_lowercase() == search_term.to_lowercase()
-            },
+            (true, true) => {
+                |field: &str, search_term: &str| field.to_lowercase() == search_term.to_lowercase()
+            }
             (true, false) => |field: &str, search_term: &str| {
                 field.to_lowercase().contains(&search_term.to_lowercase())
             },
-            (false, true) => {
-                |field: &str, search_term: &str| field == search_term
-            }
-            (false, false) => {
-                |field: &str, search_term: &str| field.contains(search_term)
-            }
+            (false, true) => |field: &str, search_term: &str| field == search_term,
+            (false, false) => |field: &str, search_term: &str| field.contains(search_term),
         };
 
         match (self.folder.as_deref(), folder) {
@@ -272,9 +267,7 @@ impl DecryptedSearchCipher {
 
         match needle {
             Needle::Uuid(uuid, s) => {
-                if uuid::Uuid::parse_str(&self.id) != Ok(*uuid)
-                    && !match_str(&self.name, s)
-                {
+                if uuid::Uuid::parse_str(&self.id) != Ok(*uuid) && !match_str(&self.name, s) {
                     return false;
                 }
             }
@@ -284,9 +277,11 @@ impl DecryptedSearchCipher {
                 }
             }
             Needle::Uri(given_uri) => {
-                if self.uris.iter().all(|(uri, match_type)| {
-                    !matches_url(uri, *match_type, given_uri)
-                }) {
+                if self
+                    .uris
+                    .iter()
+                    .all(|(uri, match_type)| !matches_url(uri, *match_type, given_uri))
+                {
                     return false;
                 }
             }
@@ -350,24 +345,20 @@ struct DecryptedCipher {
 impl DecryptedCipher {
     fn display_short(&self, desc: &str, clipboard: bool) -> bool {
         match &self.data {
-            DecryptedData::Login { password, .. } => {
-                password.as_ref().map_or_else(
-                    || {
-                        eprintln!("entry for '{desc}' had no password");
-                        false
-                    },
-                    |password| val_display_or_store(clipboard, password),
-                )
-            }
-            DecryptedData::Card { number, .. } => {
-                number.as_ref().map_or_else(
-                    || {
-                        eprintln!("entry for '{desc}' had no card number");
-                        false
-                    },
-                    |number| val_display_or_store(clipboard, number),
-                )
-            }
+            DecryptedData::Login { password, .. } => password.as_ref().map_or_else(
+                || {
+                    eprintln!("entry for '{desc}' had no password");
+                    false
+                },
+                |password| val_display_or_store(clipboard, password),
+            ),
+            DecryptedData::Card { number, .. } => number.as_ref().map_or_else(
+                || {
+                    eprintln!("entry for '{desc}' had no card number");
+                    false
+                },
+                |number| val_display_or_store(clipboard, number),
+            ),
             DecryptedData::Identity {
                 title,
                 first_name,
@@ -375,13 +366,12 @@ impl DecryptedCipher {
                 last_name,
                 ..
             } => {
-                let names: Vec<_> =
-                    [title, first_name, middle_name, last_name]
-                        .iter()
-                        .copied()
-                        .flatten()
-                        .cloned()
-                        .collect();
+                let names: Vec<_> = [title, first_name, middle_name, last_name]
+                    .iter()
+                    .copied()
+                    .flatten()
+                    .cloned()
+                    .collect();
                 if names.is_empty() {
                     eprintln!("entry for '{desc}' had no name");
                     false
@@ -396,15 +386,13 @@ impl DecryptedCipher {
                 },
                 |notes| val_display_or_store(clipboard, notes),
             ),
-            DecryptedData::SshKey { public_key, .. } => {
-                public_key.as_ref().map_or_else(
-                    || {
-                        eprintln!("entry for '{desc}' had no public key");
-                        false
-                    },
-                    |public_key| val_display_or_store(clipboard, public_key),
-                )
-            }
+            DecryptedData::SshKey { public_key, .. } => public_key.as_ref().map_or_else(
+                || {
+                    eprintln!("entry for '{desc}' had no public key");
+                    false
+                },
+                |public_key| val_display_or_store(clipboard, public_key),
+            ),
         }
     }
 
@@ -442,8 +430,7 @@ impl DecryptedCipher {
                 }
                 Ok(Field::Uris) => {
                     if let Some(uris) = uris {
-                        let uri_strs: Vec<_> =
-                            uris.iter().map(|uri| uri.uri.clone()).collect();
+                        let uri_strs: Vec<_> = uris.iter().map(|uri| uri.uri.clone()).collect();
                         val_display_or_store(clipboard, &uri_strs.join("\n"));
                     }
                 }
@@ -454,10 +441,7 @@ impl DecryptedCipher {
                     for f in &self.fields {
                         if let Some(name) = &f.name {
                             if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
+                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
                                 break;
                             }
                         }
@@ -477,10 +461,7 @@ impl DecryptedCipher {
                 }
                 Ok(Field::Expiration) => {
                     if let (Some(month), Some(year)) = (exp_month, exp_year) {
-                        val_display_or_store(
-                            clipboard,
-                            &format!("{month}/{year}"),
-                        );
+                        val_display_or_store(clipboard, &format!("{month}/{year}"));
                     }
                 }
                 Ok(Field::ExpMonth) => {
@@ -517,10 +498,7 @@ impl DecryptedCipher {
                     for f in &self.fields {
                         if let Some(name) = &f.name {
                             if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
+                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
                                 break;
                             }
                         }
@@ -620,10 +598,7 @@ impl DecryptedCipher {
                     for f in &self.fields {
                         if let Some(name) = &f.name {
                             if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
+                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
                                 break;
                             }
                         }
@@ -638,10 +613,7 @@ impl DecryptedCipher {
                     for f in &self.fields {
                         if let Some(name) = &f.name {
                             if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
+                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
                                 break;
                             }
                         }
@@ -675,10 +647,7 @@ impl DecryptedCipher {
                     for f in &self.fields {
                         if let Some(name) = &f.name {
                             if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
+                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
                                 break;
                             }
                         }
@@ -697,22 +666,14 @@ impl DecryptedCipher {
                 ..
             } => {
                 let mut displayed = self.display_short(desc, clipboard);
-                displayed |=
-                    display_field("Username", username.as_deref(), clipboard);
-                displayed |=
-                    display_field("TOTP Secret", totp.as_deref(), clipboard);
+                displayed |= display_field("Username", username.as_deref(), clipboard);
+                displayed |= display_field("TOTP Secret", totp.as_deref(), clipboard);
 
                 if let Some(uris) = uris {
                     for uri in uris {
-                        displayed |=
-                            display_field("URI", Some(&uri.uri), clipboard);
-                        let match_type =
-                            uri.match_type.map(|ty| format!("{ty}"));
-                        displayed |= display_field(
-                            "Match type",
-                            match_type.as_deref(),
-                            clipboard,
-                        );
+                        displayed |= display_field("URI", Some(&uri.uri), clipboard);
+                        let match_type = uri.match_type.map(|ty| format!("{ty}"));
+                        displayed |= display_field("Match type", match_type.as_deref(), clipboard);
                     }
                 }
 
@@ -742,20 +703,13 @@ impl DecryptedCipher {
                 let mut displayed = false;
 
                 displayed |= self.display_short(desc, clipboard);
-                if let (Some(exp_month), Some(exp_year)) =
-                    (exp_month, exp_year)
-                {
+                if let (Some(exp_month), Some(exp_year)) = (exp_month, exp_year) {
                     println!("Expiration: {exp_month}/{exp_year}");
                     displayed = true;
                 }
                 displayed |= display_field("CVV", code.as_deref(), clipboard);
-                displayed |= display_field(
-                    "Name",
-                    cardholder_name.as_deref(),
-                    clipboard,
-                );
-                displayed |=
-                    display_field("Brand", brand.as_deref(), clipboard);
+                displayed |= display_field("Name", cardholder_name.as_deref(), clipboard);
+                displayed |= display_field("Brand", brand.as_deref(), clipboard);
 
                 if let Some(notes) = &self.notes {
                     if displayed {
@@ -782,40 +736,19 @@ impl DecryptedCipher {
             } => {
                 let mut displayed = self.display_short(desc, clipboard);
 
-                displayed |=
-                    display_field("Address", address1.as_deref(), clipboard);
-                displayed |=
-                    display_field("Address", address2.as_deref(), clipboard);
-                displayed |=
-                    display_field("Address", address3.as_deref(), clipboard);
-                displayed |=
-                    display_field("City", city.as_deref(), clipboard);
-                displayed |=
-                    display_field("State", state.as_deref(), clipboard);
-                displayed |= display_field(
-                    "Postcode",
-                    postal_code.as_deref(),
-                    clipboard,
-                );
-                displayed |=
-                    display_field("Country", country.as_deref(), clipboard);
-                displayed |=
-                    display_field("Phone", phone.as_deref(), clipboard);
-                displayed |=
-                    display_field("Email", email.as_deref(), clipboard);
+                displayed |= display_field("Address", address1.as_deref(), clipboard);
+                displayed |= display_field("Address", address2.as_deref(), clipboard);
+                displayed |= display_field("Address", address3.as_deref(), clipboard);
+                displayed |= display_field("City", city.as_deref(), clipboard);
+                displayed |= display_field("State", state.as_deref(), clipboard);
+                displayed |= display_field("Postcode", postal_code.as_deref(), clipboard);
+                displayed |= display_field("Country", country.as_deref(), clipboard);
+                displayed |= display_field("Phone", phone.as_deref(), clipboard);
+                displayed |= display_field("Email", email.as_deref(), clipboard);
                 displayed |= display_field("SSN", ssn.as_deref(), clipboard);
-                displayed |= display_field(
-                    "License",
-                    license_number.as_deref(),
-                    clipboard,
-                );
-                displayed |= display_field(
-                    "Passport",
-                    passport_number.as_deref(),
-                    clipboard,
-                );
-                displayed |=
-                    display_field("Username", username.as_deref(), clipboard);
+                displayed |= display_field("License", license_number.as_deref(), clipboard);
+                displayed |= display_field("Passport", passport_number.as_deref(), clipboard);
+                displayed |= display_field("Username", username.as_deref(), clipboard);
 
                 if let Some(notes) = &self.notes {
                     if displayed {
@@ -829,11 +762,7 @@ impl DecryptedCipher {
             }
             DecryptedData::SshKey { fingerprint, .. } => {
                 let mut displayed = self.display_short(desc, clipboard);
-                displayed |= display_field(
-                    "Fingerprint",
-                    fingerprint.as_deref(),
-                    clipboard,
-                );
+                displayed |= display_field("Fingerprint", fingerprint.as_deref(), clipboard);
 
                 for field in &self.fields {
                     displayed |= display_field(
@@ -935,8 +864,7 @@ impl DecryptedCipher {
                 if email.is_some() {
                     println!("{}", Field::Email);
                 }
-                if [address1, address2, address3].iter().any(|f| f.is_some())
-                {
+                if [address1, address2, address3].iter().any(|f| f.is_some()) {
                     // the display_field combines all these fields together.
                     println!("address");
                 }
@@ -1122,15 +1050,13 @@ fn matches_url(
                 if let Some(self_host_port) = host_port(&self_url) {
                     if self_url.scheme() == given_url.scheme()
                         && (self_host_port == given_host_port
-                            || given_host_port
-                                .ends_with(&format!(".{self_host_port}")))
+                            || given_host_port.ends_with(&format!(".{self_host_port}")))
                     {
                         return true;
                     }
                 }
             }
-            url == given_host_port
-                || given_host_port.ends_with(&format!(".{url}"))
+            url == given_host_port || given_host_port.ends_with(&format!(".{url}"))
         }
         rbw::api::UriMatchType::Host => {
             let Some(given_host_port) = host_port(given_url) else {
@@ -1138,8 +1064,7 @@ fn matches_url(
             };
             if let Ok(self_url) = url::Url::parse(url) {
                 if let Some(self_host_port) = host_port(&self_url) {
-                    if self_url.scheme() == given_url.scheme()
-                        && self_host_port == given_host_port
+                    if self_url.scheme() == given_url.scheme() && self_host_port == given_host_port
                     {
                         return true;
                     }
@@ -1147,13 +1072,10 @@ fn matches_url(
             }
             url == given_host_port
         }
-        rbw::api::UriMatchType::StartsWith => {
-            given_url.to_string().starts_with(url)
-        }
+        rbw::api::UriMatchType::StartsWith => given_url.to_string().starts_with(url),
         rbw::api::UriMatchType::Exact => {
             if given_url.path() == "/" {
-                given_url.to_string().trim_end_matches('/')
-                    == url.trim_end_matches('/')
+                given_url.to_string().trim_end_matches('/') == url.trim_end_matches('/')
             } else {
                 given_url.to_string() == url
             }
@@ -1171,10 +1093,8 @@ fn matches_url(
 fn host_port(url: &url::Url) -> Option<String> {
     let host = url.host_str()?;
     Some(
-        url.port().map_or_else(
-            || host.to_string(),
-            |port| format!("{host}:{port}"),
-        ),
+        url.port()
+            .map_or_else(|| host.to_string(), |port| format!("{host}:{port}")),
     )
 }
 
@@ -1237,8 +1157,7 @@ pub fn config_show() -> anyhow::Result<()> {
 }
 
 pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
-    let mut config = rbw::config::Config::load()
-        .unwrap_or_else(|_| rbw::config::Config::new());
+    let mut config = rbw::config::Config::load().unwrap_or_else(|_| rbw::config::Config::new());
     match key {
         "email" => config.email = Some(value.to_string()),
         "sso_id" => config.sso_id = Some(value.to_string()),
@@ -1249,8 +1168,7 @@ pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
             config.notifications_url = Some(value.to_string());
         }
         "client_cert_path" => {
-            config.client_cert_path =
-                Some(std::path::PathBuf::from(value.to_string()));
+            config.client_cert_path = Some(std::path::PathBuf::from(value.to_string()));
         }
         "lock_timeout" => {
             let timeout = value
@@ -1285,8 +1203,7 @@ pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
 }
 
 pub fn config_unset(key: &str) -> anyhow::Result<()> {
-    let mut config = rbw::config::Config::load()
-        .unwrap_or_else(|_| rbw::config::Config::new());
+    let mut config = rbw::config::Config::load().unwrap_or_else(|_| rbw::config::Config::new());
     match key {
         "email" => config.email = None,
         "sso_id" => config.sso_id = None,
@@ -1407,9 +1324,8 @@ pub fn get(
         needle
     );
 
-    let (_, decrypted) =
-        find_entry(&db, needle, user, folder, ignore_case)
-            .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+    let (_, decrypted) = find_entry(&db, needle, user, folder, ignore_case)
+        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
     if list_fields {
         decrypted.display_fields_list();
     } else if raw {
@@ -1440,18 +1356,18 @@ fn print_entry_list(
                 .iter()
                 .map(|field| match field {
                     ListField::Id => entry.id.clone(),
-                    ListField::Name => entry.name.as_ref().map_or_else(
-                        String::new,
-                        std::string::ToString::to_string,
-                    ),
-                    ListField::User => entry.user.as_ref().map_or_else(
-                        String::new,
-                        std::string::ToString::to_string,
-                    ),
-                    ListField::Folder => entry.folder.as_ref().map_or_else(
-                        String::new,
-                        std::string::ToString::to_string,
-                    ),
+                    ListField::Name => entry
+                        .name
+                        .as_ref()
+                        .map_or_else(String::new, std::string::ToString::to_string),
+                    ListField::User => entry
+                        .user
+                        .as_ref()
+                        .map_or_else(String::new, std::string::ToString::to_string),
+                    ListField::Folder => entry
+                        .folder
+                        .as_ref()
+                        .map_or_else(String::new, std::string::ToString::to_string),
                     ListField::Uri => {
                         // "uri" is not listed in the TryFrom
                         // implementation, so there's no way to try to
@@ -1460,21 +1376,17 @@ fn print_entry_list(
                         // string)
                         unreachable!()
                     }
-                    ListField::EntryType => {
-                        entry.entry_type.as_ref().map_or_else(
-                            String::new,
-                            std::string::ToString::to_string,
-                        )
-                    }
+                    ListField::EntryType => entry
+                        .entry_type
+                        .as_ref()
+                        .map_or_else(String::new, std::string::ToString::to_string),
                 })
                 .collect();
 
             // write to stdout but don't panic when pipe get's closed
             // this happens when piping stdout in a shell
             match writeln!(&mut std::io::stdout(), "{}", values.join("\t")) {
-                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                    Ok(())
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
                 res => res,
             }?;
         }
@@ -1538,17 +1450,14 @@ pub fn code(
         needle
     );
 
-    let (_, decrypted) =
-        find_entry(&db, needle, user, folder, ignore_case)
-            .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+    let (_, decrypted) = find_entry(&db, needle, user, folder, ignore_case)
+        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     if let DecryptedData::Login { totp, .. } = decrypted.data {
         if let Some(totp) = totp {
             val_display_or_store(clipboard, &generate_totp(&totp)?);
         } else {
-            return Err(anyhow::anyhow!(
-                "entry does not contain a totp secret"
-            ));
+            return Err(anyhow::anyhow!("entry does not contain a totp secret"));
         }
     } else {
         return Err(anyhow::anyhow!("not a login entry"));
@@ -1598,8 +1507,7 @@ pub fn add(
 
     let mut folder_id = None;
     if let Some(folder_name) = folder {
-        let (new_access_token, folders) =
-            rbw::actions::list_folders(&access_token, refresh_token)?;
+        let (new_access_token, folders) = rbw::actions::list_folders(&access_token, refresh_token)?;
         if let Some(new_access_token) = new_access_token {
             access_token.clone_from(&new_access_token);
             db.access_token = Some(new_access_token);
@@ -1609,9 +1517,7 @@ pub fn add(
         let folders: Vec<(String, String)> = folders
             .iter()
             .cloned()
-            .map(|(id, name)| {
-                Ok((id, crate::actions::decrypt(&name, None, None)?))
-            })
+            .map(|(id, name)| Ok((id, crate::actions::decrypt(&name, None, None)?)))
             .collect::<anyhow::Result<_>>()?;
 
         for (id, name) in folders {
@@ -1704,9 +1610,7 @@ pub fn generate(
             let folders: Vec<(String, String)> = folders
                 .iter()
                 .cloned()
-                .map(|(id, name)| {
-                    Ok((id, crate::actions::decrypt(&name, None, None)?))
-                })
+                .map(|(id, name)| Ok((id, crate::actions::decrypt(&name, None, None)?)))
                 .collect::<anyhow::Result<_>>()?;
 
             for (id, name) in folders {
@@ -1770,14 +1674,12 @@ pub fn edit(
         name
     );
 
-    let (entry, decrypted) =
-        find_entry(&db, name, username, folder, ignore_case)
-            .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+    let (entry, decrypted) = find_entry(&db, name, username, folder, ignore_case)
+        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     let (data, fields, notes, history) = match &decrypted.data {
         DecryptedData::Login { password, .. } => {
-            let mut contents =
-                format!("{}\n", password.as_deref().unwrap_or(""));
+            let mut contents = format!("{}\n", password.as_deref().unwrap_or(""));
             if let Some(notes) = decrypted.notes {
                 write!(contents, "\n{notes}\n").unwrap();
             }
@@ -1786,17 +1688,10 @@ pub fn edit(
 
             let (password, notes) = parse_editor(&contents);
             let password = password
-                .map(|password| {
-                    crate::actions::encrypt(
-                        &password,
-                        entry.org_id.as_deref(),
-                    )
-                })
+                .map(|password| crate::actions::encrypt(&password, entry.org_id.as_deref()))
                 .transpose()?;
             let notes = notes
-                .map(|notes| {
-                    crate::actions::encrypt(&notes, entry.org_id.as_deref())
-                })
+                .map(|notes| crate::actions::encrypt(&notes, entry.org_id.as_deref()))
                 .transpose()?;
             let mut history = entry.history.clone();
             let rbw::db::EntryData::Login {
@@ -1813,9 +1708,7 @@ pub fn edit(
                 let new_history_entry = rbw::db::HistoryEntry {
                     last_used_date: format!(
                         "{}",
-                        humantime::format_rfc3339(
-                            std::time::SystemTime::now()
-                        )
+                        humantime::format_rfc3339(std::time::SystemTime::now())
                     ),
                     password: prev_password,
                 };
@@ -1833,19 +1726,16 @@ pub fn edit(
         DecryptedData::SecureNote => {
             let data = rbw::db::EntryData::SecureNote {};
 
-            let editor_content = decrypted.notes.map_or_else(
-                || "\n".to_string(),
-                |notes| format!("{notes}\n"),
-            );
+            let editor_content = decrypted
+                .notes
+                .map_or_else(|| "\n".to_string(), |notes| format!("{notes}\n"));
             let contents = rbw::edit::edit(&editor_content, HELP_NOTES)?;
 
             // prepend blank line to be parsed as pw by `parse_editor`
             let (_, notes) = parse_editor(&format!("\n{contents}\n"));
 
             let notes = notes
-                .map(|notes| {
-                    crate::actions::encrypt(&notes, entry.org_id.as_deref())
-                })
+                .map(|notes| crate::actions::encrypt(&notes, entry.org_id.as_deref()))
                 .transpose()?;
 
             (data, entry.fields, notes, entry.history)
@@ -1898,8 +1788,7 @@ pub fn remove(
     let (entry, _) = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
-    if let (Some(access_token), ()) =
-        rbw::actions::remove(access_token, refresh_token, &entry.id)?
+    if let (Some(access_token), ()) = rbw::actions::remove(access_token, refresh_token, &entry.id)?
     {
         db.access_token = Some(access_token);
         save_db(&db)?;
@@ -1977,9 +1866,7 @@ fn run_agent() -> anyhow::Result<()> {
     if !status.success() {
         if let Some(code) = status.code() {
             if code != 23 {
-                return Err(anyhow::anyhow!(
-                    "failed to run rbw-agent: {status}"
-                ));
+                return Err(anyhow::anyhow!("failed to run rbw-agent: {status}"));
             }
         }
     }
@@ -2031,13 +1918,9 @@ fn find_entry(
     let ciphers: Vec<(rbw::db::Entry, DecryptedSearchCipher)> = db
         .entries
         .iter()
-        .map(|entry| {
-            decrypt_search_cipher(entry)
-                .map(|decrypted| (entry.clone(), decrypted))
-        })
+        .map(|entry| decrypt_search_cipher(entry).map(|decrypted| (entry.clone(), decrypted)))
         .collect::<anyhow::Result<_>>()?;
-    let (entry, _) =
-        find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
+    let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
     let decrypted_entry = decrypt_cipher(&entry)?;
     Ok((entry, decrypted_entry))
 }
@@ -2077,13 +1960,9 @@ fn find_entry_raw(
 
         let strict_folder_matches = find_matches(false, true, exact);
         let strict_username_matches = find_matches(true, false, exact);
-        if strict_folder_matches.len() == 1
-            && strict_username_matches.len() != 1
-        {
+        if strict_folder_matches.len() == 1 && strict_username_matches.len() != 1 {
             return Ok(strict_folder_matches[0].clone());
-        } else if strict_folder_matches.len() != 1
-            && strict_username_matches.len() == 1
-        {
+        } else if strict_folder_matches.len() != 1 && strict_username_matches.len() == 1 {
             return Ok(strict_username_matches[0].clone());
         }
 
@@ -2202,15 +2081,9 @@ fn decrypt_list_cipher(
     })
 }
 
-fn decrypt_search_cipher(
-    entry: &rbw::db::Entry,
-) -> anyhow::Result<DecryptedSearchCipher> {
+fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSearchCipher> {
     let id = entry.id.clone();
-    let name = crate::actions::decrypt(
-        &entry.name,
-        entry.key.as_deref(),
-        entry.org_id.as_deref(),
-    )?;
+    let name = crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?;
     let user = match &entry.data {
         rbw::db::EntryData::Login { username, .. } => decrypt_field(
             Field::Username,
@@ -2230,13 +2103,7 @@ fn decrypt_search_cipher(
     let notes = entry
         .notes
         .as_ref()
-        .map(|notes| {
-            crate::actions::decrypt(
-                notes,
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            )
-        })
+        .map(|notes| crate::actions::decrypt(notes, entry.key.as_deref(), entry.org_id.as_deref()))
         .transpose();
     let uris = if let rbw::db::EntryData::Login { uris, .. } = &entry.data {
         uris.iter()
@@ -2263,13 +2130,7 @@ fn decrypt_search_cipher(
                 field.value.as_ref()
             }
         })
-        .map(|value| {
-            crate::actions::decrypt(
-                value,
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            )
-        })
+        .map(|value| crate::actions::decrypt(value, entry.key.as_deref(), entry.org_id.as_deref()))
         .collect::<anyhow::Result<_>>()?;
     let notes = match notes {
         Ok(notes) => notes,
@@ -2323,11 +2184,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
                     .name
                     .as_ref()
                     .map(|name| {
-                        crate::actions::decrypt(
-                            name,
-                            entry.key.as_deref(),
-                            entry.org_id.as_deref(),
-                        )
+                        crate::actions::decrypt(name, entry.key.as_deref(), entry.org_id.as_deref())
                     })
                     .transpose()?,
                 value: field
@@ -2348,13 +2205,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
     let notes = entry
         .notes
         .as_ref()
-        .map(|notes| {
-            crate::actions::decrypt(
-                notes,
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            )
-        })
+        .map(|notes| crate::actions::decrypt(notes, entry.key.as_deref(), entry.org_id.as_deref()))
         .transpose();
     let notes = match notes {
         Ok(notes) => notes,
@@ -2616,11 +2467,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
     Ok(DecryptedCipher {
         id: entry.id.clone(),
         folder,
-        name: crate::actions::decrypt(
-            &entry.name,
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        )?,
+        name: crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?,
         data,
         fields,
         notes,
@@ -2653,10 +2500,7 @@ fn load_db() -> anyhow::Result<rbw::db::Db> {
     let config = rbw::config::Config::load()?;
     config.email.as_ref().map_or_else(
         || Err(anyhow::anyhow!("failed to find email address in config")),
-        |email| {
-            rbw::db::Db::load(&config.server_name(), email)
-                .map_err(anyhow::Error::new)
-        },
+        |email| rbw::db::Db::load(&config.server_name(), email).map_err(anyhow::Error::new),
     )
 }
 
@@ -2675,10 +2519,7 @@ fn remove_db() -> anyhow::Result<()> {
     let config = rbw::config::Config::load()?;
     config.email.as_ref().map_or_else(
         || Err(anyhow::anyhow!("failed to find email address in config")),
-        |email| {
-            rbw::db::Db::remove(&config.server_name(), email)
-                .map_err(anyhow::Error::new)
-        },
+        |email| rbw::db::Db::remove(&config.server_name(), email).map_err(anyhow::Error::new),
     )
 }
 
@@ -2710,33 +2551,29 @@ fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
         match u.scheme() {
             "otpauth" => {
                 if u.host_str() != Some("totp") {
-                    return Err(anyhow::anyhow!(
-                        "totp secret url must have totp host"
-                    ));
+                    return Err(anyhow::anyhow!("totp secret url must have totp host"));
                 }
 
-                let query: std::collections::HashMap<_, _> =
-                    u.query_pairs().collect();
+                let query: std::collections::HashMap<_, _> = u.query_pairs().collect();
 
                 let secret = decode_totp_secret(
-                    query.get("secret").ok_or_else(|| {
-                        anyhow::anyhow!("totp secret url must have secret")
-                    })?,
+                    query
+                        .get("secret")
+                        .ok_or_else(|| anyhow::anyhow!("totp secret url must have secret"))?,
                 )?;
-                let algorithm = query.get("algorithm").map_or_else(
-                    || String::from("SHA1"),
-                    std::string::ToString::to_string,
-                );
+                let algorithm = query
+                    .get("algorithm")
+                    .map_or_else(|| String::from("SHA1"), std::string::ToString::to_string);
                 let digits = match query.get("digits") {
-                    Some(dig) => dig
-                        .parse::<usize>()
-                        .map_err(|_| anyhow::anyhow!("digits parameter in totp url must be a valid integer."))?,
+                    Some(dig) => dig.parse::<usize>().map_err(|_| {
+                        anyhow::anyhow!("digits parameter in totp url must be a valid integer.")
+                    })?,
                     None => 6,
                 };
                 let period = match query.get("period") {
-                    Some(dig) => {
-                        dig.parse::<u64>().map_err(|_| anyhow::anyhow!("period parameter in totp url must be a valid integer."))?
-                    }
+                    Some(dig) => dig.parse::<u64>().map_err(|_| {
+                        anyhow::anyhow!("period parameter in totp url must be a valid integer.")
+                    })?,
                     None => TOTP_DEFAULT_STEP,
                 };
 
@@ -2773,9 +2610,7 @@ fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
 
 // This function exists for the sake of making the generate_totp function less
 // densely packed and more readable
-fn generate_totp_algorithm_type(
-    alg: &str,
-) -> anyhow::Result<totp_rs::Algorithm> {
+fn generate_totp_algorithm_type(alg: &str) -> anyhow::Result<totp_rs::Algorithm> {
     match alg {
         "SHA1" => Ok(totp_rs::Algorithm::SHA1),
         "SHA256" => Ok(totp_rs::Algorithm::SHA256),
@@ -2798,8 +2633,7 @@ fn generate_totp(secret: &str) -> anyhow::Result<String> {
             totp_params.secret,
         )
         .generate_current()?),
-        "STEAM" => Ok(totp_rs::TOTP::new_steam(totp_params.secret)
-            .generate_current()?),
+        "STEAM" => Ok(totp_rs::TOTP::new_steam(totp_params.secret).generate_current()?),
         _ => Err(anyhow::anyhow!(format!(
             "{alg} is not a valid totp algorithm"
         ))),
@@ -2888,25 +2722,11 @@ mod test {
             "BITWARDEN"
         );
         assert!(
-            one_match(
-                entries,
-                "github",
-                Some("foo"),
-                Some("websites"),
-                6,
-                false
-            ),
+            one_match(entries, "github", Some("foo"), Some("websites"), 6, false),
             "websites/foo@github"
         );
         assert!(
-            one_match(
-                entries,
-                "GITHUB",
-                Some("foo"),
-                Some("websites"),
-                6,
-                true
-            ),
+            one_match(entries, "GITHUB", Some("foo"), Some("websites"), 6, true),
             "websites/foo@GITHUB"
         );
         assert!(
@@ -3011,18 +2831,8 @@ mod test {
             make_entry("github", Some("foo"), None, &[]),
             make_entry("gitlab", Some("foo"), None, &[]),
             make_entry("gitlab", Some("bar"), None, &[]),
-            make_entry(
-                "12345678-1234-1234-1234-1234567890ab",
-                None,
-                None,
-                &[],
-            ),
-            make_entry(
-                "12345678-1234-1234-1234-1234567890AC",
-                None,
-                None,
-                &[],
-            ),
+            make_entry("12345678-1234-1234-1234-1234567890ab", None, None, &[]),
+            make_entry("12345678-1234-1234-1234-1234567890AC", None, None, &[]),
             make_entry("123456781234123412341234567890AD", None, None, &[]),
         ];
 
@@ -3111,19 +2921,9 @@ mod test {
         let entries = &[
             make_entry("one", None, None, &[("https://one.com/", None)]),
             make_entry("two", None, None, &[("https://two.com/login", None)]),
-            make_entry(
-                "three",
-                None,
-                None,
-                &[("https://login.three.com/", None)],
-            ),
+            make_entry("three", None, None, &[("https://login.three.com/", None)]),
             make_entry("four", None, None, &[("four.com", None)]),
-            make_entry(
-                "five",
-                None,
-                None,
-                &[("https://five.com:8080/", None)],
-            ),
+            make_entry("five", None, None, &[("https://five.com:8080/", None)]),
             make_entry("six", None, None, &[("six.com:8080", None)]),
             make_entry("seven", None, None, &[("192.168.0.128:8080", None)]),
         ];
@@ -3133,14 +2933,7 @@ mod test {
             "one"
         );
         assert!(
-            one_match(
-                entries,
-                "https://login.one.com/",
-                None,
-                None,
-                0,
-                false
-            ),
+            one_match(entries, "https://login.one.com/", None, None, 0, false),
             "one"
         );
         assert!(
@@ -3160,26 +2953,12 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/other-page", None, None, 1, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3193,14 +2972,7 @@ mod test {
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://five.com:8080/",
-                None,
-                None,
-                4,
-                false
-            ),
+            one_match(entries, "https://five.com:8080/", None, None, 4, false),
             "five"
         );
         assert!(
@@ -3217,14 +2989,7 @@ mod test {
             "six"
         );
         assert!(
-            one_match(
-                entries,
-                "https://192.168.0.128:8080/",
-                None,
-                None,
-                6,
-                false
-            ),
+            one_match(entries, "https://192.168.0.128:8080/", None, None, 6, false),
             "seven"
         );
         assert!(
@@ -3285,10 +3050,7 @@ mod test {
                 "seven",
                 None,
                 None,
-                &[(
-                    "192.168.0.128:8080",
-                    Some(rbw::api::UriMatchType::Domain),
-                )],
+                &[("192.168.0.128:8080", Some(rbw::api::UriMatchType::Domain))],
             ),
         ];
 
@@ -3297,14 +3059,7 @@ mod test {
             "one"
         );
         assert!(
-            one_match(
-                entries,
-                "https://login.one.com/",
-                None,
-                None,
-                0,
-                false
-            ),
+            one_match(entries, "https://login.one.com/", None, None, 0, false),
             "one"
         );
         assert!(
@@ -3324,26 +3079,12 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/other-page", None, None, 1, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3357,14 +3098,7 @@ mod test {
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://five.com:8080/",
-                None,
-                None,
-                4,
-                false
-            ),
+            one_match(entries, "https://five.com:8080/", None, None, 4, false),
             "five"
         );
         assert!(
@@ -3381,14 +3115,7 @@ mod test {
             "six"
         );
         assert!(
-            one_match(
-                entries,
-                "https://192.168.0.128:8080/",
-                None,
-                None,
-                6,
-                false
-            ),
+            one_match(entries, "https://192.168.0.128:8080/", None, None, 6, false),
             "seven"
         );
         assert!(
@@ -3410,10 +3137,7 @@ mod test {
                 "two",
                 None,
                 None,
-                &[(
-                    "https://two.com/login",
-                    Some(rbw::api::UriMatchType::Host),
-                )],
+                &[("https://two.com/login", Some(rbw::api::UriMatchType::Host))],
             ),
             make_entry(
                 "three",
@@ -3434,10 +3158,7 @@ mod test {
                 "five",
                 None,
                 None,
-                &[(
-                    "https://five.com:8080/",
-                    Some(rbw::api::UriMatchType::Host),
-                )],
+                &[("https://five.com:8080/", Some(rbw::api::UriMatchType::Host))],
             ),
             make_entry(
                 "six",
@@ -3478,26 +3199,12 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/other-page", None, None, 1, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3511,14 +3218,7 @@ mod test {
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://five.com:8080/",
-                None,
-                None,
-                4,
-                false
-            ),
+            one_match(entries, "https://five.com:8080/", None, None, 4, false),
             "five"
         );
         assert!(
@@ -3535,14 +3235,7 @@ mod test {
             "six"
         );
         assert!(
-            one_match(
-                entries,
-                "https://192.168.0.128:8080/",
-                None,
-                None,
-                6,
-                false
-            ),
+            one_match(entries, "https://192.168.0.128:8080/", None, None, 6, false),
             "seven"
         );
         assert!(
@@ -3558,10 +3251,7 @@ mod test {
                 "one",
                 None,
                 None,
-                &[(
-                    "https://one.com/",
-                    Some(rbw::api::UriMatchType::StartsWith),
-                )],
+                &[("https://one.com/", Some(rbw::api::UriMatchType::StartsWith))],
             ),
             make_entry(
                 "two",
@@ -3608,14 +3298,7 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/login/sso",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/login/sso", None, None, 1, false),
             "two"
         );
         assert!(
@@ -3623,25 +3306,12 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/other-page", None, None, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3663,10 +3333,7 @@ mod test {
                 "two",
                 None,
                 None,
-                &[(
-                    "https://two.com/login",
-                    Some(rbw::api::UriMatchType::Exact),
-                )],
+                &[("https://two.com/login", Some(rbw::api::UriMatchType::Exact))],
             ),
             make_entry(
                 "three",
@@ -3718,13 +3385,7 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/login/sso",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/login/sso", None, None, false),
             "two"
         );
         assert!(
@@ -3732,25 +3393,12 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/other-page", None, None, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3832,14 +3480,7 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/login/sso",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/login/sso", None, None, 1, false),
             "two"
         );
         assert!(
@@ -3847,25 +3488,12 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/other-page", None, None, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3891,10 +3519,7 @@ mod test {
                 "two",
                 None,
                 None,
-                &[(
-                    "https://two.com/login",
-                    Some(rbw::api::UriMatchType::Never),
-                )],
+                &[("https://two.com/login", Some(rbw::api::UriMatchType::Never))],
             ),
             make_entry(
                 "three",
@@ -3953,24 +3578,12 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/other-page", None, None, false),
             "two"
         );
 
         assert!(
-            no_matches(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://login.three.com/", None, None, false),
             "three"
         );
         assert!(
@@ -4010,14 +3623,8 @@ mod test {
                 None,
                 None,
                 &[
-                    (
-                        "https://one.com/",
-                        Some(rbw::api::UriMatchType::Domain),
-                    ),
-                    (
-                        "https://two.com/",
-                        Some(rbw::api::UriMatchType::Domain),
-                    ),
+                    ("https://one.com/", Some(rbw::api::UriMatchType::Domain)),
+                    ("https://two.com/", Some(rbw::api::UriMatchType::Domain)),
                 ],
             ),
             make_entry(
@@ -4141,9 +3748,7 @@ mod test {
                 folder_id: None,
                 name: "this is the encrypted name".to_string(),
                 data: rbw::db::EntryData::Login {
-                    username: username.map(|_| {
-                        "this is the encrypted username".to_string()
-                    }),
+                    username: username.map(|_| "this is the encrypted username".to_string()),
                     password: None,
                     uris: uris
                         .iter()
@@ -4168,9 +3773,7 @@ mod test {
                 user: username.map(std::string::ToString::to_string),
                 uris: uris
                     .iter()
-                    .map(|(uri, match_type)| {
-                        ((*uri).to_string(), *match_type)
-                    })
+                    .map(|(uri, match_type)| ((*uri).to_string(), *match_type))
                     .collect(),
                 fields: vec![],
                 notes: None,

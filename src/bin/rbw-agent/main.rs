@@ -10,9 +10,7 @@ mod ssh_agent;
 mod state;
 mod timeout;
 
-async fn tokio_main(
-    startup_ack: Option<crate::daemon::StartupAck>,
-) -> anyhow::Result<()> {
+async fn tokio_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::Result<()> {
     let listener = crate::sock::listen()?;
 
     if let Some(startup_ack) = startup_ack {
@@ -20,38 +18,34 @@ async fn tokio_main(
     }
 
     let config = rbw::config::Config::load()?;
-    let timeout_duration =
-        std::time::Duration::from_secs(config.lock_timeout);
-    let sync_timeout_duration =
-        std::time::Duration::from_secs(config.sync_interval);
+    let timeout_duration = std::time::Duration::from_secs(config.lock_timeout);
+    let sync_timeout_duration = std::time::Duration::from_secs(config.sync_interval);
     let (timeout, timer_r) = crate::timeout::Timeout::new();
     let (sync_timeout, sync_timer_r) = crate::timeout::Timeout::new();
     if sync_timeout_duration > std::time::Duration::ZERO {
         sync_timeout.set(sync_timeout_duration);
     }
     let notifications_handler = crate::notifications::Handler::new();
-    let state =
-        std::sync::Arc::new(tokio::sync::Mutex::new(crate::state::State {
-            priv_key: None,
-            org_keys: None,
-            timeout,
-            timeout_duration,
-            sync_timeout,
-            sync_timeout_duration,
-            notifications_handler,
-            master_password_reprompt: std::collections::HashSet::new(),
-            master_password_reprompt_initialized: false,
-            last_environment: rbw::protocol::Environment::default(),
-            #[cfg(feature = "clipboard")]
-            clipboard: arboard::Clipboard::new()
-                .inspect_err(|e| {
-                    log::warn!("couldn't create clipboard context: {e}");
-                })
-                .ok(),
-        }));
+    let state = std::sync::Arc::new(tokio::sync::Mutex::new(crate::state::State {
+        priv_key: None,
+        org_keys: None,
+        timeout,
+        timeout_duration,
+        sync_timeout,
+        sync_timeout_duration,
+        notifications_handler,
+        master_password_reprompt: std::collections::HashSet::new(),
+        master_password_reprompt_initialized: false,
+        last_environment: rbw::protocol::Environment::default(),
+        #[cfg(feature = "clipboard")]
+        clipboard: arboard::Clipboard::new()
+            .inspect_err(|e| {
+                log::warn!("couldn't create clipboard context: {e}");
+            })
+            .ok(),
+    }));
 
-    let agent =
-        crate::agent::Agent::new(timer_r, sync_timer_r, state.clone());
+    let agent = crate::agent::Agent::new(timer_r, sync_timer_r, state.clone());
 
     let ssh_agent = crate::ssh_agent::SshAgent::new(state.clone());
 
@@ -61,10 +55,7 @@ async fn tokio_main(
 }
 
 fn real_main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let no_daemonize = std::env::args()
         .nth(1)
@@ -72,8 +63,7 @@ fn real_main() -> anyhow::Result<()> {
 
     rbw::dirs::make_all()?;
 
-    let startup_ack =
-        daemon::daemonize(no_daemonize).context("failed to daemonize")?;
+    let startup_ack = daemon::daemonize(no_daemonize).context("failed to daemonize")?;
 
     if let Err(e) = debugger::disable_tracing() {
         log::warn!("{e}");

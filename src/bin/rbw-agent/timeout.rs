@@ -37,11 +37,9 @@ impl Timeout {
                     (_, Event::Request(Action::Set(dur))) => {
                         stream.insert(
                             Streams::Timer,
-                            futures_util::stream::once(tokio::time::sleep(
-                                dur,
-                            ))
-                            .map(|()| Event::Timer)
-                            .boxed(),
+                            futures_util::stream::once(tokio::time::sleep(dur))
+                                .map(|()| Event::Timer)
+                                .boxed(),
                         );
                     }
                     (_, Event::Request(Action::Clear)) => {

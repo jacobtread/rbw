@@ -25,17 +25,14 @@ pub fn unlocked() -> anyhow::Result<()> {
             let res = sock.recv()?;
             match res {
                 rbw::protocol::Response::Ack => Ok(()),
-                rbw::protocol::Response::Error { error } => {
-                    Err(anyhow::anyhow!("{error}"))
-                }
+                rbw::protocol::Response::Error { error } => Err(anyhow::anyhow!("{error}")),
                 _ => Err(anyhow::anyhow!("unexpected message: {res:?}")),
             }
         }
         Err(e) => {
             if matches!(
                 e.kind(),
-                std::io::ErrorKind::ConnectionRefused
-                    | std::io::ErrorKind::NotFound
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
             ) {
                 anyhow::bail!("agent not running");
             }
@@ -58,9 +55,7 @@ pub fn quit() -> anyhow::Result<()> {
             let pidfile = rbw::dirs::pid_file();
             let mut pid = String::new();
             std::fs::File::open(pidfile)?.read_to_string(&mut pid)?;
-            let Some(pid) =
-                rustix::process::Pid::from_raw(pid.trim_end().parse()?)
-            else {
+            let Some(pid) = rustix::process::Pid::from_raw(pid.trim_end().parse()?) else {
                 anyhow::bail!("failed to read pid from pidfile");
             };
             sock.send(&rbw::protocol::Request::new(
@@ -73,8 +68,7 @@ pub fn quit() -> anyhow::Result<()> {
         Err(e) => match e.kind() {
             // if the socket doesn't exist, or the socket exists but nothing
             // is listening on it, the agent must already be not running
-            std::io::ErrorKind::ConnectionRefused
-            | std::io::ErrorKind::NotFound => Ok(()),
+            std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound => Ok(()),
             _ => Err(e.into()),
         },
     }
@@ -105,10 +99,7 @@ pub fn decrypt(
     }
 }
 
-pub fn encrypt(
-    plaintext: &str,
-    org_id: Option<&str>,
-) -> anyhow::Result<String> {
+pub fn encrypt(plaintext: &str, org_id: Option<&str>) -> anyhow::Result<String> {
     let mut sock = connect()?;
     sock.send(&rbw::protocol::Request::new(
         get_environment(),
@@ -159,9 +150,7 @@ fn simple_action(action: rbw::protocol::Action) -> anyhow::Result<()> {
     let res = sock.recv()?;
     match res {
         rbw::protocol::Response::Ack => Ok(()),
-        rbw::protocol::Response::Error { error } => {
-            Err(anyhow::anyhow!("{error}"))
-        }
+        rbw::protocol::Response::Error { error } => Err(anyhow::anyhow!("{error}")),
         _ => Err(anyhow::anyhow!("unexpected message: {res:?}")),
     }
 }
@@ -195,9 +184,7 @@ fn get_environment() -> rbw::protocol::Environment {
     });
 
     let env_vars = std::env::vars_os()
-        .filter(|(var_name, _)| {
-            (*rbw::protocol::ENVIRONMENT_VARIABLES_OS).contains(var_name)
-        })
+        .filter(|(var_name, _)| (*rbw::protocol::ENVIRONMENT_VARIABLES_OS).contains(var_name))
         .collect();
     rbw::protocol::Environment::new(tty, env_vars)
 }

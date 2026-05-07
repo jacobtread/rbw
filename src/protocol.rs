@@ -73,14 +73,13 @@ pub const ENVIRONMENT_VARIABLES: &[&str] = &[
     "PINENTRY_GEOM_HINT",
 ];
 
-pub static ENVIRONMENT_VARIABLES_OS: std::sync::LazyLock<
-    Vec<std::ffi::OsString>,
-> = std::sync::LazyLock::new(|| {
-    ENVIRONMENT_VARIABLES
-        .iter()
-        .map(std::ffi::OsString::from)
-        .collect()
-});
+pub static ENVIRONMENT_VARIABLES_OS: std::sync::LazyLock<Vec<std::ffi::OsString>> =
+    std::sync::LazyLock::new(|| {
+        ENVIRONMENT_VARIABLES
+            .iter()
+            .map(std::ffi::OsString::from)
+            .collect()
+    });
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
 struct SerializableOsString(std::ffi::OsString);
@@ -104,10 +103,7 @@ impl<'de> serde::Deserialize<'de> for SerializableOsString {
         impl serde::de::Visitor<'_> for Visitor {
             type Value = SerializableOsString;
 
-            fn expecting(
-                &self,
-                formatter: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("base64 encoded os string")
             }
 
@@ -116,9 +112,8 @@ impl<'de> serde::Deserialize<'de> for SerializableOsString {
                 E: serde::de::Error,
             {
                 Ok(SerializableOsString(std::ffi::OsString::from_vec(
-                    crate::base64::decode(s).map_err(|_| {
-                        E::invalid_value(serde::de::Unexpected::Str(s), &self)
-                    })?,
+                    crate::base64::decode(s)
+                        .map_err(|_| E::invalid_value(serde::de::Unexpected::Str(s), &self))?,
                 )))
             }
         }
@@ -142,9 +137,7 @@ impl Environment {
             tty: tty.map(SerializableOsString),
             env_vars: env_vars
                 .into_iter()
-                .map(|(k, v)| {
-                    (SerializableOsString(k), SerializableOsString(v))
-                })
+                .map(|(k, v)| (SerializableOsString(k), SerializableOsString(v)))
                 .collect(),
         }
     }
@@ -153,10 +146,7 @@ impl Environment {
         self.tty.as_ref().map(|tty| tty.0.as_os_str())
     }
 
-    pub fn env_vars(
-        &self,
-    ) -> std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>
-    {
+    pub fn env_vars(&self) -> std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> {
         self.env_vars
             .iter()
             .map(|(var, val)| (var.0.clone(), val.0.clone()))

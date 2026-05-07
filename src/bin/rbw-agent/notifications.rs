@@ -16,9 +16,8 @@ pub struct Handler {
         >,
     >,
     read_handle: Option<tokio::task::JoinHandle<()>>,
-    sending_channels: std::sync::Arc<
-        tokio::sync::RwLock<Vec<tokio::sync::mpsc::UnboundedSender<Message>>>,
-    >,
+    sending_channels:
+        std::sync::Arc<tokio::sync::RwLock<Vec<tokio::sync::mpsc::UnboundedSender<Message>>>>,
 }
 
 impl Handler {
@@ -26,23 +25,17 @@ impl Handler {
         Self {
             write: None,
             read_handle: None,
-            sending_channels: std::sync::Arc::new(tokio::sync::RwLock::new(
-                Vec::new(),
-            )),
+            sending_channels: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
     }
 
-    pub async fn connect(
-        &mut self,
-        url: String,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn connect(&mut self, url: String) -> Result<(), Box<dyn std::error::Error>> {
         if self.is_connected() {
             self.disconnect().await?;
         }
 
         let (write, read_handle) =
-            subscribe_to_notifications(url, self.sending_channels.clone())
-                .await?;
+            subscribe_to_notifications(url, self.sending_channels.clone()).await?;
 
         self.write = Some(write);
         self.read_handle = Some(read_handle);
@@ -55,9 +48,7 @@ impl Handler {
             && !self.read_handle.as_ref().unwrap().is_finished()
     }
 
-    pub async fn disconnect(
-        &mut self,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn disconnect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.sending_channels.write().await.clear();
         if let Some(mut write) = self.write.take() {
             write
@@ -71,9 +62,7 @@ impl Handler {
         Ok(())
     }
 
-    pub async fn get_channel(
-        &self,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<Message> {
+    pub async fn get_channel(&self) -> tokio::sync::mpsc::UnboundedReceiver<Message> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.sending_channels.write().await.push(tx);
         rx
@@ -98,8 +87,7 @@ async fn subscribe_to_notifications(
     Box<dyn std::error::Error>,
 > {
     let url = url::Url::parse(url.as_str())?;
-    let (ws_stream, _response) =
-        tokio_tungstenite::connect_async(url).await?;
+    let (ws_stream, _response) = tokio_tungstenite::connect_async(url).await?;
     let (mut write, read) = ws_stream.split();
 
     write
@@ -133,19 +121,15 @@ async fn subscribe_to_notifications(
     Ok((write, tokio::spawn(read_future)))
 }
 
-fn parse_message(
-    message: tokio_tungstenite::tungstenite::Message,
-) -> Option<Message> {
-    let tokio_tungstenite::tungstenite::Message::Binary(data) = message
-    else {
+fn parse_message(message: tokio_tungstenite::tungstenite::Message) -> Option<Message> {
+    let tokio_tungstenite::tungstenite::Message::Binary(data) = message else {
         return None;
     };
 
     // the first few bytes with the 0x80 bit set, plus one byte terminating the length contain the length of the message
     let len_buffer_length = data.iter().position(|&x| (x & 0x80) == 0)? + 1;
 
-    let unpacked_messagepack =
-        rmpv::decode::read_value(&mut &data[len_buffer_length..]).ok()?;
+    let unpacked_messagepack = rmpv::decode::read_value(&mut &data[len_buffer_length..]).ok()?;
 
     let unpacked_message = unpacked_messagepack.as_array()?;
     let message_type = unpacked_message.first()?.as_u64()?;

@@ -26,11 +26,7 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
 
     let (cmd, args) = if contains_shell_metacharacters(&editor) {
         let mut cmdline = std::ffi::OsString::new();
-        cmdline.extend([
-            editor.as_ref(),
-            std::ffi::OsStr::new(" "),
-            file.as_os_str(),
-        ]);
+        cmdline.extend([editor.as_ref(), std::ffi::OsStr::new(" "), file.as_os_str()]);
 
         let editor_args = vec![std::ffi::OsString::from("-c"), cmdline];
         (std::path::Path::new("/bin/sh"), editor_args)

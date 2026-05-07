@@ -19,8 +19,8 @@ impl Identity {
     ) -> Result<Self> {
         let email = email.trim().to_lowercase();
 
-        let iterations = std::num::NonZeroU32::new(iterations)
-            .ok_or(Error::Pbkdf2ZeroIterations)?;
+        let iterations =
+            std::num::NonZeroU32::new(iterations).ok_or(Error::Pbkdf2ZeroIterations)?;
 
         let mut keys = crate::locked::Vec::new();
         keys.extend(std::iter::repeat_n(0, 64));
@@ -74,8 +74,7 @@ impl Identity {
         )
         .map_err(|_| Error::Pbkdf2)?;
 
-        let hkdf = hkdf::Hkdf::<sha2::Sha256>::from_prk(enc_key)
-            .map_err(|_| Error::HkdfExpand)?;
+        let hkdf = hkdf::Hkdf::<sha2::Sha256>::from_prk(enc_key).map_err(|_| Error::HkdfExpand)?;
         hkdf.expand(b"enc", enc_key)
             .map_err(|_| Error::HkdfExpand)?;
         let mac_key = &mut keys.data_mut()[32..64];

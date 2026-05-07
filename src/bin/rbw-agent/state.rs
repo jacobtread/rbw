@@ -2,8 +2,7 @@ use sha2::Digest as _;
 
 pub struct State {
     pub priv_key: Option<rbw::locked::Keys>,
-    pub org_keys:
-        Option<std::collections::HashMap<String, rbw::locked::Keys>>,
+    pub org_keys: Option<std::collections::HashMap<String, rbw::locked::Keys>>,
     pub timeout: crate::timeout::Timeout,
     pub timeout_duration: std::time::Duration,
     pub sync_timeout: crate::timeout::Timeout,
@@ -74,10 +73,7 @@ impl State {
     // if the agent gets a request for any of those cipherstrings that it saw
     // marked as master password reprompt during the most recent sync, it
     // forces a reprompt.
-    pub fn set_master_password_reprompt(
-        &mut self,
-        entries: &[rbw::db::Entry],
-    ) {
+    pub fn set_master_password_reprompt(&mut self, entries: &[rbw::db::Entry]) {
         self.master_password_reprompt.clear();
 
         let mut hasher = sha2::Sha256::new();
@@ -137,10 +133,7 @@ impl State {
         &self.last_environment
     }
 
-    pub fn set_last_environment(
-        &mut self,
-        environment: rbw::protocol::Environment,
-    ) {
+    pub fn set_last_environment(&mut self, environment: rbw::protocol::Environment) {
         self.last_environment = environment;
     }
 }

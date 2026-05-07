@@ -20,9 +20,7 @@ fn spawn_pinentry(
     let env_vars = environment.env_vars();
     // Not all pinentry appear to respect the --display flag, so we also keep the environment
     // variable.
-    if let Some(display) =
-        env_vars.get(std::ffi::OsString::from("DISPLAY").as_os_str())
-    {
+    if let Some(display) = env_vars.get(std::ffi::OsString::from("DISPLAY").as_os_str()) {
         args.extend(["--display".into(), display.clone()]);
     }
     if !grab {
@@ -91,12 +89,7 @@ pub async fn getpin(
     buf.zero();
     // unwrap is safe because we specified stdout as piped in the command opts
     // above
-    let len = read_password(
-        ncommands,
-        buf.data_mut(),
-        child.stdout.as_mut().unwrap(),
-    )
-    .await?;
+    let len = read_password(ncommands, buf.data_mut(), child.stdout.as_mut().unwrap()).await?;
     buf.truncate(len);
 
     child
@@ -135,8 +128,7 @@ pub async fn confirm(
     drop(stdin);
 
     let mut buf = [0u8; 64];
-    read_password(ncommands, &mut buf, child.stdout.as_mut().unwrap())
-        .await?;
+    read_password(ncommands, &mut buf, child.stdout.as_mut().unwrap()).await?;
 
     child
         .wait()
@@ -146,11 +138,7 @@ pub async fn confirm(
     Ok(true)
 }
 
-async fn read_password<R>(
-    mut ncommands: u8,
-    data: &mut [u8],
-    mut r: R,
-) -> Result<usize>
+async fn read_password<R>(mut ncommands: u8, data: &mut [u8], mut r: R) -> Result<usize>
 where
     R: tokio::io::AsyncRead + tokio::io::AsyncReadExt + Unpin + Send,
 {
@@ -245,8 +233,7 @@ fn percent_decode(buf: &mut [u8]) -> usize {
                 if let Some(l) = char::from(buf[read_idx + 2]).to_digit(16) {
                     // h and l were parsed from a single hex digit, so they
                     // must be in the range 0-15, so these unwraps are safe
-                    c = u8::try_from(h).unwrap() * 0x10
-                        + u8::try_from(l).unwrap();
+                    c = u8::try_from(h).unwrap() * 0x10 + u8::try_from(l).unwrap();
                     read_idx += 2;
                 }
             }

@@ -2,8 +2,7 @@ use zeroize::Zeroize as _;
 
 const LEN: usize = 4096;
 
-static REGION_LOCK_WORKS: std::sync::OnceLock<bool> =
-    std::sync::OnceLock::new();
+static REGION_LOCK_WORKS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 pub struct Vec {
     data: Box<arrayvec::ArrayVec<u8, LEN>>,
@@ -14,9 +13,7 @@ impl Default for Vec {
     fn default() -> Self {
         let data = Box::new(arrayvec::ArrayVec::<_, LEN>::new());
         let lock = match REGION_LOCK_WORKS.get() {
-            Some(true) => {
-                Some(region::lock(data.as_ptr(), data.capacity()).unwrap())
-            }
+            Some(true) => Some(region::lock(data.as_ptr(), data.capacity()).unwrap()),
             Some(false) => None,
             None => match region::lock(data.as_ptr(), data.capacity()) {
                 Ok(lock) => {

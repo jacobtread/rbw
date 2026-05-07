@@ -4,9 +4,7 @@ use std::io::{Read as _, Write as _};
 
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-#[derive(
-    serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq,
-)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Entry {
     pub id: String,
     pub org_id: Option<String>,
@@ -43,17 +41,11 @@ impl<'de> serde::Deserialize<'de> for Uri {
         impl<'de> serde::de::Visitor<'de> for StringOrUri {
             type Value = Uri;
 
-            fn expecting(
-                &self,
-                formatter: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("uri")
             }
 
-            fn visit_str<E>(
-                self,
-                value: &str,
-            ) -> std::result::Result<Self::Value, E>
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
@@ -63,10 +55,7 @@ impl<'de> serde::Deserialize<'de> for Uri {
                 })
             }
 
-            fn visit_map<M>(
-                self,
-                mut map: M,
-            ) -> std::result::Result<Self::Value, M::Error>
+            fn visit_map<M>(self, mut map: M) -> std::result::Result<Self::Value, M::Error>
             where
                 M: serde::de::MapAccess<'de>,
             {
@@ -76,19 +65,13 @@ impl<'de> serde::Deserialize<'de> for Uri {
                     match key {
                         "uri" => {
                             if uri.is_some() {
-                                return Err(
-                                    serde::de::Error::duplicate_field("uri"),
-                                );
+                                return Err(serde::de::Error::duplicate_field("uri"));
                             }
                             uri = Some(map.next_value()?);
                         }
                         "match_type" => {
                             if match_type.is_some() {
-                                return Err(
-                                    serde::de::Error::duplicate_field(
-                                        "match_type",
-                                    ),
-                                );
+                                return Err(serde::de::Error::duplicate_field("match_type"));
                             }
                             match_type = map.next_value()?;
                         }
@@ -112,9 +95,7 @@ impl<'de> serde::Deserialize<'de> for Uri {
     }
 }
 
-#[derive(
-    serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq,
-)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum EntryData {
     Login {
         username: Option<String>,
@@ -157,9 +138,7 @@ pub enum EntryData {
     },
 }
 
-#[derive(
-    serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq,
-)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Field {
     pub ty: Option<crate::api::FieldType>,
     pub name: Option<String>,
@@ -167,9 +146,7 @@ pub struct Field {
     pub linked_id: Option<crate::api::LinkedIdType>,
 }
 
-#[derive(
-    serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq,
-)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct HistoryEntry {
     pub last_used_date: String,
     pub password: String,
@@ -198,40 +175,38 @@ impl Db {
 
     pub fn load(server: &str, email: &str) -> Result<Self> {
         let file = crate::dirs::db_file(server, email);
-        let mut fh =
-            std::fs::File::open(&file).map_err(|source| Error::LoadDb {
-                source,
-                file: file.clone(),
-            })?;
+        let mut fh = std::fs::File::open(&file).map_err(|source| Error::LoadDb {
+            source,
+            file: file.clone(),
+        })?;
         let mut json = String::new();
         fh.read_to_string(&mut json)
             .map_err(|source| Error::LoadDb {
                 source,
                 file: file.clone(),
             })?;
-        let slf: Self = serde_json::from_str(&json)
-            .map_err(|source| Error::LoadDbJson { source, file })?;
+        let slf: Self =
+            serde_json::from_str(&json).map_err(|source| Error::LoadDbJson { source, file })?;
         Ok(slf)
     }
 
     pub async fn load_async(server: &str, email: &str) -> Result<Self> {
         let file = crate::dirs::db_file(server, email);
-        let mut fh =
-            tokio::fs::File::open(&file).await.map_err(|source| {
-                Error::LoadDbAsync {
-                    source,
-                    file: file.clone(),
-                }
-            })?;
-        let mut json = String::new();
-        fh.read_to_string(&mut json).await.map_err(|source| {
-            Error::LoadDbAsync {
+        let mut fh = tokio::fs::File::open(&file)
+            .await
+            .map_err(|source| Error::LoadDbAsync {
                 source,
                 file: file.clone(),
-            }
-        })?;
-        let slf: Self = serde_json::from_str(&json)
-            .map_err(|source| Error::LoadDbJson { source, file })?;
+            })?;
+        let mut json = String::new();
+        fh.read_to_string(&mut json)
+            .await
+            .map_err(|source| Error::LoadDbAsync {
+                source,
+                file: file.clone(),
+            })?;
+        let slf: Self =
+            serde_json::from_str(&json).map_err(|source| Error::LoadDbJson { source, file })?;
         Ok(slf)
     }
 
@@ -240,17 +215,14 @@ impl Db {
         let file = crate::dirs::db_file(server, email);
         // unwrap is safe here because Self::filename is explicitly
         // constructed as a filename in a directory
-        std::fs::create_dir_all(file.parent().unwrap()).map_err(
-            |source| Error::SaveDb {
-                source,
-                file: file.clone(),
-            },
-        )?;
-        let mut fh =
-            std::fs::File::create(&file).map_err(|source| Error::SaveDb {
-                source,
-                file: file.clone(),
-            })?;
+        std::fs::create_dir_all(file.parent().unwrap()).map_err(|source| Error::SaveDb {
+            source,
+            file: file.clone(),
+        })?;
+        let mut fh = std::fs::File::create(&file).map_err(|source| Error::SaveDb {
+            source,
+            file: file.clone(),
+        })?;
         fh.write_all(
             serde_json::to_string(self)
                 .map_err(|source| Error::SaveDbJson {
@@ -274,12 +246,11 @@ impl Db {
                 source,
                 file: file.clone(),
             })?;
-        let mut fh =
-            tokio::fs::File::create(&file).await.map_err(|source| {
-                Error::SaveDbAsync {
-                    source,
-                    file: file.clone(),
-                }
+        let mut fh = tokio::fs::File::create(&file)
+            .await
+            .map_err(|source| Error::SaveDbAsync {
+                source,
+                file: file.clone(),
             })?;
         fh.write_all(
             serde_json::to_string(self)

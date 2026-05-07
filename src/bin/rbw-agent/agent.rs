@@ -20,10 +20,7 @@ impl Agent {
         }
     }
 
-    pub async fn run(
-        self,
-        listener: tokio::net::UnixListener,
-    ) -> anyhow::Result<()> {
+    pub async fn run(self, listener: tokio::net::UnixListener) -> anyhow::Result<()> {
         pub enum Event {
             Request(std::io::Result<tokio::net::UnixStream>),
             Timeout(()),
@@ -37,10 +34,7 @@ impl Agent {
             .notifications_handler
             .get_channel()
             .await;
-        let notifications =
-            tokio_stream::wrappers::UnboundedReceiverStream::new(
-                notifications,
-            )
+        let notifications = tokio_stream::wrappers::UnboundedReceiverStream::new(notifications)
             .map(|message| match message {
                 crate::notifications::Message::Logout => Event::Timeout(()),
                 crate::notifications::Message::Sync => Event::Sync(()),
@@ -51,16 +45,12 @@ impl Agent {
             tokio_stream::wrappers::UnixListenerStream::new(listener)
                 .map(Event::Request)
                 .boxed(),
-            tokio_stream::wrappers::UnboundedReceiverStream::new(
-                self.timer_r,
-            )
-            .map(Event::Timeout)
-            .boxed(),
-            tokio_stream::wrappers::UnboundedReceiverStream::new(
-                self.sync_timer_r,
-            )
-            .map(Event::Sync)
-            .boxed(),
+            tokio_stream::wrappers::UnboundedReceiverStream::new(self.timer_r)
+                .map(Event::Timeout)
+                .boxed(),
+            tokio_stream::wrappers::UnboundedReceiverStream::new(self.sync_timer_r)
+                .map(Event::Sync)
+                .boxed(),
             notifications,
         ]);
         while let Some(event) = stream.next().await {
@@ -71,8 +61,7 @@ impl Agent {
                     );
                     let state = self.state.clone();
                     tokio::spawn(async move {
-                        let res =
-                            handle_request(&mut sock, state.clone()).await;
+                        let res = handle_request(&mut sock, state.clone()).await;
                         if let Err(e) = res {
                             // unwrap is the only option here
                             sock.send(&rbw::protocol::Response::Error {
@@ -91,9 +80,7 @@ impl Agent {
                     tokio::spawn(async move {
                         // this could fail if we aren't logged in, but we
                         // don't care about that
-                        if let Err(e) =
-                            crate::actions::sync(None, state.clone()).await
-                        {
+                        if let Err(e) = crate::actions::sync(None, state.clone()).await {
                             eprintln!("failed to sync: {e:#}");
                         }
                     });
@@ -163,18 +150,11 @@ async fn handle_request(
             true
         }
         rbw::protocol::Action::Encrypt { plaintext, org_id } => {
-            crate::actions::encrypt(
-                sock,
-                state.clone(),
-                plaintext,
-                org_id.as_deref(),
-            )
-            .await?;
+            crate::actions::encrypt(sock, state.clone(), plaintext, org_id.as_deref()).await?;
             true
         }
         rbw::protocol::Action::ClipboardStore { text } => {
-            crate::actions::clipboard_store(sock, state.clone(), text)
-                .await?;
+            crate::actions::clipboard_store(sock, state.clone(), text).await?;
             true
         }
         rbw::protocol::Action::Quit => std::process::exit(0),

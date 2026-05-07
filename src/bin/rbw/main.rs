@@ -131,11 +131,7 @@ enum Opt {
         name: String,
         #[arg(help = "Username for the password entry")]
         user: Option<String>,
-        #[arg(
-            long,
-            help = "URI for the password entry",
-            number_of_values = 1
-        )]
+        #[arg(long, help = "URI for the password entry", number_of_values = 1)]
         uri: Vec<String>,
         #[arg(long, help = "Folder for the password entry")]
         folder: Option<String>,
@@ -161,11 +157,7 @@ enum Opt {
         name: Option<String>,
         #[arg(help = "Username for the password entry")]
         user: Option<String>,
-        #[arg(
-            long,
-            help = "URI for the password entry",
-            number_of_values = 1
-        )]
+        #[arg(long, help = "URI for the password entry", number_of_values = 1)]
         uri: Vec<String>,
         #[arg(long, help = "Folder for the password entry")]
         folder: Option<String>,
@@ -310,20 +302,16 @@ impl Config {
 fn main() {
     let opt = Opt::parse();
 
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .format(|buf, record| {
-        if let Some((terminal_size::Width(w), _)) =
-            terminal_size::terminal_size()
-        {
-            let out = format!("{}: {}", record.level(), record.args());
-            writeln!(buf, "{}", textwrap::fill(&out, usize::from(w) - 1))
-        } else {
-            writeln!(buf, "{}: {}", record.level(), record.args())
-        }
-    })
-    .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            if let Some((terminal_size::Width(w), _)) = terminal_size::terminal_size() {
+                let out = format!("{}: {}", record.level(), record.args());
+                writeln!(buf, "{}", textwrap::fill(&out, usize::from(w) - 1))
+            } else {
+                writeln!(buf, "{}: {}", record.level(), record.args())
+            }
+        })
+        .init();
 
     let subcommand_name = opt.subcommand_name();
     let res = match opt {

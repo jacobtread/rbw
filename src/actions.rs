@@ -1,9 +1,6 @@
 use crate::prelude::*;
 
-pub async fn register(
-    email: &str,
-    apikey: crate::locked::ApiKey,
-) -> Result<()> {
+pub async fn register(email: &str, apikey: crate::locked::ApiKey) -> Result<()> {
     let (client, config) = api_client_async().await?;
 
     client
@@ -28,17 +25,10 @@ pub async fn login(
     String,
 )> {
     let (client, config) = api_client_async().await?;
-    let (kdf, iterations, memory, parallelism) =
-        client.prelogin(email).await?;
+    let (kdf, iterations, memory, parallelism) = client.prelogin(email).await?;
 
-    let identity = crate::identity::Identity::new(
-        email,
-        &password,
-        kdf,
-        iterations,
-        memory,
-        parallelism,
-    )?;
+    let identity =
+        crate::identity::Identity::new(email, &password, kdf, iterations, memory, parallelism)?;
     let (access_token, refresh_token, protected_key) = client
         .login(
             email,
@@ -61,10 +51,7 @@ pub async fn login(
     ))
 }
 
-pub async fn send_two_factor_email(
-    email: &str,
-    sso_email_2fa_session_token: &str,
-) -> Result<()> {
+pub async fn send_two_factor_email(email: &str, sso_email_2fa_session_token: &str) -> Result<()> {
     let (client, config) = api_client_async().await?;
     client
         .send_email_login(
@@ -89,17 +76,10 @@ pub fn unlock<S: std::hash::BuildHasher>(
     crate::locked::Keys,
     std::collections::HashMap<String, crate::locked::Keys>,
 )> {
-    let identity = crate::identity::Identity::new(
-        email,
-        password,
-        kdf,
-        iterations,
-        memory,
-        parallelism,
-    )?;
+    let identity =
+        crate::identity::Identity::new(email, password, kdf, iterations, memory, parallelism)?;
 
-    let protected_key =
-        crate::cipherstring::CipherString::new(protected_key)?;
+    let protected_key = crate::cipherstring::CipherString::new(protected_key)?;
     let key = match protected_key.decrypt_locked_symmetric(&identity.keys) {
         Ok(master_keys) => crate::locked::Keys::new(master_keys),
         Err(Error::InvalidMac) => {
@@ -110,23 +90,19 @@ pub fn unlock<S: std::hash::BuildHasher>(
         Err(e) => return Err(e),
     };
 
-    let protected_private_key =
-        crate::cipherstring::CipherString::new(protected_private_key)?;
-    let private_key =
-        match protected_private_key.decrypt_locked_symmetric(&key) {
-            Ok(private_key) => crate::locked::PrivateKey::new(private_key),
-            Err(e) => return Err(e),
-        };
+    let protected_private_key = crate::cipherstring::CipherString::new(protected_private_key)?;
+    let private_key = match protected_private_key.decrypt_locked_symmetric(&key) {
+        Ok(private_key) => crate::locked::PrivateKey::new(private_key),
+        Err(e) => return Err(e),
+    };
 
     let mut org_keys = std::collections::HashMap::new();
     for (org_id, protected_org_key) in protected_org_keys {
-        let protected_org_key =
-            crate::cipherstring::CipherString::new(protected_org_key)?;
-        let org_key =
-            match protected_org_key.decrypt_locked_asymmetric(&private_key) {
-                Ok(org_key) => crate::locked::Keys::new(org_key),
-                Err(e) => return Err(e),
-            };
+        let protected_org_key = crate::cipherstring::CipherString::new(protected_org_key)?;
+        let org_key = match protected_org_key.decrypt_locked_asymmetric(&private_key) {
+            Ok(org_key) => crate::locked::Keys::new(org_key),
+            Err(e) => return Err(e),
+        };
         org_keys.insert(org_id.clone(), org_key);
     }
 
@@ -145,14 +121,10 @@ pub async fn sync(
         Vec<crate::db::Entry>,
     ),
 )> {
-    with_exchange_refresh_token_async(
-        access_token,
-        refresh_token,
-        |access_token| {
-            let access_token = access_token.to_string();
-            Box::pin(async move { sync_once(&access_token).await })
-        },
-    )
+    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
+        let access_token = access_token.to_string();
+        Box::pin(async move { sync_once(&access_token).await })
+    })
     .await
 }
 
@@ -246,11 +218,7 @@ fn edit_once(
     Ok(())
 }
 
-pub fn remove(
-    access_token: &str,
-    refresh_token: &str,
-    id: &str,
-) -> Result<(Option<String>, ())> {
+pub fn remove(access_token: &str, refresh_token: &str, id: &str) -> Result<(Option<String>, ())> {
     with_exchange_refresh_token(access_token, refresh_token, |access_token| {
         remove_once(access_token, id)
     })
@@ -316,19 +284,15 @@ async fn with_exchange_refresh_token_async<F, T>(
     f: F,
 ) -> Result<(Option<String>, T)>
 where
-    F: Fn(
-            &str,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<T>> + Send>,
-        > + Send
+    F: Fn(&str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
+        + Send
         + Sync,
     T: Send,
 {
     match f(access_token).await {
         Ok(t) => Ok((None, t)),
         Err(Error::RequestUnauthorized) => {
-            let access_token =
-                exchange_refresh_token_async(refresh_token).await?;
+            let access_token = exchange_refresh_token_async(refresh_token).await?;
             let t = f(&access_token).await?;
             Ok((Some(access_token), t))
         }
@@ -357,8 +321,7 @@ fn api_client() -> Result<(crate::api::Client, crate::config::Config)> {
     Ok((client, config))
 }
 
-async fn api_client_async(
-) -> Result<(crate::api::Client, crate::config::Config)> {
+async fn api_client_async() -> Result<(crate::api::Client, crate::config::Config)> {
     let config = crate::config::Config::load_async().await?;
     let client = crate::api::Client::new(
         &config.base_url(),

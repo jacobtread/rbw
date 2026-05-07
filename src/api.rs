@@ -7,18 +7,10 @@ use crate::prelude::*;
 use rand::distr::SampleString as _;
 use sha2::Digest as _;
 
-use crate::json::{
-    DeserializeJsonWithPath as _, DeserializeJsonWithPathAsync as _,
-};
+use crate::json::{DeserializeJsonWithPath as _, DeserializeJsonWithPathAsync as _};
 
 #[derive(
-    serde_repr::Serialize_repr,
-    serde_repr::Deserialize_repr,
-    Debug,
-    Copy,
-    Clone,
-    PartialEq,
-    Eq,
+    serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Debug, Copy, Clone, PartialEq, Eq,
 )]
 #[repr(u8)]
 pub enum UriMatchType {
@@ -61,10 +53,12 @@ pub enum TwoFactorProviderType {
 impl TwoFactorProviderType {
     pub fn message(&self) -> &str {
         match *self {
-            Self::Authenticator => "Enter the 6 digit verification code from your authenticator app.",
+            Self::Authenticator => {
+                "Enter the 6 digit verification code from your authenticator app."
+            }
             Self::Yubikey => "Insert your Yubikey and push the button.",
             Self::Email => "Enter the PIN you received via email.",
-            _ => "Enter the code."
+            _ => "Enter the code.",
         }
     }
 
@@ -91,32 +85,22 @@ impl<'de> serde::Deserialize<'de> for TwoFactorProviderType {
         impl serde::de::Visitor<'_> for TwoFactorProviderTypeVisitor {
             type Value = TwoFactorProviderType;
 
-            fn expecting(
-                &self,
-                formatter: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("two factor provider id")
             }
 
-            fn visit_str<E>(
-                self,
-                value: &str,
-            ) -> std::result::Result<Self::Value, E>
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
                 value.parse().map_err(serde::de::Error::custom)
             }
 
-            fn visit_u64<E>(
-                self,
-                value: u64,
-            ) -> std::result::Result<Self::Value, E>
+            fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                std::convert::TryFrom::try_from(value)
-                    .map_err(serde::de::Error::custom)
+                std::convert::TryFrom::try_from(value).map_err(serde::de::Error::custom)
             }
         }
 
@@ -177,32 +161,22 @@ impl<'de> serde::Deserialize<'de> for KdfType {
         impl serde::de::Visitor<'_> for KdfTypeVisitor {
             type Value = KdfType;
 
-            fn expecting(
-                &self,
-                formatter: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("kdf id")
             }
 
-            fn visit_str<E>(
-                self,
-                value: &str,
-            ) -> std::result::Result<Self::Value, E>
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
                 value.parse().map_err(serde::de::Error::custom)
             }
 
-            fn visit_u64<E>(
-                self,
-                value: u64,
-            ) -> std::result::Result<Self::Value, E>
+            fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                std::convert::TryFrom::try_from(value)
-                    .map_err(serde::de::Error::custom)
+                std::convert::TryFrom::try_from(value).map_err(serde::de::Error::custom)
             }
         }
 
@@ -237,10 +211,7 @@ impl std::str::FromStr for KdfType {
 }
 
 impl serde::Serialize for KdfType {
-    fn serialize<S>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -253,13 +224,7 @@ impl serde::Serialize for KdfType {
 }
 
 #[derive(
-    serde_repr::Serialize_repr,
-    serde_repr::Deserialize_repr,
-    Debug,
-    Copy,
-    Clone,
-    PartialEq,
-    Eq,
+    serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Debug, Copy, Clone, PartialEq, Eq,
 )]
 #[repr(u8)]
 pub enum CipherRepromptType {
@@ -348,38 +313,28 @@ struct ConnectErrorRes {
     error_model: Option<ConnectErrorResErrorModel>,
     #[serde(rename = "TwoFactorProviders", alias = "twoFactorProviders")]
     two_factor_providers: Option<Vec<TwoFactorProviderType>>,
-    #[serde(
-        rename = "SsoEmail2faSessionToken",
-        alias = "ssoEmail2faSessionToken"
-    )]
+    #[serde(rename = "SsoEmail2faSessionToken", alias = "ssoEmail2faSessionToken")]
     sso_email_2fa_session_token: Option<String>,
 }
 
 impl TryFrom<ConnectErrorRes> for Error {
     type Error = ConnectErrorRes;
 
-    fn try_from(
-        value: ConnectErrorRes,
-    ) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: ConnectErrorRes) -> std::result::Result<Self, Self::Error> {
         let error_desc = value.error_description.as_deref();
         match value.error.as_str() {
             "invalid_grant" => match error_desc {
                 Some("invalid_username_or_password") => {
                     if let Some(error_model) = value.error_model.as_ref() {
-                        let message =
-                            error_model.message.as_str().to_string();
+                        let message = error_model.message.as_str().to_string();
                         return Ok(Error::IncorrectPassword { message });
                     }
                 }
                 Some("Two factor required.") => {
-                    if let Some(providers) =
-                        value.two_factor_providers.as_ref()
-                    {
+                    if let Some(providers) = value.two_factor_providers.as_ref() {
                         return Ok(Error::TwoFactorRequired {
                             providers: providers.clone(),
-                            sso_email_2fa_session_token: value
-                                .sso_email_2fa_session_token
-                                .clone(),
+                            sso_email_2fa_session_token: value.sso_email_2fa_session_token.clone(),
                         });
                     }
                 }
@@ -396,21 +351,18 @@ impl TryFrom<ConnectErrorRes> for Error {
                 // this case, for some reason
                 if error_desc.is_none() || error_desc == Some("") {
                     if let Some(error_model) = value.error_model.as_ref() {
-                        let message =
-                            error_model.message.as_str().to_string();
+                        let message = error_model.message.as_str().to_string();
                         match message.as_str() {
-                        "Username or password is incorrect. Try again"
-                        | "TOTP code is not a number" => {
-                            return Ok(Error::IncorrectPassword { message });
-                        }
-                        s => {
-                            if s.starts_with(
-                                "Invalid TOTP code! Server time: ",
-                            ) {
+                            "Username or password is incorrect. Try again"
+                            | "TOTP code is not a number" => {
                                 return Ok(Error::IncorrectPassword { message });
                             }
+                            s => {
+                                if s.starts_with("Invalid TOTP code! Server time: ") {
+                                    return Ok(Error::IncorrectPassword { message });
+                                }
+                            }
                         }
-                    }
                     }
                 }
             }
@@ -437,10 +389,7 @@ struct SendEmailLoginReq {
     email: String,
     #[serde(rename = "DeviceIdentifier", alias = "deviceIdentifier")]
     device_identifier: String,
-    #[serde(
-        rename = "SsoEmail2faSessionToken",
-        alias = "ssoEmail2faSessionToken"
-    )]
+    #[serde(rename = "SsoEmail2faSessionToken", alias = "ssoEmail2faSessionToken")]
     sso_email_2fa_session_token: String,
 }
 
@@ -489,62 +438,51 @@ struct SyncResCipher {
 }
 
 impl SyncResCipher {
-    fn to_entry(
-        &self,
-        folders: &[SyncResFolder],
-    ) -> Option<crate::db::Entry> {
+    fn to_entry(&self, folders: &[SyncResFolder]) -> Option<crate::db::Entry> {
         if self.deleted_date.is_some() {
             return None;
         }
-        let history =
-            self.password_history
-                .as_ref()
-                .map_or_else(Vec::new, |history| {
-                    history
-                        .iter()
-                        .filter_map(|entry| {
-                            // Gets rid of entries with a non-existent
-                            // password
-                            entry.password.clone().map(|p| {
-                                crate::db::HistoryEntry {
-                                    last_used_date: entry
-                                        .last_used_date
-                                        .clone(),
-                                    password: p,
-                                }
-                            })
+        let history = self
+            .password_history
+            .as_ref()
+            .map_or_else(Vec::new, |history| {
+                history
+                    .iter()
+                    .filter_map(|entry| {
+                        // Gets rid of entries with a non-existent
+                        // password
+                        entry.password.clone().map(|p| crate::db::HistoryEntry {
+                            last_used_date: entry.last_used_date.clone(),
+                            password: p,
                         })
-                        .collect()
-                });
-
-        let (folder, folder_id) =
-            self.folder_id.as_ref().map_or((None, None), |folder_id| {
-                let mut folder_name = None;
-                for folder in folders {
-                    if &folder.id == folder_id {
-                        folder_name = Some(folder.name.clone());
-                    }
-                }
-                (folder_name, Some(folder_id))
+                    })
+                    .collect()
             });
+
+        let (folder, folder_id) = self.folder_id.as_ref().map_or((None, None), |folder_id| {
+            let mut folder_name = None;
+            for folder in folders {
+                if &folder.id == folder_id {
+                    folder_name = Some(folder.name.clone());
+                }
+            }
+            (folder_name, Some(folder_id))
+        });
         let data = if let Some(login) = &self.login {
             crate::db::EntryData::Login {
                 username: login.username.clone(),
                 password: login.password.clone(),
                 totp: login.totp.clone(),
-                uris: login.uris.as_ref().map_or_else(
-                    std::vec::Vec::new,
-                    |uris| {
-                        uris.iter()
-                            .filter_map(|uri| {
-                                uri.uri.clone().map(|s| crate::db::Uri {
-                                    uri: s,
-                                    match_type: uri.match_type,
-                                })
+                uris: login.uris.as_ref().map_or_else(std::vec::Vec::new, |uris| {
+                    uris.iter()
+                        .filter_map(|uri| {
+                            uri.uri.clone().map(|s| crate::db::Uri {
+                                uri: s,
+                                match_type: uri.match_type,
                             })
-                            .collect()
-                    },
-                ),
+                        })
+                        .collect()
+                }),
             }
         } else if let Some(card) = &self.card {
             crate::db::EntryData::Card {
@@ -724,13 +662,7 @@ struct CipherSshKey {
 }
 
 #[derive(
-    serde_repr::Serialize_repr,
-    serde_repr::Deserialize_repr,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
+    serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Debug, Clone, Copy, PartialEq, Eq,
 )]
 #[repr(u16)]
 pub enum FieldType {
@@ -741,13 +673,7 @@ pub enum FieldType {
 }
 
 #[derive(
-    serde_repr::Serialize_repr,
-    serde_repr::Deserialize_repr,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
+    serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Debug, Clone, Copy, PartialEq, Eq,
 )]
 #[repr(u16)]
 pub enum LinkedIdType {
@@ -892,17 +818,11 @@ impl<'a> ClientRequest<'a> {
             Self::Login(r, email) => http_client
                 .post(client.identity_url("/connect/token"))
                 .form(&r)
-                .header(
-                    "auth-email",
-                    crate::base64::encode_url_safe_no_pad(email),
-                ),
+                .header("auth-email", crate::base64::encode_url_safe_no_pad(email)),
             Self::SendEmailLogin(r, email) => http_client
                 .post(client.api_url("/two-factor/send-email-login"))
                 .json(&r)
-                .header(
-                    "auth-email",
-                    crate::base64::encode_url_safe_no_pad(email),
-                ),
+                .header("auth-email", crate::base64::encode_url_safe_no_pad(email)),
             Self::Sync(access_token) => http_client
                 .get(client.api_url("/sync"))
                 .header("Authorization", format!("Bearer {access_token}"))
@@ -988,8 +908,7 @@ impl Client {
             base_url: base_url.to_string(),
             identity_url: identity_url.to_string(),
             ui_url: ui_url.to_string(),
-            client_cert_path: client_cert_path
-                .map(std::path::Path::to_path_buf),
+            client_cert_path: client_cert_path.map(std::path::Path::to_path_buf),
         }
     }
 
@@ -1007,22 +926,17 @@ impl Client {
             "Device-Type",
             // unwrap is safe here because DEVICE_TYPE is a number and digits
             // are valid ASCII
-            axum::http::HeaderValue::from_str(&DEVICE_TYPE.to_string())
-                .unwrap(),
+            axum::http::HeaderValue::from_str(&DEVICE_TYPE.to_string()).unwrap(),
         );
-        let user_agent = format!(
-            "{}/{}",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION")
-        );
+        let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         if let Some(client_cert_path) = self.client_cert_path.as_ref() {
             let buf =
-                tokio::fs::read(client_cert_path).await.map_err(|e| {
-                    Error::LoadClientCert {
+                tokio::fs::read(client_cert_path)
+                    .await
+                    .map_err(|e| Error::LoadClientCert {
                         source: e,
                         file: client_cert_path.clone(),
-                    }
-                })?;
+                    })?;
             let pem = reqwest::Identity::from_pem(&buf)
                 .map_err(|e| Error::CreateReqwestClient { source: e })?;
             Ok(reqwest::Client::builder()
@@ -1040,10 +954,7 @@ impl Client {
         }
     }
 
-    pub async fn prelogin(
-        &self,
-        email: &str,
-    ) -> Result<(KdfType, u32, Option<u32>, Option<u32>)> {
+    pub async fn prelogin(&self, email: &str) -> Result<(KdfType, u32, Option<u32>, Option<u32>)> {
         let res: PreloginRes = ClientRequest::Prelogin(PreloginReq {
             email: email.to_string(),
         })
@@ -1067,20 +978,14 @@ impl Client {
         apikey: &crate::locked::ApiKey,
     ) -> Result<()> {
         let connect_req = ConnectTokenReq {
-            auth: ConnectTokenAuth::ClientCredentials(
-                ConnectTokenClientCredentials {
-                    username: email.to_string(),
-                    client_secret: String::from_utf8(
-                        apikey.client_secret().to_vec(),
-                    )
-                    .unwrap(),
-                },
-            ),
+            auth: ConnectTokenAuth::ClientCredentials(ConnectTokenClientCredentials {
+                username: email.to_string(),
+                client_secret: String::from_utf8(apikey.client_secret().to_vec()).unwrap(),
+            }),
             grant_type: "client_credentials".to_string(),
             scope: "api".to_string(),
             // XXX unwraps here are not necessarily safe
-            client_id: String::from_utf8(apikey.client_id().to_vec())
-                .unwrap(),
+            client_id: String::from_utf8(apikey.client_id().to_vec()).unwrap(),
             device_type: u32::from(DEVICE_TYPE),
             device_identifier: device_id.to_string(),
             device_name: "rbw".to_string(),
@@ -1094,18 +999,16 @@ impl Client {
         } else {
             let code = res.status().as_u16();
             match res.text().await {
-                Ok(body) => {
-                    match body.clone().json_with_path::<ConnectErrorRes>() {
-                        Ok(err) => Err(err.try_into().unwrap_or_else(|err| {
-                            log::warn!("unexpected error received during login: {err:?}");
-                            Error::RequestFailed { status: code }
-                        })),
-                        Err(e) => {
-                            log::warn!("{e}: {body}");
-                            Err(Error::RequestFailed { status: code })
-                        }
+                Ok(body) => match body.clone().json_with_path::<ConnectErrorRes>() {
+                    Ok(err) => Err(err.try_into().unwrap_or_else(|err| {
+                        log::warn!("unexpected error received during login: {err:?}");
+                        Error::RequestFailed { status: code }
+                    })),
+                    Err(e) => {
+                        log::warn!("{e}: {body}");
+                        Err(Error::RequestFailed { status: code })
                     }
-                }
+                },
                 Err(e) => {
                     log::warn!("failed to read response body: {e}");
                     Err(Error::RequestFailed { status: code })
@@ -1141,10 +1044,8 @@ impl Client {
                     device_identifier: device_id.to_string(),
                     device_name: "rbw".to_string(),
                     device_push_token: String::new(),
-                    two_factor_token: two_factor_token
-                        .map(std::string::ToString::to_string),
-                    two_factor_provider: two_factor_provider
-                        .map(|ty| ty as u32),
+                    two_factor_token: two_factor_token.map(std::string::ToString::to_string),
+                    two_factor_provider: two_factor_provider.map(|ty| ty as u32),
                 }
             }
             None => ConnectTokenReq {
@@ -1160,8 +1061,7 @@ impl Client {
                 device_identifier: device_id.to_string(),
                 device_name: "rbw".to_string(),
                 device_push_token: String::new(),
-                two_factor_token: two_factor_token
-                    .map(std::string::ToString::to_string),
+                two_factor_token: two_factor_token.map(std::string::ToString::to_string),
                 two_factor_provider: two_factor_provider.map(|ty| ty as u32),
             },
         };
@@ -1178,18 +1078,16 @@ impl Client {
         } else {
             let code = res.status().as_u16();
             match res.text().await {
-                Ok(body) => {
-                    match body.clone().json_with_path::<ConnectErrorRes>() {
-                        Ok(err) => Err(err.try_into().unwrap_or_else(|err| {
-                            log::warn!("unexpected error received during login: {err:?}");
-                            Error::RequestFailed { status: code }
-                        })),
-                        Err(e) => {
-                            log::warn!("{e}: {body}");
-                            Err(Error::RequestFailed { status: code })
-                        }
+                Ok(body) => match body.clone().json_with_path::<ConnectErrorRes>() {
+                    Ok(err) => Err(err.try_into().unwrap_or_else(|err| {
+                        log::warn!("unexpected error received during login: {err:?}");
+                        Error::RequestFailed { status: code }
+                    })),
+                    Err(e) => {
+                        log::warn!("{e}: {body}");
+                        Err(Error::RequestFailed { status: code })
                     }
-                }
+                },
                 Err(e) => {
                     log::warn!("failed to read response body: {e}");
                     Err(Error::RequestFailed { status: code })
@@ -1208,8 +1106,7 @@ impl Client {
             SendEmailLoginReq {
                 email: email.to_string(),
                 device_identifier: device_id.to_string(),
-                sso_email_2fa_session_token: sso_email_2fa_session_token
-                    .to_string(),
+                sso_email_2fa_session_token: sso_email_2fa_session_token.to_string(),
             },
             email,
         )
@@ -1225,19 +1122,13 @@ impl Client {
         }
     }
 
-    async fn obtain_sso_code(
-        &self,
-        sso_id: &str,
-    ) -> Result<(String, String, String)> {
-        let state =
-            rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 64);
-        let sso_code_verifier =
-            rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 64);
+    async fn obtain_sso_code(&self, sso_id: &str) -> Result<(String, String, String)> {
+        let state = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 64);
+        let sso_code_verifier = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 64);
 
         let mut hasher = sha2::Sha256::new();
         hasher.update(sso_code_verifier.clone());
-        let code_challenge =
-            crate::base64::encode_url_safe_no_pad(hasher.finalize());
+        let code_challenge = crate::base64::encode_url_safe_no_pad(hasher.finalize());
 
         let port = find_free_port(8065, 8070).await?;
 
@@ -1245,11 +1136,9 @@ impl Client {
             .await
             .map_err(|e| Error::CreateSSOCallbackServer { err: e })?;
 
-        let callback_server =
-            start_sso_callback_server(listener, state.as_str());
+        let callback_server = start_sso_callback_server(listener, state.as_str());
 
-        let callback_url =
-            "http://localhost:".to_string() + port.to_string().as_str();
+        let callback_url = "http://localhost:".to_string() + port.to_string().as_str();
 
         open::that(
             self.ui_url.clone()
@@ -1308,9 +1197,7 @@ impl Client {
                     ciphers,
                 ))
             }
-            reqwest::StatusCode::UNAUTHORIZED => {
-                Err(Error::RequestUnauthorized)
-            }
+            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
             _ => Err(Error::RequestFailed {
                 status: res.status().as_u16(),
             }),
@@ -1426,9 +1313,7 @@ impl Client {
         let res = ClientBlockingRequest::Add(access_token, req).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => Ok(()),
-            reqwest::StatusCode::UNAUTHORIZED => {
-                Err(Error::RequestUnauthorized)
-            }
+            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
             _ => Err(Error::RequestFailed {
                 status: res.status().as_u16(),
             }),
@@ -1568,13 +1453,10 @@ impl Client {
             crate::db::EntryData::SshKey { .. } => unreachable!(),
         }
 
-        let res =
-            ClientBlockingRequest::Edit(access_token, id, req).req(self)?;
+        let res = ClientBlockingRequest::Edit(access_token, id, req).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => Ok(()),
-            reqwest::StatusCode::UNAUTHORIZED => {
-                Err(Error::RequestUnauthorized)
-            }
+            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
             _ => Err(Error::RequestFailed {
                 status: res.status().as_u16(),
             }),
@@ -1582,23 +1464,17 @@ impl Client {
     }
 
     pub fn remove(&self, access_token: &str, id: &str) -> Result<()> {
-        let res =
-            ClientBlockingRequest::Remove(access_token, id).req(self)?;
+        let res = ClientBlockingRequest::Remove(access_token, id).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => Ok(()),
-            reqwest::StatusCode::UNAUTHORIZED => {
-                Err(Error::RequestUnauthorized)
-            }
+            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
             _ => Err(Error::RequestFailed {
                 status: res.status().as_u16(),
             }),
         }
     }
 
-    pub fn folders(
-        &self,
-        access_token: &str,
-    ) -> Result<Vec<(String, String)>> {
+    pub fn folders(&self, access_token: &str) -> Result<Vec<(String, String)>> {
         let res = ClientBlockingRequest::Folders(access_token).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => {
@@ -1609,55 +1485,38 @@ impl Client {
                     .map(|folder| (folder.id.clone(), folder.name.clone()))
                     .collect())
             }
-            reqwest::StatusCode::UNAUTHORIZED => {
-                Err(Error::RequestUnauthorized)
-            }
+            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
             _ => Err(Error::RequestFailed {
                 status: res.status().as_u16(),
             }),
         }
     }
 
-    pub fn create_folder(
-        &self,
-        access_token: &str,
-        name: &str,
-    ) -> Result<String> {
-        let res = ClientBlockingRequest::CreateFolder(access_token, name)
-            .req(self)?;
+    pub fn create_folder(&self, access_token: &str, name: &str) -> Result<String> {
+        let res = ClientBlockingRequest::CreateFolder(access_token, name).req(self)?;
         match res.status() {
             reqwest::StatusCode::OK => {
                 let folders_res: FoldersResData = res.json_with_path()?;
                 Ok(folders_res.id)
             }
-            reqwest::StatusCode::UNAUTHORIZED => {
-                Err(Error::RequestUnauthorized)
-            }
+            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
             _ => Err(Error::RequestFailed {
                 status: res.status().as_u16(),
             }),
         }
     }
 
-    pub fn exchange_refresh_token(
-        &self,
-        refresh_token: &str,
-    ) -> Result<String> {
-        let res = ClientBlockingRequest::ExchangeRefreshToken(refresh_token)
-            .req(self)?;
+    pub fn exchange_refresh_token(&self, refresh_token: &str) -> Result<String> {
+        let res = ClientBlockingRequest::ExchangeRefreshToken(refresh_token).req(self)?;
         let connect_res: ConnectRefreshTokenRes = res.json_with_path()?;
         Ok(connect_res.access_token)
     }
 
-    pub async fn exchange_refresh_token_async(
-        &self,
-        refresh_token: &str,
-    ) -> Result<String> {
+    pub async fn exchange_refresh_token_async(&self, refresh_token: &str) -> Result<String> {
         let res = ClientRequest::ExchangeRefreshToken(refresh_token)
             .req(self)
             .await?;
-        let connect_res: ConnectRefreshTokenRes =
-            res.json_with_path().await?;
+        let connect_res: ConnectRefreshTokenRes = res.json_with_path().await?;
         Ok(connect_res.access_token)
     }
 
@@ -1708,14 +1567,9 @@ async fn start_sso_callback_server(
         .with_state(sso_handler_state);
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(sso_server_graceful_shutdown(
-            sender,
-            shut_receiver,
-        ))
+        .with_graceful_shutdown(sso_server_graceful_shutdown(sender, shut_receiver))
         .await
-        .map_err(|e| Error::FailedToProcessSSOCallback {
-            msg: e.to_string(),
-        })?;
+        .map_err(|e| Error::FailedToProcessSSOCallback { msg: e.to_string() })?;
 
     receiver.recv().await.unwrap()
 }
@@ -1728,33 +1582,37 @@ async fn sso_server_graceful_shutdown(
 }
 
 async fn handle_sso_callback(
-    axum::extract::State(state): axum::extract::State<
-        std::sync::Arc<SSOHandlerState>,
-    >,
-    axum::extract::Query(params): axum::extract::Query<
-        std::collections::HashMap<String, String>,
-    >,
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<SSOHandlerState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::http::Response<String> {
     match sso_query_code(&params, state.state.as_str()) {
         Ok(sso_code) => {
             state.sender.send(Ok(sso_code)).await.unwrap();
 
-            axum::http::Response::builder().status(axum::http::StatusCode::OK).
-            body(
-                "<html><head><title>Success | rbw</title></head><body> \
+            axum::http::Response::builder()
+                .status(axum::http::StatusCode::OK)
+                .body(
+                    "<html><head><title>Success | rbw</title></head><body> \
                   <h1>Successfully authenticated with rbw</h1> \
                   <p>You may now close this tab and return to the terminal.</p> \
-                  </body></html>".to_string()).unwrap()
+                  </body></html>"
+                        .to_string(),
+                )
+                .unwrap()
         }
         Err(e) => {
             state.sender.send(Err(e)).await.unwrap();
 
-            axum::http::Response::builder().status(axum::http::StatusCode::BAD_REQUEST).
-            body(
-                "<html><head><title>Failed | rbw</title></head><body> \
+            axum::http::Response::builder()
+                .status(axum::http::StatusCode::BAD_REQUEST)
+                .body(
+                    "<html><head><title>Failed | rbw</title></head><body> \
                   <h1>Something went wrong logging into the rbw</h1> \
                   <p>You may now close this tab and return to the terminal.</p> \
-                  </body></html>".to_string()).unwrap()
+                  </body></html>"
+                        .to_string(),
+                )
+                .unwrap()
         }
     }
 }
@@ -1763,23 +1621,23 @@ fn sso_query_code(
     params: &std::collections::HashMap<String, String>,
     state: &str,
 ) -> Result<String> {
-    let sso_code =
-        params
-            .get("code")
-            .ok_or(Error::FailedToProcessSSOCallback {
-                msg: "Could not obtain code from the URL".to_string(),
-            })?;
+    let sso_code = params
+        .get("code")
+        .ok_or(Error::FailedToProcessSSOCallback {
+            msg: "Could not obtain code from the URL".to_string(),
+        })?;
 
-    let received_state =
-        params
-            .get("state")
-            .ok_or(Error::FailedToProcessSSOCallback {
-                msg: "Could not obtain state from the URL".to_string(),
-            })?;
+    let received_state = params
+        .get("state")
+        .ok_or(Error::FailedToProcessSSOCallback {
+            msg: "Could not obtain state from the URL".to_string(),
+        })?;
 
     if received_state.split("_identifier=").next().unwrap() != state {
         return Err(Error::FailedToProcessSSOCallback {
-            msg: format!("SSO callback states do not match, sent: {state}, received: {received_state}"),
+            msg: format!(
+                "SSO callback states do not match, sent: {state}, received: {received_state}"
+            ),
         });
     }
 

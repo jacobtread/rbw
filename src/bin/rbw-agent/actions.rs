@@ -9,8 +9,7 @@ pub async fn register(
 
     if db.needs_login() {
         let url_str = config_base_url().await?;
-        let url = reqwest::Url::parse(&url_str)
-            .context("failed to parse base url")?;
+        let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
         let Some(host) = url.host_str() else {
             return Err(anyhow::anyhow!(
                 "couldn't find host in rbw base url {url_str}"
@@ -55,17 +54,12 @@ pub async fn register(
                 }
                 Err(rbw::error::Error::IncorrectPassword { message }) => {
                     if i == 3 {
-                        return Err(rbw::error::Error::IncorrectPassword {
-                            message,
-                        })
-                        .context("failed to log in to bitwarden instance");
+                        return Err(rbw::error::Error::IncorrectPassword { message })
+                            .context("failed to log in to bitwarden instance");
                     }
                     err_msg = Some(message);
                 }
-                Err(e) => {
-                    return Err(e)
-                        .context("failed to log in to bitwarden instance")
-                }
+                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
             }
         }
     }
@@ -84,8 +78,7 @@ pub async fn login(
 
     if db.needs_login() {
         let url_str = config_base_url().await?;
-        let url = reqwest::Url::parse(&url_str)
-            .context("failed to parse base url")?;
+        let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
         let Some(host) = url.host_str() else {
             return Err(anyhow::anyhow!(
                 "couldn't find host in rbw base url {url_str}"
@@ -113,9 +106,7 @@ pub async fn login(
             )
             .await
             .context("failed to read password from pinentry")?;
-            match rbw::actions::login(&email, password.clone(), None, None)
-                .await
-            {
+            match rbw::actions::login(&email, password.clone(), None, None).await {
                 Ok((
                     access_token,
                     refresh_token,
@@ -153,9 +144,7 @@ pub async fn login(
 
                     for provider in supported_types {
                         if providers.contains(&provider) {
-                            if provider
-                                == rbw::api::TwoFactorProviderType::Email
-                            {
+                            if provider == rbw::api::TwoFactorProviderType::Email {
                                 if let Some(sso_email_2fa_session_token) =
                                     sso_email_2fa_session_token
                                 {
@@ -174,13 +163,7 @@ pub async fn login(
                                 memory,
                                 parallelism,
                                 protected_key,
-                            ) = two_factor(
-                                environment,
-                                &email,
-                                password.clone(),
-                                provider,
-                            )
-                            .await?;
+                            ) = two_factor(environment, &email, password.clone(), provider).await?;
                             login_success(
                                 state.clone(),
                                 access_token,
@@ -204,17 +187,12 @@ pub async fn login(
                 }
                 Err(rbw::error::Error::IncorrectPassword { message }) => {
                     if i == 3 {
-                        return Err(rbw::error::Error::IncorrectPassword {
-                            message,
-                        })
-                        .context("failed to log in to bitwarden instance");
+                        return Err(rbw::error::Error::IncorrectPassword { message })
+                            .context("failed to log in to bitwarden instance");
                     }
                     err_msg = Some(message);
                 }
-                Err(e) => {
-                    return Err(e)
-                        .context("failed to log in to bitwarden instance")
-                }
+                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
             }
         }
     }
@@ -257,16 +235,8 @@ async fn two_factor(
         )
         .await
         .context("failed to read code from pinentry")?;
-        let code = std::str::from_utf8(code.password())
-            .context("code was not valid utf8")?;
-        match rbw::actions::login(
-            email,
-            password.clone(),
-            Some(code),
-            Some(provider),
-        )
-        .await
-        {
+        let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
+        match rbw::actions::login(email, password.clone(), Some(code), Some(provider)).await {
             Ok((
                 access_token,
                 refresh_token,
@@ -288,10 +258,8 @@ async fn two_factor(
             }
             Err(rbw::error::Error::IncorrectPassword { message }) => {
                 if i == 3 {
-                    return Err(rbw::error::Error::IncorrectPassword {
-                        message,
-                    })
-                    .context("failed to log in to bitwarden instance");
+                    return Err(rbw::error::Error::IncorrectPassword { message })
+                        .context("failed to log in to bitwarden instance");
                 }
                 err_msg = Some(message);
             }
@@ -299,17 +267,12 @@ async fn two_factor(
             Err(rbw::error::Error::TwoFactorRequired { .. }) => {
                 let message = "TOTP code is not a number".to_string();
                 if i == 3 {
-                    return Err(rbw::error::Error::IncorrectPassword {
-                        message,
-                    })
-                    .context("failed to log in to bitwarden instance");
+                    return Err(rbw::error::Error::IncorrectPassword { message })
+                        .context("failed to log in to bitwarden instance");
                 }
                 err_msg = Some(message);
             }
-            Err(e) => {
-                return Err(e)
-                    .context("failed to log in to bitwarden instance")
-            }
+            Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
         }
     }
 
@@ -383,18 +346,14 @@ async fn unlock_state(
         };
 
         let Some(iterations) = db.iterations else {
-            return Err(anyhow::anyhow!(
-                "failed to find number of iterations in db"
-            ));
+            return Err(anyhow::anyhow!("failed to find number of iterations in db"));
         };
 
         let memory = db.memory;
         let parallelism = db.parallelism;
 
         let Some(protected_key) = db.protected_key else {
-            return Err(anyhow::anyhow!(
-                "failed to find protected key in db"
-            ));
+            return Err(anyhow::anyhow!("failed to find protected key in db"));
         };
         let Some(protected_private_key) = db.protected_private_key else {
             return Err(anyhow::anyhow!(
@@ -416,10 +375,7 @@ async fn unlock_state(
             let password = rbw::pinentry::getpin(
                 &config_pinentry().await?,
                 "Master Password",
-                &format!(
-                    "Unlock the local database for '{}'",
-                    rbw::dirs::profile()
-                ),
+                &format!("Unlock the local database for '{}'", rbw::dirs::profile()),
                 err.as_deref(),
                 environment,
                 true,
@@ -443,10 +399,8 @@ async fn unlock_state(
                 }
                 Err(rbw::error::Error::IncorrectPassword { message }) => {
                     if i == 3 {
-                        return Err(rbw::error::Error::IncorrectPassword {
-                            message,
-                        })
-                        .context("failed to unlock database");
+                        return Err(rbw::error::Error::IncorrectPassword { message })
+                            .context("failed to unlock database");
                     }
                     err_msg = Some(message);
                 }
@@ -521,12 +475,10 @@ pub async fn sync(
     } else {
         return Err(anyhow::anyhow!("failed to find refresh token in db"));
     };
-    let (
-        access_token,
-        (protected_key, protected_private_key, protected_org_keys, entries),
-    ) = rbw::actions::sync(&access_token, &refresh_token)
-        .await
-        .context("failed to sync database from server")?;
+    let (access_token, (protected_key, protected_private_key, protected_org_keys, entries)) =
+        rbw::actions::sync(&access_token, &refresh_token)
+            .await
+            .context("failed to sync database from server")?;
     state.lock().await.set_master_password_reprompt(&entries);
     if let Some(access_token) = access_token {
         db.access_token = Some(access_token);
@@ -566,13 +518,12 @@ async fn decrypt_cipher(
         ));
     };
     let entry_key = if let Some(entry_key) = entry_key {
-        let key_cipherstring =
-            rbw::cipherstring::CipherString::new(entry_key)
-                .context("failed to parse individual item encryption key")?;
+        let key_cipherstring = rbw::cipherstring::CipherString::new(entry_key)
+            .context("failed to parse individual item encryption key")?;
         Some(rbw::locked::Keys::new(
-            key_cipherstring.decrypt_locked_symmetric(keys).context(
-                "failed to decrypt individual item encryption key",
-            )?,
+            key_cipherstring
+                .decrypt_locked_symmetric(keys)
+                .context("failed to decrypt individual item encryption key")?,
         ))
     } else {
         None
@@ -592,18 +543,14 @@ async fn decrypt_cipher(
         };
 
         let Some(iterations) = db.iterations else {
-            return Err(anyhow::anyhow!(
-                "failed to find number of iterations in db"
-            ));
+            return Err(anyhow::anyhow!("failed to find number of iterations in db"));
         };
 
         let memory = db.memory;
         let parallelism = db.parallelism;
 
         let Some(protected_key) = db.protected_key else {
-            return Err(anyhow::anyhow!(
-                "failed to find protected key in db"
-            ));
+            return Err(anyhow::anyhow!("failed to find protected key in db"));
         };
         let Some(protected_private_key) = db.protected_private_key else {
             return Err(anyhow::anyhow!(
@@ -648,10 +595,8 @@ async fn decrypt_cipher(
                 }
                 Err(rbw::error::Error::IncorrectPassword { message }) => {
                     if i == 3 {
-                        return Err(rbw::error::Error::IncorrectPassword {
-                            message,
-                        })
-                        .context("failed to unlock database");
+                        return Err(rbw::error::Error::IncorrectPassword { message })
+                            .context("failed to unlock database");
                     }
                     err_msg = Some(message);
                 }
@@ -680,9 +625,7 @@ pub async fn decrypt(
     entry_key: Option<&str>,
     org_id: Option<&str>,
 ) -> anyhow::Result<()> {
-    let plaintext =
-        decrypt_cipher(state, environment, cipherstring, entry_key, org_id)
-            .await?;
+    let plaintext = decrypt_cipher(state, environment, cipherstring, entry_key, org_id).await?;
     respond_decrypt(sock, plaintext).await?;
 
     Ok(())
@@ -700,11 +643,9 @@ pub async fn encrypt(
             "failed to find encryption keys in in-memory state"
         ));
     };
-    let cipherstring = rbw::cipherstring::CipherString::encrypt_symmetric(
-        keys,
-        plaintext.as_bytes(),
-    )
-    .context("failed to encrypt plaintext secret")?;
+    let cipherstring =
+        rbw::cipherstring::CipherString::encrypt_symmetric(keys, plaintext.as_bytes())
+            .context("failed to encrypt plaintext secret")?;
 
     respond_encrypt(sock, cipherstring.to_string()).await?;
 
@@ -719,9 +660,9 @@ pub async fn clipboard_store(
 ) -> anyhow::Result<()> {
     let mut state = state.lock().await;
     if let Some(clipboard) = &mut state.clipboard {
-        clipboard.set_text(text).map_err(|e| {
-            anyhow::anyhow!("couldn't store value to clipboard: {e}")
-        })?;
+        clipboard
+            .set_text(text)
+            .map_err(|e| anyhow::anyhow!("couldn't store value to clipboard: {e}"))?;
     }
 
     respond_ack(sock).await?;
@@ -758,20 +699,14 @@ async fn respond_ack(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn respond_decrypt(
-    sock: &mut crate::sock::Sock,
-    plaintext: String,
-) -> anyhow::Result<()> {
+async fn respond_decrypt(sock: &mut crate::sock::Sock, plaintext: String) -> anyhow::Result<()> {
     sock.send(&rbw::protocol::Response::Decrypt { plaintext })
         .await?;
 
     Ok(())
 }
 
-async fn respond_encrypt(
-    sock: &mut crate::sock::Sock,
-    cipherstring: String,
-) -> anyhow::Result<()> {
+async fn respond_encrypt(sock: &mut crate::sock::Sock, cipherstring: String) -> anyhow::Result<()> {
     sock.send(&rbw::protocol::Response::Encrypt { cipherstring })
         .await?;
 
@@ -829,10 +764,8 @@ pub async fn subscribe_to_notifications(
         .await
         .context("Config is missing")?;
     let email = config.email.clone().context("Config is missing email")?;
-    let db = rbw::db::Db::load_async(config.server_name().as_str(), &email)
-        .await?;
-    let access_token =
-        db.access_token.context("Error getting access token")?;
+    let db = rbw::db::Db::load_async(config.server_name().as_str(), &email).await?;
+    let access_token = db.access_token.context("Error getting access token")?;
 
     let websocket_url = format!(
         "{}/hub?access_token={}",
@@ -919,17 +852,14 @@ pub async fn find_ssh_private_key(
             )
             .await?;
             let public_key_bytes =
-                ssh_agent_lib::ssh_key::PublicKey::from_openssh(
-                    &public_key_plaintext,
-                )
-                .map_err(anyhow::Error::new)?
-                .to_bytes();
+                ssh_agent_lib::ssh_key::PublicKey::from_openssh(&public_key_plaintext)
+                    .map_err(anyhow::Error::new)?
+                    .to_bytes();
 
             if public_key_bytes == request_bytes {
-                let private_key_enc =
-                    private_key.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!("Matching entry has no private key")
-                    })?;
+                let private_key_enc = private_key
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Matching entry has no private key"))?;
 
                 let private_key_plaintext = decrypt_cipher(
                     state.clone(),
@@ -940,10 +870,8 @@ pub async fn find_ssh_private_key(
                 )
                 .await?;
 
-                return ssh_agent_lib::ssh_key::PrivateKey::from_openssh(
-                    private_key_plaintext,
-                )
-                .map_err(anyhow::Error::new);
+                return ssh_agent_lib::ssh_key::PrivateKey::from_openssh(private_key_plaintext)
+                    .map_err(anyhow::Error::new);
             }
         }
     }

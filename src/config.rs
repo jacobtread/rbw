@@ -67,11 +67,9 @@ impl Config {
 
     pub fn load() -> Result<Self> {
         let file = crate::dirs::config_file();
-        let mut fh = std::fs::File::open(&file).map_err(|source| {
-            Error::LoadConfig {
-                source,
-                file: file.clone(),
-            }
+        let mut fh = std::fs::File::open(&file).map_err(|source| Error::LoadConfig {
+            source,
+            file: file.clone(),
         })?;
         let mut json = String::new();
         fh.read_to_string(&mut json)
@@ -79,8 +77,8 @@ impl Config {
                 source,
                 file: file.clone(),
             })?;
-        let mut slf: Self = serde_json::from_str(&json)
-            .map_err(|source| Error::LoadConfigJson { source, file })?;
+        let mut slf: Self =
+            serde_json::from_str(&json).map_err(|source| Error::LoadConfigJson { source, file })?;
         if slf.lock_timeout == 0 {
             log::warn!("lock_timeout must be greater than 0");
             slf.lock_timeout = default_lock_timeout();
@@ -91,21 +89,21 @@ impl Config {
     pub async fn load_async() -> Result<Self> {
         let file = crate::dirs::config_file();
         let mut fh =
-            tokio::fs::File::open(&file).await.map_err(|source| {
-                Error::LoadConfigAsync {
+            tokio::fs::File::open(&file)
+                .await
+                .map_err(|source| Error::LoadConfigAsync {
                     source,
                     file: file.clone(),
-                }
-            })?;
+                })?;
         let mut json = String::new();
-        fh.read_to_string(&mut json).await.map_err(|source| {
-            Error::LoadConfigAsync {
+        fh.read_to_string(&mut json)
+            .await
+            .map_err(|source| Error::LoadConfigAsync {
                 source,
                 file: file.clone(),
-            }
-        })?;
-        let mut slf: Self = serde_json::from_str(&json)
-            .map_err(|source| Error::LoadConfigJson { source, file })?;
+            })?;
+        let mut slf: Self =
+            serde_json::from_str(&json).map_err(|source| Error::LoadConfigJson { source, file })?;
         if slf.lock_timeout == 0 {
             log::warn!("lock_timeout must be greater than 0");
             slf.lock_timeout = default_lock_timeout();
@@ -117,17 +115,13 @@ impl Config {
         let file = crate::dirs::config_file();
         // unwrap is safe here because Self::filename is explicitly
         // constructed as a filename in a directory
-        std::fs::create_dir_all(file.parent().unwrap()).map_err(
-            |source| Error::SaveConfig {
-                source,
-                file: file.clone(),
-            },
-        )?;
-        let mut fh = std::fs::File::create(&file).map_err(|source| {
-            Error::SaveConfig {
-                source,
-                file: file.clone(),
-            }
+        std::fs::create_dir_all(file.parent().unwrap()).map_err(|source| Error::SaveConfig {
+            source,
+            file: file.clone(),
+        })?;
+        let mut fh = std::fs::File::create(&file).map_err(|source| Error::SaveConfig {
+            source,
+            file: file.clone(),
         })?;
         fh.write_all(
             serde_json::to_string(self)
@@ -238,18 +232,18 @@ pub async fn device_id(config: &Config) -> Result<String> {
             || uuid::Uuid::new_v4().hyphenated().to_string(),
             String::to_string,
         );
-        let mut fh = tokio::fs::File::create(&file).await.map_err(|e| {
-            Error::LoadDeviceId {
+        let mut fh = tokio::fs::File::create(&file)
+            .await
+            .map_err(|e| Error::LoadDeviceId {
                 source: e,
                 file: file.clone(),
-            }
-        })?;
-        fh.write_all(id.as_bytes()).await.map_err(|e| {
-            Error::LoadDeviceId {
+            })?;
+        fh.write_all(id.as_bytes())
+            .await
+            .map_err(|e| Error::LoadDeviceId {
                 source: e,
                 file: file.clone(),
-            }
-        })?;
+            })?;
         Ok(id)
     }
 }
