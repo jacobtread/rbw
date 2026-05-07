@@ -178,7 +178,7 @@ pub fn edit(
     history: &[crate::db::HistoryEntry],
 ) -> Result<(Option<String>, ())> {
     with_exchange_refresh_token(access_token, refresh_token, |access_token| {
-        edit_once(
+        api_client()?.0.edit(
             access_token,
             id,
             org_id,
@@ -190,32 +190,6 @@ pub fn edit(
             history,
         )
     })
-}
-
-fn edit_once(
-    access_token: &str,
-    id: &str,
-    org_id: Option<&str>,
-    name: &str,
-    data: &crate::db::EntryData,
-    fields: &[crate::db::Field],
-    notes: Option<&str>,
-    folder_uuid: Option<&str>,
-    history: &[crate::db::HistoryEntry],
-) -> Result<()> {
-    let (client, _) = api_client()?;
-    client.edit(
-        access_token,
-        id,
-        org_id,
-        name,
-        data,
-        fields,
-        notes,
-        folder_uuid,
-        history,
-    )?;
-    Ok(())
 }
 
 pub fn remove(access_token: &str, refresh_token: &str, id: &str) -> Result<(Option<String>, ())> {
