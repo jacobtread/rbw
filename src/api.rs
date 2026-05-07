@@ -1547,7 +1547,7 @@ async fn start_sso_callback_server(
     listener: tokio::net::TcpListener,
     state: &str,
 ) -> Result<String> {
-    let (shut_tx, shut_rx) = mpsc::channel(1);
+    let (shut_tx, mut shut_rx) = mpsc::channel(1);
     let (tx, mut rx) = mpsc::channel(1);
 
     let sso_handler_state = Arc::new(SSOHandlerState {
@@ -1560,18 +1560,13 @@ async fn start_sso_callback_server(
         .with_state(sso_handler_state);
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(sso_server_graceful_shutdown(tx, shut_rx))
+        .with_graceful_shutdown(
+            async move { tx.send(shut_rx.recv().await.unwrap()).await.unwrap() },
+        )
         .await
         .map_err(|e| Error::FailedToProcessSSOCallback { msg: e.to_string() })?;
 
     rx.recv().await.unwrap()
-}
-
-async fn sso_server_graceful_shutdown(
-    sender: mpsc::Sender<Result<String>>,
-    mut receiver: mpsc::Receiver<Result<String>>,
-) {
-    sender.send(receiver.recv().await.unwrap()).await.unwrap();
 }
 
 async fn handle_sso_callback(
