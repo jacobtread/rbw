@@ -2,10 +2,19 @@
 // here, unfortunately
 #![allow(clippy::as_conversions)]
 
+use std::{
+    fmt::Display,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+};
+
 use crate::prelude::*;
 
 use rand::distr::SampleString as _;
+use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
+use tokio::sync::mpsc;
 
 use crate::json::{DeserializeJsonWithPath as _, DeserializeJsonWithPathAsync as _};
 
@@ -22,7 +31,7 @@ pub enum UriMatchType {
     Never = 5,
 }
 
-impl std::fmt::Display for UriMatchType {
+impl Display for UriMatchType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         #[allow(clippy::enum_glob_use)]
         use UriMatchType::*;
@@ -76,7 +85,7 @@ impl TwoFactorProviderType {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for TwoFactorProviderType {
+impl<'de> Deserialize<'de> for TwoFactorProviderType {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -108,7 +117,7 @@ impl<'de> serde::Deserialize<'de> for TwoFactorProviderType {
     }
 }
 
-impl std::convert::TryFrom<u64> for TwoFactorProviderType {
+impl TryFrom<u64> for TwoFactorProviderType {
     type Error = Error;
 
     fn try_from(ty: u64) -> Result<Self> {
@@ -128,7 +137,7 @@ impl std::convert::TryFrom<u64> for TwoFactorProviderType {
     }
 }
 
-impl std::str::FromStr for TwoFactorProviderType {
+impl FromStr for TwoFactorProviderType {
     type Err = Error;
 
     fn from_str(ty: &str) -> Result<Self> {
@@ -152,7 +161,7 @@ pub enum KdfType {
     Argon2id = 1,
 }
 
-impl<'de> serde::Deserialize<'de> for KdfType {
+impl<'de> Deserialize<'de> for KdfType {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -184,7 +193,7 @@ impl<'de> serde::Deserialize<'de> for KdfType {
     }
 }
 
-impl std::convert::TryFrom<u64> for KdfType {
+impl TryFrom<u64> for KdfType {
     type Error = Error;
 
     fn try_from(ty: u64) -> Result<Self> {
@@ -198,7 +207,7 @@ impl std::convert::TryFrom<u64> for KdfType {
     }
 }
 
-impl std::str::FromStr for KdfType {
+impl FromStr for KdfType {
     type Err = Error;
 
     fn from_str(ty: &str) -> Result<Self> {
@@ -210,7 +219,7 @@ impl std::str::FromStr for KdfType {
     }
 }
 
-impl serde::Serialize for KdfType {
+impl Serialize for KdfType {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -232,7 +241,7 @@ pub enum CipherRepromptType {
     Password = 1,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct PreloginRes {
     #[serde(rename = "Kdf", alias = "kdf")]
     kdf: KdfType,
@@ -244,7 +253,7 @@ struct PreloginRes {
     kdf_parallelism: Option<u32>,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct ConnectTokenReq {
     grant_type: String,
     scope: String,
@@ -265,7 +274,7 @@ struct ConnectTokenReq {
     auth: ConnectTokenAuth,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 #[serde(untagged)]
 enum ConnectTokenAuth {
     Password(ConnectTokenPassword),
@@ -273,26 +282,26 @@ enum ConnectTokenAuth {
     ClientCredentials(ConnectTokenClientCredentials),
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct ConnectTokenPassword {
     username: String,
     password: String,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct ConnectTokenAuthCode {
     code: String,
     code_verifier: String,
     redirect_uri: String,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct ConnectTokenClientCredentials {
     username: String,
     client_secret: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct ConnectTokenRes {
     access_token: String,
     refresh_token: String,
@@ -300,7 +309,7 @@ struct ConnectTokenRes {
     key: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct ConnectErrorRes {
     error: String,
     error_description: Option<String>,
@@ -368,18 +377,18 @@ impl TryFrom<ConnectErrorRes> for Error {
     }
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct ConnectErrorResErrorModel {
     #[serde(rename = "Message", alias = "message")]
     message: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct ConnectRefreshTokenRes {
     access_token: String,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct SendEmailLoginReq {
     email: String,
     #[serde(rename = "DeviceIdentifier", alias = "deviceIdentifier")]
@@ -388,7 +397,7 @@ struct SendEmailLoginReq {
     sso_email_2fa_session_token: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct SyncRes {
     #[serde(rename = "Ciphers", alias = "ciphers")]
     ciphers: Vec<SyncResCipher>,
@@ -398,7 +407,7 @@ struct SyncRes {
     folders: Vec<SyncResFolder>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct SyncResCipher {
     #[serde(rename = "Id", alias = "id")]
     id: String,
@@ -546,7 +555,7 @@ impl SyncResCipher {
     }
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct SyncResProfile {
     #[serde(rename = "Key", alias = "key")]
     key: String,
@@ -556,7 +565,7 @@ struct SyncResProfile {
     organizations: Vec<SyncResProfileOrganization>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct SyncResProfileOrganization {
     #[serde(rename = "Id", alias = "id")]
     id: String,
@@ -564,7 +573,7 @@ struct SyncResProfileOrganization {
     key: String,
 }
 
-#[derive(serde::Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 struct SyncResFolder {
     #[serde(rename = "Id", alias = "id")]
     id: String,
@@ -572,7 +581,7 @@ struct SyncResFolder {
     name: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherLogin {
     #[serde(rename = "Username", alias = "username")]
     username: Option<String>,
@@ -584,7 +593,7 @@ struct CipherLogin {
     uris: Option<Vec<CipherLoginUri>>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherLoginUri {
     #[serde(rename = "Uri", alias = "uri")]
     uri: Option<String>,
@@ -592,7 +601,7 @@ struct CipherLoginUri {
     match_type: Option<UriMatchType>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherCard {
     #[serde(rename = "CardholderName", alias = "cardholderName")]
     cardholder_name: Option<String>,
@@ -608,7 +617,7 @@ struct CipherCard {
     code: Option<String>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherIdentity {
     #[serde(rename = "Title", alias = "title")]
     title: Option<String>,
@@ -646,7 +655,7 @@ struct CipherIdentity {
     username: Option<String>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherSshKey {
     #[serde(rename = "PrivateKey", alias = "privateKey")]
     private_key: Option<String>,
@@ -701,7 +710,7 @@ pub enum LinkedIdType {
     IdentityFullName = 418,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherField {
     #[serde(rename = "Type", alias = "type")]
     ty: Option<FieldType>,
@@ -715,10 +724,10 @@ struct CipherField {
 
 // this is just a name and some notes, both of which are already on the cipher
 // object
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherSecureNote {}
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct SyncResPasswordHistory {
     #[serde(rename = "LastUsedDate", alias = "lastUsedDate")]
     last_used_date: String,
@@ -726,7 +735,7 @@ struct SyncResPasswordHistory {
     password: Option<String>,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct CiphersPostReq {
     #[serde(rename = "type")]
     ty: u32, // XXX what are the valid types?
@@ -741,7 +750,7 @@ struct CiphersPostReq {
     secure_note: Option<CipherSecureNote>,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct CiphersPutReq {
     #[serde(rename = "type")]
     ty: u32, // XXX what are the valid types?
@@ -761,7 +770,7 @@ struct CiphersPutReq {
     password_history: Vec<CiphersPutReqHistory>,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct CiphersPutReqHistory {
     #[serde(rename = "LastUsedDate")]
     last_used_date: String,
@@ -769,13 +778,13 @@ struct CiphersPutReqHistory {
     password: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct FoldersRes {
     #[serde(rename = "Data", alias = "data")]
     data: Vec<FoldersResData>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 struct FoldersResData {
     #[serde(rename = "Id", alias = "id")]
     id: String,
@@ -889,7 +898,7 @@ pub struct Client {
     base_url: String,
     identity_url: String,
     ui_url: String,
-    client_cert_path: Option<std::path::PathBuf>,
+    client_cert_path: Option<PathBuf>,
 }
 
 impl Client {
@@ -897,13 +906,13 @@ impl Client {
         base_url: &str,
         identity_url: &str,
         ui_url: &str,
-        client_cert_path: Option<&std::path::Path>,
+        client_cert_path: Option<&Path>,
     ) -> Self {
         Self {
             base_url: base_url.to_string(),
             identity_url: identity_url.to_string(),
             ui_url: ui_url.to_string(),
-            client_cert_path: client_cert_path.map(std::path::Path::to_path_buf),
+            client_cert_path: client_cert_path.map(Path::to_path_buf),
         }
     }
 
@@ -1540,19 +1549,19 @@ async fn find_free_port(bottom: u16, top: u16) -> Result<u16> {
 #[derive(Clone)]
 struct SSOHandlerState {
     state: String,
-    sender: tokio::sync::mpsc::Sender<Result<String>>,
+    sender: mpsc::Sender<Result<String>>,
 }
 
 async fn start_sso_callback_server(
     listener: tokio::net::TcpListener,
     state: &str,
 ) -> Result<String> {
-    let (shut_sender, shut_receiver) = tokio::sync::mpsc::channel(1);
-    let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+    let (shut_tx, shut_rx) = mpsc::channel(1);
+    let (tx, mut rx) = mpsc::channel(1);
 
-    let sso_handler_state = std::sync::Arc::new(SSOHandlerState {
+    let sso_handler_state = Arc::new(SSOHandlerState {
         state: state.to_string(),
-        sender: shut_sender,
+        sender: shut_tx,
     });
 
     let app = axum::Router::new()
@@ -1560,22 +1569,22 @@ async fn start_sso_callback_server(
         .with_state(sso_handler_state);
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(sso_server_graceful_shutdown(sender, shut_receiver))
+        .with_graceful_shutdown(sso_server_graceful_shutdown(tx, shut_rx))
         .await
         .map_err(|e| Error::FailedToProcessSSOCallback { msg: e.to_string() })?;
 
-    receiver.recv().await.unwrap()
+    rx.recv().await.unwrap()
 }
 
 async fn sso_server_graceful_shutdown(
-    sender: tokio::sync::mpsc::Sender<Result<String>>,
-    mut receiver: tokio::sync::mpsc::Receiver<Result<String>>,
+    sender: mpsc::Sender<Result<String>>,
+    mut receiver: mpsc::Receiver<Result<String>>,
 ) {
     sender.send(receiver.recv().await.unwrap()).await.unwrap();
 }
 
 async fn handle_sso_callback(
-    axum::extract::State(state): axum::extract::State<std::sync::Arc<SSOHandlerState>>,
+    axum::extract::State(state): axum::extract::State<Arc<SSOHandlerState>>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::http::Response<String> {
     match sso_query_code(&params, state.state.as_str()) {
