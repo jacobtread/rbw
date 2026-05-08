@@ -3,10 +3,7 @@
 #![allow(clippy::as_conversions)]
 
 use std::{
-    fmt::Display,
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::Arc,
+    collections::HashMap, fmt::Display, path::{Path, PathBuf}, str::FromStr, sync::Arc
 };
 
 use crate::prelude::*;
@@ -459,7 +456,7 @@ impl SyncResCipher {
                 username: login.username.clone(),
                 password: login.password.clone(),
                 totp: login.totp.clone(),
-                uris: login.uris.as_ref().map_or_else(std::vec::Vec::new, |uris| {
+                uris: login.uris.as_ref().map_or_else(Vec::new, |uris| {
                     uris.iter()
                         .filter_map(|uri| {
                             uri.uri.clone().map(|s| crate::db::Uri {
@@ -525,7 +522,7 @@ impl SyncResCipher {
             id: self.id.clone(),
             org_id: self.organization_id.clone(),
             folder,
-            folder_id: folder_id.map(std::string::ToString::to_string),
+            folder_id: folder_id.map(ToString::to_string),
             name: self.name.clone(),
             data,
             fields,
@@ -1255,7 +1252,7 @@ impl Client {
     ) -> Result<(
         String,
         String,
-        std::collections::HashMap<String, String>,
+        HashMap<String, String>,
         Vec<crate::db::Entry>,
     )> {
         let res = ClientRequest::Sync(access_token).req(self).await?;
@@ -1297,9 +1294,9 @@ impl Client {
         folder_id: Option<&str>,
     ) -> Result<()> {
         let req = CiphersPostReq {
-            folder_id: folder_id.map(std::string::ToString::to_string),
+            folder_id: folder_id.map(ToString::to_string),
             name: name.to_string(),
-            notes: notes.map(std::string::ToString::to_string),
+            notes: notes.map(ToString::to_string),
             data: EntryDataWire(data),
         };
 
@@ -1327,10 +1324,10 @@ impl Client {
         history: &[crate::db::HistoryEntry],
     ) -> Result<()> {
         let req = CiphersPutReq {
-            folder_id: folder_uuid.map(std::string::ToString::to_string),
-            organization_id: org_id.map(std::string::ToString::to_string),
+            folder_id: folder_uuid.map(ToString::to_string),
+            organization_id: org_id.map(ToString::to_string),
             name: name.to_string(),
-            notes: notes.map(std::string::ToString::to_string),
+            notes: notes.map(ToString::to_string),
             data: EntryDataWire(data),
             fields: fields
                 .iter()
@@ -1476,7 +1473,7 @@ async fn start_sso_callback_server(
 
 async fn handle_sso_callback(
     axum::extract::State(state): axum::extract::State<Arc<SSOHandlerState>>,
-    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> axum::http::Response<String> {
     match sso_query_code(&params, state.state.as_str()) {
         Ok(sso_code) => {
@@ -1511,7 +1508,7 @@ async fn handle_sso_callback(
 }
 
 fn sso_query_code(
-    params: &std::collections::HashMap<String, String>,
+    params: &HashMap<String, String>,
     state: &str,
 ) -> Result<String> {
     let sso_code = params
