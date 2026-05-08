@@ -379,15 +379,6 @@ struct ConnectRefreshTokenRes {
     access_token: String,
 }
 
-#[derive(Serialize, Debug)]
-struct SendEmailLoginReq {
-    email: String,
-    #[serde(rename = "DeviceIdentifier", alias = "deviceIdentifier")]
-    device_identifier: String,
-    #[serde(rename = "SsoEmail2faSessionToken", alias = "ssoEmail2faSessionToken")]
-    sso_email_2fa_session_token: String,
-}
-
 #[derive(Deserialize, Debug)]
 struct SyncRes {
     #[serde(rename = "Ciphers", alias = "ciphers")]
@@ -899,7 +890,7 @@ enum ClientRequest<'a> {
     Prelogin(&'a str),
     ConnectToken(ConnectTokenReq),
     Login(ConnectTokenReq, &'a str),
-    SendEmailLogin(SendEmailLoginReq, &'a str),
+    SendEmailLogin(&'a str, &'a str, &'a str),
     Sync(&'a str),
     ExchangeRefreshToken(&'a str),
 }
@@ -919,10 +910,16 @@ impl<'a> ClientRequest<'a> {
                 .post(client.identity_url("/connect/token"))
                 .form(&r)
                 .header("auth-email", crate::base64::encode_url_safe_no_pad(email)),
-            Self::SendEmailLogin(r, email) => http_client
-                .post(client.api_url("/two-factor/send-email-login"))
-                .json(&r)
-                .header("auth-email", crate::base64::encode_url_safe_no_pad(email)),
+            Self::SendEmailLogin(email, device_identifier, sso_email_2fa_session_token) => {
+                http_client
+                    .post(client.api_url("/two-factor/send-email-login"))
+                    .json(&serde_json::json!({
+                        "email": email,
+                        "DeviceIdentifier": device_identifier,
+                        "SsoEmail2faSessionToken": sso_email_2fa_session_token
+                    }))
+                    .header("auth-email", crate::base64::encode_url_safe_no_pad(email))
+            }
             Self::Sync(access_token) => http_client
                 .get(client.api_url("/sync"))
                 .header("Authorization", format!("Bearer {access_token}"))
@@ -1196,16 +1193,9 @@ impl Client {
         device_id: &str,
         sso_email_2fa_session_token: &str,
     ) -> Result<()> {
-        let res = ClientRequest::SendEmailLogin(
-            SendEmailLoginReq {
-                email: email.to_string(),
-                device_identifier: device_id.to_string(),
-                sso_email_2fa_session_token: sso_email_2fa_session_token.to_string(),
-            },
-            email,
-        )
-        .req(self)
-        .await?;
+        let res = ClientRequest::SendEmailLogin(email, device_id, sso_email_2fa_session_token)
+            .req(self)
+            .await?;
 
         if res.status() == reqwest::StatusCode::OK {
             Ok(())
