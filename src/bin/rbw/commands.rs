@@ -1,4 +1,12 @@
-use std::{fmt::Write as _, io::Write as _, os::unix::ffi::OsStrExt as _};
+use std::{
+    collections::HashMap,
+    fmt::{Display, Write as _},
+    io::Write as _,
+    os::unix::ffi::OsStrExt as _,
+    path::PathBuf,
+    str::FromStr,
+    time::SystemTime,
+};
 
 use anyhow::Context as _;
 
@@ -23,7 +31,7 @@ pub enum Needle {
     Uuid(uuid::Uuid, String),
 }
 
-impl std::fmt::Display for Needle {
+impl Display for Needle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match &self {
             Self::Name(name) => name.clone(),
@@ -86,7 +94,7 @@ enum Field {
     LastName,
 }
 
-impl std::str::FromStr for Field {
+impl FromStr for Field {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -172,7 +180,7 @@ impl Field {
     }
 }
 
-impl std::fmt::Display for Field {
+impl Display for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
@@ -1121,7 +1129,7 @@ impl ListField {
     }
 }
 
-impl std::convert::TryFrom<&String> for ListField {
+impl TryFrom<&String> for ListField {
     type Error = anyhow::Error;
 
     fn try_from(s: &String) -> anyhow::Result<Self> {
@@ -1168,7 +1176,7 @@ pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
             config.notifications_url = Some(value.to_string());
         }
         "client_cert_path" => {
-            config.client_cert_path = Some(std::path::PathBuf::from(value.to_string()));
+            config.client_cert_path = Some(PathBuf::from(value.to_string()));
         }
         "lock_timeout" => {
             let timeout = value
@@ -1283,7 +1291,7 @@ pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
     } else {
         fields
             .iter()
-            .map(std::convert::TryFrom::try_from)
+            .map(TryFrom::try_from)
             .collect::<anyhow::Result<_>>()?
     };
 
@@ -1359,15 +1367,15 @@ fn print_entry_list(
                     ListField::Name => entry
                         .name
                         .as_ref()
-                        .map_or_else(String::new, std::string::ToString::to_string),
+                        .map_or_else(String::new, ToString::to_string),
                     ListField::User => entry
                         .user
                         .as_ref()
-                        .map_or_else(String::new, std::string::ToString::to_string),
+                        .map_or_else(String::new, ToString::to_string),
                     ListField::Folder => entry
                         .folder
                         .as_ref()
-                        .map_or_else(String::new, std::string::ToString::to_string),
+                        .map_or_else(String::new, ToString::to_string),
                     ListField::Uri => {
                         // "uri" is not listed in the TryFrom
                         // implementation, so there's no way to try to
@@ -1379,7 +1387,7 @@ fn print_entry_list(
                     ListField::EntryType => entry
                         .entry_type
                         .as_ref()
-                        .map_or_else(String::new, std::string::ToString::to_string),
+                        .map_or_else(String::new, ToString::to_string),
                 })
                 .collect();
 
@@ -1406,7 +1414,7 @@ pub fn search(
     } else {
         fields
             .iter()
-            .map(std::convert::TryFrom::try_from)
+            .map(TryFrom::try_from)
             .collect::<anyhow::Result<_>>()?
     };
 
@@ -1424,7 +1432,7 @@ pub fn search(
                 .map(|entry| entry.search_match(term, folder))
                 .unwrap_or(true)
         })
-        .map(|entry| entry.map(std::convert::Into::into))
+        .map(|entry| entry.map(Into::into))
         .collect::<Result<_, anyhow::Error>>()?;
     entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
@@ -1706,10 +1714,7 @@ pub fn edit(
 
             if let Some(prev_password) = entry_password.clone() {
                 let new_history_entry = rbw::db::HistoryEntry {
-                    last_used_date: format!(
-                        "{}",
-                        humantime::format_rfc3339(std::time::SystemTime::now())
-                    ),
+                    last_used_date: format!("{}", humantime::format_rfc3339(SystemTime::now())),
                     password: prev_password,
                 };
                 history.insert(0, new_history_entry);
@@ -2478,7 +2483,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
 fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
     let mut lines = contents.lines();
 
-    let password = lines.next().map(std::string::ToString::to_string);
+    let password = lines.next().map(ToString::to_string);
 
     let mut notes: String = lines
         .skip_while(|line| line.is_empty())
@@ -2554,7 +2559,7 @@ fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
                     return Err(anyhow::anyhow!("totp secret url must have totp host"));
                 }
 
-                let query: std::collections::HashMap<_, _> = u.query_pairs().collect();
+                let query: HashMap<_, _> = u.query_pairs().collect();
 
                 let secret = decode_totp_secret(
                     query
@@ -2563,7 +2568,7 @@ fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
                 )?;
                 let algorithm = query
                     .get("algorithm")
-                    .map_or_else(|| String::from("SHA1"), std::string::ToString::to_string);
+                    .map_or_else(|| String::from("SHA1"), ToString::to_string);
                 let digits = match query.get("digits") {
                     Some(dig) => dig.parse::<usize>().map_err(|_| {
                         anyhow::anyhow!("digits parameter in totp url must be a valid integer.")
@@ -3768,9 +3773,9 @@ mod test {
             DecryptedSearchCipher {
                 id: id.to_string(),
                 entry_type: "Login".to_string(),
-                folder: folder.map(std::string::ToString::to_string),
+                folder: folder.map(ToString::to_string),
                 name: name.to_string(),
-                user: username.map(std::string::ToString::to_string),
+                user: username.map(ToString::to_string),
                 uris: uris
                     .iter()
                     .map(|(uri, match_type)| ((*uri).to_string(), *match_type))
