@@ -394,6 +394,244 @@ impl DecryptedCipher {
         val_display_or_store(clipboard, &short)
     }
 
+    fn get_field(&self, field: &str) -> Option<String> {
+        let ret = match &self.data {
+            DecryptedData::Login {
+                username,
+                totp,
+                uris,
+                ..
+            } => match field.parse() {
+                Ok(Field::Notes) => &self.notes,
+                Ok(Field::Username) => username,
+
+                Ok(Field::Totp) => {
+                    if let Some(totp) = totp {
+                        match generate_totp(totp) {
+                            Ok(code) => {
+                                &Some(code)
+
+                                // val_display_or_store(clipboard, &code);
+                            }
+                            Err(e) => {
+                                eprintln!("{e}");
+                                &None
+                            }
+                        }
+                    } else {
+                        &None
+                    }
+                }
+                Ok(Field::Uris) => {
+                    if let Some(uris) = uris {
+                        let uri_strs: Vec<_> = uris.iter().map(|uri| uri.uri.clone()).collect();
+                        // val_display_or_store(clipboard, &uri_strs.join("\n"));
+                        &Some(uri_strs.join("\n"))
+                    } else {
+                        &None
+                    }
+                }
+                Ok(Field::Password) => {
+                    // self.display_short(desc, clipboard);
+                    &self.get_short()
+                }
+                _ => {
+                    let x: Vec<String> = self
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            if let Some(name) = &f.name {
+                                if name.to_lowercase().contains(field) {
+                                    f.clone().value.unwrap_or("".to_string())
+                                } else {
+                                    "".to_string()
+                                }
+                            } else {
+                                "".to_string()
+                            }
+                        })
+                        .collect();
+
+                    &Some(x.join("\n"))
+                    // for f in &self.fields {
+                    //     if let Some(name) = &f.name {
+                    //         if name.to_lowercase().as_str().contains(field) {
+                    //             val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
+                    //             break;
+                    //         }
+                    //     }
+                    // }
+                }
+            },
+            DecryptedData::Card {
+                cardholder_name,
+                brand,
+                exp_month,
+                exp_year,
+                code,
+                ..
+            } => match field.parse() {
+                Ok(Field::CardNumber) => &self.get_short(),
+                Ok(Field::Expiration) => {
+                    if let (Some(month), Some(year)) = (exp_month, exp_year) {
+                        &Some(format!("{month}/{year}"))
+                        //val_display_or_store(clipboard, &format!("{month}/{year}"));
+                    } else {
+                        &None
+                    }
+                }
+                Ok(Field::ExpMonth) => &exp_month,
+                Ok(Field::ExpYear) => &exp_year,
+                Ok(Field::Cvv) => &code,
+                Ok(Field::Name | Field::Cardholder) => &cardholder_name,
+                Ok(Field::Brand) => &brand,
+                Ok(Field::Notes) => &self.notes,
+                _ => {
+                    let x: Vec<String> = self
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            if let Some(name) = &f.name {
+                                if name.to_lowercase().contains(field) {
+                                    f.clone().value.unwrap_or("".to_string())
+                                } else {
+                                    "".to_string()
+                                }
+                            } else {
+                                "".to_string()
+                            }
+                        })
+                        .collect();
+
+                    &Some(x.join("\n"))
+                }
+            },
+            DecryptedData::Identity {
+                address1,
+                address2,
+                address3,
+                city,
+                state,
+                postal_code,
+                country,
+                phone,
+                email,
+                ssn,
+                license_number,
+                passport_number,
+                username,
+                ..
+            } => match field.parse() {
+                Ok(Field::Name) => &self.get_short(),
+                Ok(Field::Email) => &email,
+                Ok(Field::Address) => {
+                    let mut strs = vec![];
+
+                    if let Some(address1) = address1 {
+                        strs.push(address1.clone());
+                    }
+                    if let Some(address2) = address2 {
+                        strs.push(address2.clone());
+                    }
+                    if let Some(address3) = address3 {
+                        strs.push(address3.clone());
+                    }
+
+                    if !strs.is_empty() {
+                        &Some(strs.join("\n"))
+                        //val_display_or_store(clipboard, &strs.join("\n"));
+                    } else {
+                        &None
+                    }
+                }
+                Ok(Field::City) => &city,
+                Ok(Field::State) => &state,
+                Ok(Field::PostalCode) => &postal_code,
+                Ok(Field::Country) => &country,
+                Ok(Field::Phone) => &phone,
+                Ok(Field::Ssn) => &ssn,
+                Ok(Field::License) => &license_number,
+                Ok(Field::Passport) => &passport_number,
+                Ok(Field::Username) => &username,
+                Ok(Field::Notes) => &self.notes,
+                _ => {
+                    let x: Vec<String> = self
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            if let Some(name) = &f.name {
+                                if name.to_lowercase().contains(field) {
+                                    f.clone().value.unwrap_or("".to_string())
+                                } else {
+                                    "".to_string()
+                                }
+                            } else {
+                                "".to_string()
+                            }
+                        })
+                        .collect();
+
+                    &Some(x.join("\n"))
+                }
+            },
+
+            DecryptedData::SecureNote => match field.parse() {
+                Ok(Field::Notes) => &self.get_short(),
+                _ => {
+                    let x: Vec<String> = self
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            if let Some(name) = &f.name {
+                                if name.to_lowercase().contains(field) {
+                                    f.clone().value.unwrap_or("".to_string())
+                                } else {
+                                    "".to_string()
+                                }
+                            } else {
+                                "".to_string()
+                            }
+                        })
+                        .collect();
+
+                    &Some(x.join("\n"))
+                }
+            },
+
+            DecryptedData::SshKey {
+                fingerprint,
+                private_key,
+                ..
+            } => match field.parse() {
+                Ok(Field::Fingerprint) => &fingerprint,
+                Ok(Field::PublicKey) => &self.get_short(),
+                Ok(Field::PrivateKey) => &private_key,
+                Ok(Field::Notes) => &self.notes,
+                _ => {
+                    let x: Vec<String> = self
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            if let Some(name) = &f.name {
+                                if name.to_lowercase().contains(field) {
+                                    f.clone().value.unwrap_or("".to_string())
+                                } else {
+                                    "".to_string()
+                                }
+                            } else {
+                                "".to_string()
+                            }
+                        })
+                        .collect();
+
+                    &Some(x.join("\n"))
+                }
+            },
+        };
+
+        ret.clone()
+    }
+
     fn display_field(&self, desc: &str, field: &str, clipboard: bool) {
         let field = field.to_lowercase();
         let field = field.as_str();
