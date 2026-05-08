@@ -682,13 +682,6 @@ impl DecryptedCipher {
                         clipboard,
                     );
                 }
-
-                if let Some(notes) = &self.notes {
-                    if displayed {
-                        println!();
-                    }
-                    println!("{notes}");
-                }
             }
             DecryptedData::Card {
                 cardholder_name,
@@ -705,13 +698,6 @@ impl DecryptedCipher {
                 displayed |= display_field("CVV", code.as_deref(), clipboard);
                 displayed |= display_field("Name", cardholder_name.as_deref(), clipboard);
                 displayed |= display_field("Brand", brand.as_deref(), clipboard);
-
-                if let Some(notes) = &self.notes {
-                    if displayed {
-                        println!();
-                    }
-                    println!("{notes}");
-                }
             }
             DecryptedData::Identity {
                 address1,
@@ -742,13 +728,6 @@ impl DecryptedCipher {
                 displayed |= display_field("License", license_number.as_deref(), clipboard);
                 displayed |= display_field("Passport", passport_number.as_deref(), clipboard);
                 displayed |= display_field("Username", username.as_deref(), clipboard);
-
-                if let Some(notes) = &self.notes {
-                    if displayed {
-                        println!();
-                    }
-                    println!("{notes}");
-                }
             }
             DecryptedData::SecureNote => {}
             DecryptedData::SshKey { fingerprint, .. } => {
@@ -761,13 +740,15 @@ impl DecryptedCipher {
                         clipboard,
                     );
                 }
+            }
+        }
 
-                if let Some(notes) = &self.notes {
-                    if displayed {
-                        println!();
-                    }
-                    println!("{notes}");
+        if !matches!(&self.data, DecryptedData::SecureNote) {
+            if let Some(notes) = &self.notes {
+                if displayed {
+                    println!();
                 }
+                println!("{notes}");
             }
         }
     }
