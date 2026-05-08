@@ -345,22 +345,10 @@ struct DecryptedCipher {
 }
 
 impl DecryptedCipher {
-    fn display_short(&self, desc: &str, clipboard: bool) -> bool {
+    fn get_short(&self) -> Option<String> {
         match &self.data {
-            DecryptedData::Login { password, .. } => password.as_ref().map_or_else(
-                || {
-                    eprintln!("entry for '{desc}' had no password");
-                    false
-                },
-                |password| val_display_or_store(clipboard, password),
-            ),
-            DecryptedData::Card { number, .. } => number.as_ref().map_or_else(
-                || {
-                    eprintln!("entry for '{desc}' had no card number");
-                    false
-                },
-                |number| val_display_or_store(clipboard, number),
-            ),
+            DecryptedData::Login { password, .. } => password.clone(),
+            DecryptedData::Card { number, .. } => number.clone(),
             DecryptedData::Identity {
                 title,
                 first_name,
@@ -368,34 +356,42 @@ impl DecryptedCipher {
                 last_name,
                 ..
             } => {
-                let names: Vec<_> = [title, first_name, middle_name, last_name]
+                let names: Vec<String> = [title, first_name, middle_name, last_name]
                     .iter()
                     .copied()
                     .flatten()
                     .cloned()
                     .collect();
+
                 if names.is_empty() {
-                    eprintln!("entry for '{desc}' had no name");
-                    false
+                    None
                 } else {
-                    val_display_or_store(clipboard, &names.join(" "))
+                    Some(names.join(" "))
                 }
             }
-            DecryptedData::SecureNote => self.notes.as_ref().map_or_else(
-                || {
-                    eprintln!("entry for '{desc}' had no notes");
-                    false
-                },
-                |notes| val_display_or_store(clipboard, notes),
-            ),
-            DecryptedData::SshKey { public_key, .. } => public_key.as_ref().map_or_else(
-                || {
-                    eprintln!("entry for '{desc}' had no public key");
-                    false
-                },
-                |public_key| val_display_or_store(clipboard, public_key),
-            ),
+            DecryptedData::SecureNote => self.notes.clone(),
+            DecryptedData::SshKey { public_key, .. } => public_key.clone(),
         }
+    }
+
+    fn display_short(&self, desc: &str, clipboard: bool) -> bool {
+        let short = self.get_short();
+        let Some(short) = short else {
+            // Would be cool if self.data had a method named main_field_name :D
+            eprintln!(
+                "entry for '{desc}' had no {}",
+                match &self.data {
+                    DecryptedData::Login { .. } => "password",
+                    DecryptedData::Card { .. } => "card number",
+                    DecryptedData::Identity { .. } => "name",
+                    DecryptedData::SecureNote => "notes",
+                    DecryptedData::SshKey { .. } => "public key",
+                }
+            );
+            return false;
+        };
+
+        val_display_or_store(clipboard, &short)
     }
 
     fn display_field(&self, desc: &str, field: &str, clipboard: bool) {
@@ -660,6 +656,7 @@ impl DecryptedCipher {
     }
 
     fn display_long(&self, desc: &str, clipboard: bool) {
+        let mut displayed = self.display_short(desc, clipboard);
         match &self.data {
             DecryptedData::Login {
                 username,
@@ -667,7 +664,6 @@ impl DecryptedCipher {
                 uris,
                 ..
             } => {
-                let mut displayed = self.display_short(desc, clipboard);
                 displayed |= display_field("Username", username.as_deref(), clipboard);
                 displayed |= display_field("TOTP Secret", totp.as_deref(), clipboard);
 
@@ -702,9 +698,6 @@ impl DecryptedCipher {
                 code,
                 ..
             } => {
-                let mut displayed = false;
-
-                displayed |= self.display_short(desc, clipboard);
                 if let (Some(exp_month), Some(exp_year)) = (exp_month, exp_year) {
                     println!("Expiration: {exp_month}/{exp_year}");
                     displayed = true;
@@ -736,8 +729,6 @@ impl DecryptedCipher {
                 username,
                 ..
             } => {
-                let mut displayed = self.display_short(desc, clipboard);
-
                 displayed |= display_field("Address", address1.as_deref(), clipboard);
                 displayed |= display_field("Address", address2.as_deref(), clipboard);
                 displayed |= display_field("Address", address3.as_deref(), clipboard);
@@ -759,11 +750,8 @@ impl DecryptedCipher {
                     println!("{notes}");
                 }
             }
-            DecryptedData::SecureNote => {
-                self.display_short(desc, clipboard);
-            }
+            DecryptedData::SecureNote => {}
             DecryptedData::SshKey { fingerprint, .. } => {
-                let mut displayed = self.display_short(desc, clipboard);
                 displayed |= display_field("Fingerprint", fingerprint.as_deref(), clipboard);
 
                 for field in &self.fields {
@@ -1332,12 +1320,23 @@ pub fn get(
         decrypted.display_fields_list();
     } else if raw {
         decrypted.display_json(&desc)?;
-    } else if full {
-        decrypted.display_long(&desc, clipboard);
-    } else if let Some(field) = field {
-        decrypted.display_field(&desc, field, clipboard);
     } else {
-        decrypted.display_short(&desc, clipboard);
+        // if clipboard {
+        //     match clipboard_store(password) {
+        //         Ok(()) => true,
+        //         Err(e) => {
+        //             eprintln!("{e}");
+        //             false
+        //         }
+        //     }
+        // }
+        if full {
+            decrypted.display_long(&desc, clipboard);
+        } else if let Some(field) = field {
+            decrypted.display_field(&desc, field, clipboard);
+        } else {
+            decrypted.display_short(&desc, clipboard);
+        }
     }
 
     Ok(())
