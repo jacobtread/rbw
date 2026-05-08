@@ -139,50 +139,44 @@ impl FromStr for Field {
     }
 }
 
-impl Field {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Notes => "notes",
-            Self::Username => "username",
-            Self::Password => "password",
-            Self::Totp => "totp",
-            Self::Uris => "uris",
-            Self::IdentityName => "identityname",
-            Self::City => "city",
-            Self::State => "state",
-            Self::PostalCode => "postcode",
-            Self::Country => "country",
-            Self::Phone => "phone",
-            Self::Ssn => "ssn",
-            Self::License => "license",
-            Self::Passport => "passport",
-            Self::CardNumber => "number",
-            Self::Expiration => "exp",
-            Self::ExpMonth => "exp_month",
-            Self::ExpYear => "exp_year",
-            Self::Cvv => "cvv",
-            Self::Cardholder => "cardholder",
-            Self::Brand => "brand",
-            Self::Name => "name",
-            Self::Email => "email",
-            Self::Address1 => "address1",
-            Self::Address2 => "address2",
-            Self::Address3 => "address3",
-            Self::Address => "address",
-            Self::Fingerprint => "fingerprint",
-            Self::PublicKey => "public_key",
-            Self::PrivateKey => "private_key",
-            Self::Title => "title",
-            Self::FirstName => "first_name",
-            Self::MiddleName => "middle_name",
-            Self::LastName => "last_name",
-        }
-    }
-}
-
 impl Display for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        match self {
+            Self::Notes => f.write_str("notes"),
+            Self::Username => f.write_str("username"),
+            Self::Password => f.write_str("password"),
+            Self::Totp => f.write_str("totp"),
+            Self::Uris => f.write_str("uris"),
+            Self::IdentityName => f.write_str("identityname"),
+            Self::City => f.write_str("city"),
+            Self::State => f.write_str("state"),
+            Self::PostalCode => f.write_str("postcode"),
+            Self::Country => f.write_str("country"),
+            Self::Phone => f.write_str("phone"),
+            Self::Ssn => f.write_str("ssn"),
+            Self::License => f.write_str("license"),
+            Self::Passport => f.write_str("passport"),
+            Self::CardNumber => f.write_str("number"),
+            Self::Expiration => f.write_str("exp"),
+            Self::ExpMonth => f.write_str("exp_month"),
+            Self::ExpYear => f.write_str("exp_year"),
+            Self::Cvv => f.write_str("cvv"),
+            Self::Cardholder => f.write_str("cardholder"),
+            Self::Brand => f.write_str("brand"),
+            Self::Name => f.write_str("name"),
+            Self::Email => f.write_str("email"),
+            Self::Address1 => f.write_str("address1"),
+            Self::Address2 => f.write_str("address2"),
+            Self::Address3 => f.write_str("address3"),
+            Self::Address => f.write_str("address"),
+            Self::Fingerprint => f.write_str("fingerprint"),
+            Self::PublicKey => f.write_str("public_key"),
+            Self::PrivateKey => f.write_str("private_key"),
+            Self::Title => f.write_str("title"),
+            Self::FirstName => f.write_str("first_name"),
+            Self::MiddleName => f.write_str("middle_name"),
+            Self::LastName => f.write_str("last_name"),
+        }
     }
 }
 
