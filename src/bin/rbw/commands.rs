@@ -394,65 +394,64 @@ impl DecryptedCipher {
         val_display_or_store(clipboard, &short)
     }
 
-    fn get_field(&self, field: &str) -> Option<String> {
-        let ret = match &self.data {
+    /// This function is sh*t but I need it for now
+    fn get_fields(&self, field: &str) -> Vec<String> {
+        let ret: Vec<Option<String>> = match &self.data {
             DecryptedData::Login {
                 username,
                 totp,
                 uris,
                 ..
             } => match field.parse() {
-                Ok(Field::Notes) => &self.notes,
-                Ok(Field::Username) => username,
+                Ok(Field::Notes) => vec![self.notes.clone()],
+                Ok(Field::Username) => vec![username.clone()],
 
                 Ok(Field::Totp) => {
                     if let Some(totp) = totp {
                         match generate_totp(totp) {
                             Ok(code) => {
-                                &Some(code)
+                                vec![Some(code)]
 
                                 // val_display_or_store(clipboard, &code);
                             }
                             Err(e) => {
                                 eprintln!("{e}");
-                                &None
+                                vec![]
                             }
                         }
                     } else {
-                        &None
+                        vec![]
                     }
                 }
                 Ok(Field::Uris) => {
                     if let Some(uris) = uris {
                         let uri_strs: Vec<_> = uris.iter().map(|uri| uri.uri.clone()).collect();
                         // val_display_or_store(clipboard, &uri_strs.join("\n"));
-                        &Some(uri_strs.join("\n"))
+                        vec![Some(uri_strs.join("\n"))]
                     } else {
-                        &None
+                        vec![]
                     }
                 }
                 Ok(Field::Password) => {
                     // self.display_short(desc, clipboard);
-                    &self.get_short()
+                    vec![self.get_short()]
                 }
                 _ => {
-                    let x: Vec<String> = self
-                        .fields
+                    self.fields
                         .iter()
                         .map(|f| {
                             if let Some(name) = &f.name {
                                 if name.to_lowercase().contains(field) {
-                                    f.clone().value.unwrap_or("".to_string())
+                                    f.value.clone()
                                 } else {
-                                    "".to_string()
+                                    None
                                 }
                             } else {
-                                "".to_string()
+                                None
                             }
                         })
-                        .collect();
+                        .collect()
 
-                    &Some(x.join("\n"))
                     // for f in &self.fields {
                     //     if let Some(name) = &f.name {
                     //         if name.to_lowercase().as_str().contains(field) {
@@ -471,40 +470,36 @@ impl DecryptedCipher {
                 code,
                 ..
             } => match field.parse() {
-                Ok(Field::CardNumber) => &self.get_short(),
+                Ok(Field::CardNumber) => vec![self.get_short()],
                 Ok(Field::Expiration) => {
                     if let (Some(month), Some(year)) = (exp_month, exp_year) {
-                        &Some(format!("{month}/{year}"))
+                        vec![Some(format!("{month}/{year}"))]
                         //val_display_or_store(clipboard, &format!("{month}/{year}"));
                     } else {
-                        &None
+                        vec![]
                     }
                 }
-                Ok(Field::ExpMonth) => &exp_month,
-                Ok(Field::ExpYear) => &exp_year,
-                Ok(Field::Cvv) => &code,
-                Ok(Field::Name | Field::Cardholder) => &cardholder_name,
-                Ok(Field::Brand) => &brand,
-                Ok(Field::Notes) => &self.notes,
-                _ => {
-                    let x: Vec<String> = self
-                        .fields
-                        .iter()
-                        .map(|f| {
-                            if let Some(name) = &f.name {
-                                if name.to_lowercase().contains(field) {
-                                    f.clone().value.unwrap_or("".to_string())
-                                } else {
-                                    "".to_string()
-                                }
+                Ok(Field::ExpMonth) => vec![exp_month.clone()],
+                Ok(Field::ExpYear) => vec![exp_year.clone()],
+                Ok(Field::Cvv) => vec![code.clone()],
+                Ok(Field::Name | Field::Cardholder) => vec![cardholder_name.clone()],
+                Ok(Field::Brand) => vec![brand.clone()],
+                Ok(Field::Notes) => vec![self.notes.clone()],
+                _ => self
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        if let Some(name) = &f.name {
+                            if name.to_lowercase().contains(field) {
+                                f.value.clone()
                             } else {
-                                "".to_string()
+                                None
                             }
-                        })
-                        .collect();
-
-                    &Some(x.join("\n"))
-                }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
             },
             DecryptedData::Identity {
                 address1,
@@ -522,8 +517,8 @@ impl DecryptedCipher {
                 username,
                 ..
             } => match field.parse() {
-                Ok(Field::Name) => &self.get_short(),
-                Ok(Field::Email) => &email,
+                Ok(Field::Name) => vec![self.get_short()],
+                Ok(Field::Email) => vec![email.clone()],
                 Ok(Field::Address) => {
                     let mut strs = vec![];
 
@@ -538,64 +533,56 @@ impl DecryptedCipher {
                     }
 
                     if !strs.is_empty() {
-                        &Some(strs.join("\n"))
+                        vec![Some(strs.join("\n"))]
                         //val_display_or_store(clipboard, &strs.join("\n"));
                     } else {
-                        &None
+                        vec![]
                     }
                 }
-                Ok(Field::City) => &city,
-                Ok(Field::State) => &state,
-                Ok(Field::PostalCode) => &postal_code,
-                Ok(Field::Country) => &country,
-                Ok(Field::Phone) => &phone,
-                Ok(Field::Ssn) => &ssn,
-                Ok(Field::License) => &license_number,
-                Ok(Field::Passport) => &passport_number,
-                Ok(Field::Username) => &username,
-                Ok(Field::Notes) => &self.notes,
-                _ => {
-                    let x: Vec<String> = self
-                        .fields
-                        .iter()
-                        .map(|f| {
-                            if let Some(name) = &f.name {
-                                if name.to_lowercase().contains(field) {
-                                    f.clone().value.unwrap_or("".to_string())
-                                } else {
-                                    "".to_string()
-                                }
+                Ok(Field::City) => vec![city.clone()],
+                Ok(Field::State) => vec![state.clone()],
+                Ok(Field::PostalCode) => vec![postal_code.clone()],
+                Ok(Field::Country) => vec![country.clone()],
+                Ok(Field::Phone) => vec![phone.clone()],
+                Ok(Field::Ssn) => vec![ssn.clone()],
+                Ok(Field::License) => vec![license_number.clone()],
+                Ok(Field::Passport) => vec![passport_number.clone()],
+                Ok(Field::Username) => vec![username.clone()],
+                Ok(Field::Notes) => vec![self.notes.clone()],
+                _ => self
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        if let Some(name) = &f.name {
+                            if name.to_lowercase().contains(field) {
+                                f.value.clone()
                             } else {
-                                "".to_string()
+                                None
                             }
-                        })
-                        .collect();
-
-                    &Some(x.join("\n"))
-                }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
             },
 
             DecryptedData::SecureNote => match field.parse() {
-                Ok(Field::Notes) => &self.get_short(),
-                _ => {
-                    let x: Vec<String> = self
-                        .fields
-                        .iter()
-                        .map(|f| {
-                            if let Some(name) = &f.name {
-                                if name.to_lowercase().contains(field) {
-                                    f.clone().value.unwrap_or("".to_string())
-                                } else {
-                                    "".to_string()
-                                }
+                Ok(Field::Notes) => vec![self.get_short()],
+                _ => self
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        if let Some(name) = &f.name {
+                            if name.to_lowercase().contains(field) {
+                                f.value.clone()
                             } else {
-                                "".to_string()
+                                None
                             }
-                        })
-                        .collect();
-
-                    &Some(x.join("\n"))
-                }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
             },
 
             DecryptedData::SshKey {
@@ -603,294 +590,38 @@ impl DecryptedCipher {
                 private_key,
                 ..
             } => match field.parse() {
-                Ok(Field::Fingerprint) => &fingerprint,
-                Ok(Field::PublicKey) => &self.get_short(),
-                Ok(Field::PrivateKey) => &private_key,
-                Ok(Field::Notes) => &self.notes,
-                _ => {
-                    let x: Vec<String> = self
-                        .fields
-                        .iter()
-                        .map(|f| {
-                            if let Some(name) = &f.name {
-                                if name.to_lowercase().contains(field) {
-                                    f.clone().value.unwrap_or("".to_string())
-                                } else {
-                                    "".to_string()
-                                }
+                Ok(Field::Fingerprint) => vec![fingerprint.clone()],
+                Ok(Field::PublicKey) => vec![self.get_short()],
+                Ok(Field::PrivateKey) => vec![private_key.clone()],
+                Ok(Field::Notes) => vec![self.notes.clone()],
+                _ => self
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        if let Some(name) = &f.name {
+                            if name.to_lowercase().contains(field) {
+                                f.value.clone()
                             } else {
-                                "".to_string()
+                                None
                             }
-                        })
-                        .collect();
-
-                    &Some(x.join("\n"))
-                }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
             },
         };
 
-        ret.clone()
+        ret.into_iter().flatten().collect()
     }
 
     fn display_field(&self, desc: &str, field: &str, clipboard: bool) {
         let field = field.to_lowercase();
         let field = field.as_str();
-        match &self.data {
-            DecryptedData::Login {
-                username,
-                totp,
-                uris,
-                ..
-            } => match field.parse() {
-                Ok(Field::Notes) => {
-                    if let Some(notes) = &self.notes {
-                        val_display_or_store(clipboard, notes);
-                    }
-                }
-                Ok(Field::Username) => {
-                    if let Some(username) = &username {
-                        val_display_or_store(clipboard, username);
-                    }
-                }
-                Ok(Field::Totp) => {
-                    if let Some(totp) = totp {
-                        match generate_totp(totp) {
-                            Ok(code) => {
-                                val_display_or_store(clipboard, &code);
-                            }
-                            Err(e) => {
-                                eprintln!("{e}");
-                            }
-                        }
-                    }
-                }
-                Ok(Field::Uris) => {
-                    if let Some(uris) = uris {
-                        let uri_strs: Vec<_> = uris.iter().map(|uri| uri.uri.clone()).collect();
-                        val_display_or_store(clipboard, &uri_strs.join("\n"));
-                    }
-                }
-                Ok(Field::Password) => {
-                    self.display_short(desc, clipboard);
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-            DecryptedData::Card {
-                cardholder_name,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-                ..
-            } => match field.parse() {
-                Ok(Field::CardNumber) => {
-                    self.display_short(desc, clipboard);
-                }
-                Ok(Field::Expiration) => {
-                    if let (Some(month), Some(year)) = (exp_month, exp_year) {
-                        val_display_or_store(clipboard, &format!("{month}/{year}"));
-                    }
-                }
-                Ok(Field::ExpMonth) => {
-                    if let Some(exp_month) = exp_month {
-                        val_display_or_store(clipboard, exp_month);
-                    }
-                }
-                Ok(Field::ExpYear) => {
-                    if let Some(exp_year) = exp_year {
-                        val_display_or_store(clipboard, exp_year);
-                    }
-                }
-                Ok(Field::Cvv) => {
-                    if let Some(code) = code {
-                        val_display_or_store(clipboard, code);
-                    }
-                }
-                Ok(Field::Name | Field::Cardholder) => {
-                    if let Some(cardholder_name) = cardholder_name {
-                        val_display_or_store(clipboard, cardholder_name);
-                    }
-                }
-                Ok(Field::Brand) => {
-                    if let Some(brand) = brand {
-                        val_display_or_store(clipboard, brand);
-                    }
-                }
-                Ok(Field::Notes) => {
-                    if let Some(notes) = &self.notes {
-                        val_display_or_store(clipboard, notes);
-                    }
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-            DecryptedData::Identity {
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-                ..
-            } => match field.parse() {
-                Ok(Field::Name) => {
-                    self.display_short(desc, clipboard);
-                }
-                Ok(Field::Email) => {
-                    if let Some(email) = email {
-                        val_display_or_store(clipboard, email);
-                    }
-                }
-                Ok(Field::Address) => {
-                    let mut strs = vec![];
-                    if let Some(address1) = address1 {
-                        strs.push(address1.clone());
-                    }
-                    if let Some(address2) = address2 {
-                        strs.push(address2.clone());
-                    }
-                    if let Some(address3) = address3 {
-                        strs.push(address3.clone());
-                    }
-                    if !strs.is_empty() {
-                        val_display_or_store(clipboard, &strs.join("\n"));
-                    }
-                }
-                Ok(Field::City) => {
-                    if let Some(city) = city {
-                        val_display_or_store(clipboard, city);
-                    }
-                }
-                Ok(Field::State) => {
-                    if let Some(state) = state {
-                        val_display_or_store(clipboard, state);
-                    }
-                }
-                Ok(Field::PostalCode) => {
-                    if let Some(postal_code) = postal_code {
-                        val_display_or_store(clipboard, postal_code);
-                    }
-                }
-                Ok(Field::Country) => {
-                    if let Some(country) = country {
-                        val_display_or_store(clipboard, country);
-                    }
-                }
-                Ok(Field::Phone) => {
-                    if let Some(phone) = phone {
-                        val_display_or_store(clipboard, phone);
-                    }
-                }
-                Ok(Field::Ssn) => {
-                    if let Some(ssn) = ssn {
-                        val_display_or_store(clipboard, ssn);
-                    }
-                }
-                Ok(Field::License) => {
-                    if let Some(license_number) = license_number {
-                        val_display_or_store(clipboard, license_number);
-                    }
-                }
-                Ok(Field::Passport) => {
-                    if let Some(passport_number) = passport_number {
-                        val_display_or_store(clipboard, passport_number);
-                    }
-                }
-                Ok(Field::Username) => {
-                    if let Some(username) = username {
-                        val_display_or_store(clipboard, username);
-                    }
-                }
-                Ok(Field::Notes) => {
-                    if let Some(notes) = &self.notes {
-                        val_display_or_store(clipboard, notes);
-                    }
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-            DecryptedData::SecureNote => match field.parse() {
-                Ok(Field::Notes) => {
-                    self.display_short(desc, clipboard);
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-            DecryptedData::SshKey {
-                fingerprint,
-                private_key,
-                ..
-            } => match field.parse() {
-                Ok(Field::Fingerprint) => {
-                    if let Some(fingerprint) = fingerprint {
-                        val_display_or_store(clipboard, fingerprint);
-                    }
-                }
-                Ok(Field::PublicKey) => {
-                    self.display_short(desc, clipboard);
-                }
-                Ok(Field::PrivateKey) => {
-                    if let Some(private_key) = private_key {
-                        val_display_or_store(clipboard, private_key);
-                    }
-                }
-                Ok(Field::Notes) => {
-                    if let Some(notes) = &self.notes {
-                        val_display_or_store(clipboard, notes);
-                    }
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-        }
+        let fields = self.get_fields(field);
+        fields.iter().for_each(|f| {
+            val_display_or_store(clipboard, f);
+        });
     }
 
     fn display_long(&self, desc: &str, clipboard: bool) {
