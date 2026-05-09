@@ -1355,7 +1355,7 @@ fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSear
     })
 }
 
-fn decrypt_fields(
+fn decrypt_cipher_fields(
     fields: &[rbw::db::Field],
     key: Option<&str>,
     org_id: Option<&str>,
@@ -1397,7 +1397,8 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
         }
     };
 
-    let fields = decrypt_fields(&entry.fields, entry.key.as_deref(), entry.org_id.as_deref())?;
+    let fields =
+        decrypt_cipher_fields(&entry.fields, entry.key.as_deref(), entry.org_id.as_deref())?;
 
     let notes = entry
         .notes
