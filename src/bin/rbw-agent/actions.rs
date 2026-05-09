@@ -569,6 +569,7 @@ async fn decrypt_cipher(
             } else {
                 None
             };
+            // TODO: Remember somewhere that only GUI pinentry work, since this is a daemon.
             let password = rbw::pinentry::getpin(
                 &config_pinentry().await?,
                 "Master Password",
