@@ -333,13 +333,67 @@ impl From<DecryptedSearchCipher> for DecryptedListCipher {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(untagged)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
+enum DecryptedData {
+    Login {
+        username: Option<String>,
+        password: Option<String>,
+        totp: Option<String>,
+        uris: Option<Vec<DecryptedUri>>,
+    },
+    Card {
+        cardholder_name: Option<String>,
+        number: Option<String>,
+        brand: Option<String>,
+        exp_month: Option<String>,
+        exp_year: Option<String>,
+        code: Option<String>,
+    },
+    Identity {
+        title: Option<String>,
+        first_name: Option<String>,
+        middle_name: Option<String>,
+        last_name: Option<String>,
+        address1: Option<String>,
+        address2: Option<String>,
+        address3: Option<String>,
+        city: Option<String>,
+        state: Option<String>,
+        postal_code: Option<String>,
+        country: Option<String>,
+        phone: Option<String>,
+        email: Option<String>,
+        ssn: Option<String>,
+        license_number: Option<String>,
+        passport_number: Option<String>,
+        username: Option<String>,
+    },
+    SecureNote,
+    SshKey {
+        public_key: Option<String>,
+        fingerprint: Option<String>,
+        private_key: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
+struct DecryptedField {
+    name: Option<String>,
+    value: Option<String>,
+    #[serde(serialize_with = "serialize_field_type", rename = "type")]
+    ty: Option<rbw::api::FieldType>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(test, derive(Eq, PartialEq))]
 struct DecryptedCipher {
     id: String,
     folder: Option<String>,
     name: String,
     data: DecryptedData,
-    fields: Vec<DecryptedField>,
+    custom_fields: Vec<DecryptedField>,
     notes: Option<String>,
     history: Vec<DecryptedHistoryEntry>,
 }
@@ -437,7 +491,7 @@ impl DecryptedCipher {
                     vec![self.get_short()]
                 }
                 _ => {
-                    self.fields
+                    self.custom_fields
                         .iter()
                         .map(|f| {
                             if let Some(name) = &f.name {
@@ -486,7 +540,7 @@ impl DecryptedCipher {
                 Ok(Field::Brand) => vec![brand.clone()],
                 Ok(Field::Notes) => vec![self.notes.clone()],
                 _ => self
-                    .fields
+                    .custom_fields
                     .iter()
                     .map(|f| {
                         if let Some(name) = &f.name {
@@ -550,7 +604,7 @@ impl DecryptedCipher {
                 Ok(Field::Username) => vec![username.clone()],
                 Ok(Field::Notes) => vec![self.notes.clone()],
                 _ => self
-                    .fields
+                    .custom_fields
                     .iter()
                     .map(|f| {
                         if let Some(name) = &f.name {
@@ -569,7 +623,7 @@ impl DecryptedCipher {
             DecryptedData::SecureNote => match field.parse() {
                 Ok(Field::Notes) => vec![self.get_short()],
                 _ => self
-                    .fields
+                    .custom_fields
                     .iter()
                     .map(|f| {
                         if let Some(name) = &f.name {
@@ -595,7 +649,7 @@ impl DecryptedCipher {
                 Ok(Field::PrivateKey) => vec![private_key.clone()],
                 Ok(Field::Notes) => vec![self.notes.clone()],
                 _ => self
-                    .fields
+                    .custom_fields
                     .iter()
                     .map(|f| {
                         if let Some(name) = &f.name {
@@ -642,7 +696,7 @@ impl DecryptedCipher {
                     }
                 }
 
-                for field in &self.fields {
+                for field in &self.custom_fields {
                     displayed |= display_field(
                         field.name.as_deref().unwrap_or("(null)"),
                         Some(field.value.as_deref().unwrap_or("")),
@@ -700,7 +754,7 @@ impl DecryptedCipher {
             DecryptedData::SshKey { fingerprint, .. } => {
                 displayed |= display_field("Fingerprint", fingerprint.as_deref(), clipboard);
 
-                for field in &self.fields {
+                for field in &self.custom_fields {
                     displayed |= display_field(
                         field.name.as_deref().unwrap_or("(null)"),
                         Some(field.value.as_deref().unwrap_or("")),
@@ -853,7 +907,7 @@ impl DecryptedCipher {
         if self.notes.is_some() {
             println!("{}", Field::Notes);
         }
-        for f in &self.fields {
+        for f in &self.custom_fields {
             if let Some(name) = &f.name {
                 println!("{name}");
             }
@@ -882,60 +936,6 @@ fn val_display_or_store(clipboard: bool, password: &str) -> bool {
         println!("{password}");
         true
     }
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(untagged)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-enum DecryptedData {
-    Login {
-        username: Option<String>,
-        password: Option<String>,
-        totp: Option<String>,
-        uris: Option<Vec<DecryptedUri>>,
-    },
-    Card {
-        cardholder_name: Option<String>,
-        number: Option<String>,
-        brand: Option<String>,
-        exp_month: Option<String>,
-        exp_year: Option<String>,
-        code: Option<String>,
-    },
-    Identity {
-        title: Option<String>,
-        first_name: Option<String>,
-        middle_name: Option<String>,
-        last_name: Option<String>,
-        address1: Option<String>,
-        address2: Option<String>,
-        address3: Option<String>,
-        city: Option<String>,
-        state: Option<String>,
-        postal_code: Option<String>,
-        country: Option<String>,
-        phone: Option<String>,
-        email: Option<String>,
-        ssn: Option<String>,
-        license_number: Option<String>,
-        passport_number: Option<String>,
-        username: Option<String>,
-    },
-    SecureNote,
-    SshKey {
-        public_key: Option<String>,
-        fingerprint: Option<String>,
-        private_key: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedField {
-    name: Option<String>,
-    value: Option<String>,
-    #[serde(serialize_with = "serialize_field_type", rename = "type")]
-    ty: Option<rbw::api::FieldType>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref, clippy::ref_option)]
@@ -2415,7 +2415,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
         folder,
         name: crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?,
         data,
-        fields,
+        custom_fields: fields,
         notes,
         history,
     })
