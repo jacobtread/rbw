@@ -1179,25 +1179,6 @@ fn find_entry_raw(
     }
 }
 
-fn decrypt_field(
-    name: rbw::db::FieldType,
-    field: Option<&str>,
-    entry_key: Option<&str>,
-    org_id: Option<&str>,
-) -> Option<String> {
-    let field = field
-        .as_ref()
-        .map(|field| crate::actions::decrypt(field, entry_key, org_id))
-        .transpose();
-    match field {
-        Ok(field) => field,
-        Err(e) => {
-            log::warn!("failed to decrypt {name}: {e}");
-            None
-        }
-    }
-}
-
 fn decrypt_list_cipher(
     entry: &rbw::db::Entry,
     fields: &[ListField],
@@ -1353,6 +1334,25 @@ fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSear
         fields,
         notes,
     })
+}
+
+fn decrypt_field(
+    name: rbw::db::FieldType,
+    field: Option<&str>,
+    entry_key: Option<&str>,
+    org_id: Option<&str>,
+) -> Option<String> {
+    let field = field
+        .as_ref()
+        .map(|field| crate::actions::decrypt(field, entry_key, org_id))
+        .transpose();
+    match field {
+        Ok(field) => field,
+        Err(e) => {
+            log::warn!("failed to decrypt {name}: {e}");
+            None
+        }
+    }
 }
 
 fn decrypt_cipher_fields(
