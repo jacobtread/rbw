@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::Context as _;
+use rbw::db::{EntryData, Uri};
 
 // The default number of seconds the generated TOTP
 // code lasts for before a new one must be generated
@@ -332,78 +333,35 @@ impl From<DecryptedSearchCipher> for DecryptedListCipher {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(untagged)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-enum DecryptedData {
-    Login {
-        username: Option<String>,
-        password: Option<String>,
-        totp: Option<String>,
-        uris: Option<Vec<DecryptedUri>>,
-    },
-    Card {
-        cardholder_name: Option<String>,
-        number: Option<String>,
-        brand: Option<String>,
-        exp_month: Option<String>,
-        exp_year: Option<String>,
-        code: Option<String>,
-    },
-    Identity {
-        title: Option<String>,
-        first_name: Option<String>,
-        middle_name: Option<String>,
-        last_name: Option<String>,
-        address1: Option<String>,
-        address2: Option<String>,
-        address3: Option<String>,
-        city: Option<String>,
-        state: Option<String>,
-        postal_code: Option<String>,
-        country: Option<String>,
-        phone: Option<String>,
-        email: Option<String>,
-        ssn: Option<String>,
-        license_number: Option<String>,
-        passport_number: Option<String>,
-        username: Option<String>,
-    },
-    SecureNote,
-    SshKey {
-        public_key: Option<String>,
-        fingerprint: Option<String>,
-        private_key: Option<String>,
-    },
-}
-
+/// Custom field of each Record.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedField {
+struct CustomField {
     name: Option<String>,
     value: Option<String>,
     #[serde(serialize_with = "serialize_field_type", rename = "type")]
     ty: Option<rbw::api::FieldType>,
 }
 
+/// Structure that represents a decrypted entry.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedCipher {
+struct LocalEntry {
     id: String,
     folder: Option<String>,
     name: String,
-    data: DecryptedData,
-    custom_fields: Vec<DecryptedField>,
+    data: EntryData,
+    custom_fields: Vec<CustomField>,
     notes: Option<String>,
     history: Vec<DecryptedHistoryEntry>,
 }
 
-impl DecryptedCipher {
+impl LocalEntry {
     fn get_short(&self) -> Option<String> {
         match &self.data {
-            DecryptedData::Login { password, .. } => password.clone(),
-            DecryptedData::Card { number, .. } => number.clone(),
-            DecryptedData::Identity {
+            EntryData::Login { password, .. } => password.clone(),
+            EntryData::Card { number, .. } => number.clone(),
+            EntryData::Identity {
                 title,
                 first_name,
                 middle_name,
@@ -423,8 +381,8 @@ impl DecryptedCipher {
                     Some(names.join(" "))
                 }
             }
-            DecryptedData::SecureNote => self.notes.clone(),
-            DecryptedData::SshKey { public_key, .. } => public_key.clone(),
+            EntryData::SecureNote => self.notes.clone(),
+            EntryData::SshKey { public_key, .. } => public_key.clone(),
         }
     }
 
@@ -435,11 +393,11 @@ impl DecryptedCipher {
             eprintln!(
                 "entry for '{desc}' had no {}",
                 match &self.data {
-                    DecryptedData::Login { .. } => "password",
-                    DecryptedData::Card { .. } => "card number",
-                    DecryptedData::Identity { .. } => "name",
-                    DecryptedData::SecureNote => "notes",
-                    DecryptedData::SshKey { .. } => "public key",
+                    EntryData::Login { .. } => "password",
+                    EntryData::Card { .. } => "card number",
+                    EntryData::Identity { .. } => "name",
+                    EntryData::SecureNote => "notes",
+                    EntryData::SshKey { .. } => "public key",
                 }
             );
             return false;
@@ -451,7 +409,7 @@ impl DecryptedCipher {
     /// This function is sh*t but I need it for now
     fn get_fields(&self, field: &str) -> Vec<String> {
         let ret: Vec<Option<String>> = match &self.data {
-            DecryptedData::Login {
+            EntryData::Login {
                 username,
                 totp,
                 uris,
@@ -478,7 +436,7 @@ impl DecryptedCipher {
                     }
                 }
                 Ok(Field::Uris) => {
-                    if let Some(uris) = uris {
+                    if !uris.is_empty() {
                         let uri_strs: Vec<_> = uris.iter().map(|uri| uri.uri.clone()).collect();
                         // val_display_or_store(clipboard, &uri_strs.join("\n"));
                         vec![Some(uri_strs.join("\n"))]
@@ -516,7 +474,7 @@ impl DecryptedCipher {
                     // }
                 }
             },
-            DecryptedData::Card {
+            EntryData::Card {
                 cardholder_name,
                 brand,
                 exp_month,
@@ -555,7 +513,7 @@ impl DecryptedCipher {
                     })
                     .collect(),
             },
-            DecryptedData::Identity {
+            EntryData::Identity {
                 address1,
                 address2,
                 address3,
@@ -620,7 +578,7 @@ impl DecryptedCipher {
                     .collect(),
             },
 
-            DecryptedData::SecureNote => match field.parse() {
+            EntryData::SecureNote => match field.parse() {
                 Ok(Field::Notes) => vec![self.get_short()],
                 _ => self
                     .custom_fields
@@ -639,7 +597,7 @@ impl DecryptedCipher {
                     .collect(),
             },
 
-            DecryptedData::SshKey {
+            EntryData::SshKey {
                 fingerprint,
                 private_key,
                 ..
@@ -679,7 +637,7 @@ impl DecryptedCipher {
     fn display_long(&self, desc: &str, clipboard: bool) {
         let mut displayed = self.display_short(desc, clipboard);
         match &self.data {
-            DecryptedData::Login {
+            EntryData::Login {
                 username,
                 totp,
                 uris,
@@ -688,12 +646,10 @@ impl DecryptedCipher {
                 displayed |= display_field("Username", username.as_deref(), clipboard);
                 displayed |= display_field("TOTP Secret", totp.as_deref(), clipboard);
 
-                if let Some(uris) = uris {
-                    for uri in uris {
-                        displayed |= display_field("URI", Some(&uri.uri), clipboard);
-                        let match_type = uri.match_type.map(|ty| format!("{ty}"));
-                        displayed |= display_field("Match type", match_type.as_deref(), clipboard);
-                    }
+                for uri in uris {
+                    displayed |= display_field("URI", Some(&uri.uri), clipboard);
+                    let match_type = uri.match_type.map(|ty| format!("{ty}"));
+                    displayed |= display_field("Match type", match_type.as_deref(), clipboard);
                 }
 
                 for field in &self.custom_fields {
@@ -704,7 +660,7 @@ impl DecryptedCipher {
                     );
                 }
             }
-            DecryptedData::Card {
+            EntryData::Card {
                 cardholder_name,
                 brand,
                 exp_month,
@@ -720,7 +676,7 @@ impl DecryptedCipher {
                 displayed |= display_field("Name", cardholder_name.as_deref(), clipboard);
                 displayed |= display_field("Brand", brand.as_deref(), clipboard);
             }
-            DecryptedData::Identity {
+            EntryData::Identity {
                 address1,
                 address2,
                 address3,
@@ -750,8 +706,8 @@ impl DecryptedCipher {
                 displayed |= display_field("Passport", passport_number.as_deref(), clipboard);
                 displayed |= display_field("Username", username.as_deref(), clipboard);
             }
-            DecryptedData::SecureNote => {}
-            DecryptedData::SshKey { fingerprint, .. } => {
+            EntryData::SecureNote => {}
+            EntryData::SshKey { fingerprint, .. } => {
                 displayed |= display_field("Fingerprint", fingerprint.as_deref(), clipboard);
 
                 for field in &self.custom_fields {
@@ -764,7 +720,7 @@ impl DecryptedCipher {
             }
         }
 
-        if !matches!(&self.data, DecryptedData::SecureNote) {
+        if !matches!(&self.data, EntryData::SecureNote) {
             if let Some(notes) = &self.notes {
                 if displayed {
                     println!();
@@ -777,7 +733,7 @@ impl DecryptedCipher {
     /// This implementation mirror the `fn display_fied` method on which field to list
     fn display_fields_list(&self) {
         match &self.data {
-            DecryptedData::Login {
+            EntryData::Login {
                 username,
                 password,
                 totp,
@@ -790,14 +746,14 @@ impl DecryptedCipher {
                 if totp.is_some() {
                     println!("{}", Field::Totp);
                 }
-                if uris.is_some() {
+                if !uris.is_empty() {
                     println!("{}", Field::Uris);
                 }
                 if password.is_some() {
                     println!("{}", Field::Password);
                 }
             }
-            DecryptedData::Card {
+            EntryData::Card {
                 cardholder_name,
                 number,
                 brand,
@@ -826,7 +782,7 @@ impl DecryptedCipher {
                 }
             }
 
-            DecryptedData::Identity {
+            EntryData::Identity {
                 address1,
                 address2,
                 address3,
@@ -889,8 +845,8 @@ impl DecryptedCipher {
                 }
             }
 
-            DecryptedData::SecureNote => (), // handled at the end
-            DecryptedData::SshKey {
+            EntryData::SecureNote => (), // handled at the end
+            EntryData::SshKey {
                 fingerprint,
                 public_key,
                 ..
@@ -965,13 +921,6 @@ where
 struct DecryptedHistoryEntry {
     last_used_date: String,
     password: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedUri {
-    uri: String,
-    match_type: Option<rbw::api::UriMatchType>,
 }
 
 fn matches_url(
@@ -1402,7 +1351,7 @@ pub fn code(
     let (_, decrypted) = find_entry(&db, needle, user, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
-    if let DecryptedData::Login { totp, .. } = decrypted.data {
+    if let EntryData::Login { totp, .. } = decrypted.data {
         if let Some(totp) = totp {
             val_display_or_store(clipboard, &generate_totp(&totp)?);
         } else {
@@ -1627,7 +1576,7 @@ pub fn edit(
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     let (data, fields, notes, history) = match &decrypted.data {
-        DecryptedData::Login { password, .. } => {
+        EntryData::Login { password, .. } => {
             let mut contents = format!("{}\n", password.as_deref().unwrap_or(""));
             if let Some(notes) = decrypted.notes {
                 write!(contents, "\n{notes}\n").unwrap();
@@ -1669,7 +1618,7 @@ pub fn edit(
             };
             (data, entry.fields, notes, history)
         }
-        DecryptedData::SecureNote => {
+        EntryData::SecureNote => {
             let data = rbw::db::EntryData::SecureNote {};
 
             let editor_content = decrypted
@@ -1851,7 +1800,7 @@ fn find_entry(
     username: Option<&str>,
     folder: Option<&str>,
     ignore_case: bool,
-) -> anyhow::Result<(rbw::db::Entry, DecryptedCipher)> {
+) -> anyhow::Result<(rbw::db::Entry, LocalEntry)> {
     if let Needle::Uuid(uuid, s) = needle {
         for cipher in &db.entries {
             if uuid::Uuid::parse_str(&cipher.id) == Ok(uuid) {
@@ -2106,7 +2055,7 @@ fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSear
     })
 }
 
-fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
+fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<LocalEntry> {
     // folder name should always be decrypted with the local key because
     // folders are local to a specific user's vault, not the organization
     let folder = entry
@@ -2125,7 +2074,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
         .fields
         .iter()
         .map(|field| {
-            Ok(DecryptedField {
+            Ok(CustomField {
                 name: field
                     .name
                     .as_ref()
@@ -2181,7 +2130,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
             password,
             totp,
             uris,
-        } => DecryptedData::Login {
+        } => EntryData::Login {
             username: decrypt_field(
                 Field::Username,
                 username.as_deref(),
@@ -2209,11 +2158,12 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
                         entry.key.as_deref(),
                         entry.org_id.as_deref(),
                     )
-                    .map(|uri| DecryptedUri {
+                    .map(|uri| Uri {
                         uri,
                         match_type: s.match_type,
                     })
                 })
+                .flatten()
                 .collect(),
         },
         rbw::db::EntryData::Card {
@@ -2223,7 +2173,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
             exp_month,
             exp_year,
             code,
-        } => DecryptedData::Card {
+        } => EntryData::Card {
             cardholder_name: decrypt_field(
                 Field::Cardholder,
                 cardholder_name.as_deref(),
@@ -2279,7 +2229,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
             license_number,
             passport_number,
             username,
-        } => DecryptedData::Identity {
+        } => EntryData::Identity {
             title: decrypt_field(
                 Field::Title,
                 title.as_deref(),
@@ -2383,12 +2333,12 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
                 entry.org_id.as_deref(),
             ),
         },
-        rbw::db::EntryData::SecureNote => DecryptedData::SecureNote {},
+        rbw::db::EntryData::SecureNote => EntryData::SecureNote {},
         rbw::db::EntryData::SshKey {
             public_key,
             fingerprint,
             private_key,
-        } => DecryptedData::SshKey {
+        } => EntryData::SshKey {
             public_key: decrypt_field(
                 Field::PublicKey,
                 public_key.as_deref(),
@@ -2410,7 +2360,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
         },
     };
 
-    Ok(DecryptedCipher {
+    Ok(LocalEntry {
         id: entry.id.clone(),
         folder,
         name: crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?,
