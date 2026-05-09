@@ -1355,6 +1355,32 @@ fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSear
     })
 }
 
+fn decrypt_fields(
+    fields: &[rbw::db::Field],
+    key: Option<&str>,
+    org_id: Option<&str>,
+) -> anyhow::Result<Vec<rbw::db::Field>> {
+    fields
+        .iter()
+        .map(|field| {
+            Ok(rbw::db::Field {
+                name: field
+                    .name
+                    .as_ref()
+                    .map(|name| crate::actions::decrypt(name, key, org_id))
+                    .transpose()?,
+                value: field
+                    .value
+                    .as_ref()
+                    .map(|value| crate::actions::decrypt(value, key, org_id))
+                    .transpose()?,
+                ty: field.ty,
+                linked_id: None,
+            })
+        })
+        .collect::<anyhow::Result<_>>()
+}
+
 fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
     // folder name should always be decrypted with the local key because
     // folders are local to a specific user's vault, not the organization
@@ -1370,34 +1396,9 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
             None
         }
     };
-    let fields = entry
-        .fields
-        .iter()
-        .map(|field| {
-            Ok(rbw::db::Field {
-                name: field
-                    .name
-                    .as_ref()
-                    .map(|name| {
-                        crate::actions::decrypt(name, entry.key.as_deref(), entry.org_id.as_deref())
-                    })
-                    .transpose()?,
-                value: field
-                    .value
-                    .as_ref()
-                    .map(|value| {
-                        crate::actions::decrypt(
-                            value,
-                            entry.key.as_deref(),
-                            entry.org_id.as_deref(),
-                        )
-                    })
-                    .transpose()?,
-                ty: field.ty,
-                linked_id: None,
-            })
-        })
-        .collect::<anyhow::Result<_>>()?;
+
+    let fields = decrypt_fields(&entry.fields, entry.key.as_deref(), entry.org_id.as_deref())?;
+
     let notes = entry
         .notes
         .as_ref()
