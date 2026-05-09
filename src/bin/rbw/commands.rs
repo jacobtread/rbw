@@ -1427,6 +1427,10 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
         })
         .collect::<anyhow::Result<_>>()?;
 
+    let df = |ft, val: Option<&str>| {
+        decrypt_field(ft, val, entry.key.as_deref(), entry.org_id.as_deref())
+    };
+
     let data = match &entry.data {
         rbw::db::EntryData::Login {
             username,
@@ -1434,34 +1438,13 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
             totp,
             uris,
         } => EntryData::Login {
-            username: decrypt_field(
-                rbw::db::FieldType::Username,
-                username.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            password: decrypt_field(
-                rbw::db::FieldType::Password,
-                password.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            totp: decrypt_field(
-                rbw::db::FieldType::Totp,
-                totp.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
+            username: df(rbw::db::FieldType::Username, username.as_deref()),
+            password: df(rbw::db::FieldType::Password, password.as_deref()),
+            totp: df(rbw::db::FieldType::Totp, totp.as_deref()),
             uris: uris
                 .iter()
                 .map(|s| {
-                    decrypt_field(
-                        rbw::db::FieldType::Uris,
-                        Some(&s.uri),
-                        entry.key.as_deref(),
-                        entry.org_id.as_deref(),
-                    )
-                    .map(|uri| Uri {
+                    df(rbw::db::FieldType::Uris, Some(&s.uri)).map(|uri| Uri {
                         uri,
                         match_type: s.match_type,
                     })
@@ -1477,42 +1460,12 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
             exp_year,
             code,
         } => EntryData::Card {
-            cardholder_name: decrypt_field(
-                rbw::db::FieldType::Cardholder,
-                cardholder_name.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            number: decrypt_field(
-                rbw::db::FieldType::CardNumber,
-                number.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            brand: decrypt_field(
-                rbw::db::FieldType::Brand,
-                brand.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            exp_month: decrypt_field(
-                rbw::db::FieldType::ExpMonth,
-                exp_month.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            exp_year: decrypt_field(
-                rbw::db::FieldType::ExpYear,
-                exp_year.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            code: decrypt_field(
-                rbw::db::FieldType::Cvv,
-                code.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
+            cardholder_name: df(rbw::db::FieldType::Cardholder, cardholder_name.as_deref()),
+            number: df(rbw::db::FieldType::CardNumber, number.as_deref()),
+            brand: df(rbw::db::FieldType::Brand, brand.as_deref()),
+            exp_month: df(rbw::db::FieldType::ExpMonth, exp_month.as_deref()),
+            exp_year: df(rbw::db::FieldType::ExpYear, exp_year.as_deref()),
+            code: df(rbw::db::FieldType::Cvv, code.as_deref()),
         },
         rbw::db::EntryData::Identity {
             title,
@@ -1533,108 +1486,23 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
             passport_number,
             username,
         } => EntryData::Identity {
-            title: decrypt_field(
-                rbw::db::FieldType::Title,
-                title.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            first_name: decrypt_field(
-                rbw::db::FieldType::FirstName,
-                first_name.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            middle_name: decrypt_field(
-                rbw::db::FieldType::MiddleName,
-                middle_name.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            last_name: decrypt_field(
-                rbw::db::FieldType::LastName,
-                last_name.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            address1: decrypt_field(
-                rbw::db::FieldType::Address1,
-                address1.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            address2: decrypt_field(
-                rbw::db::FieldType::Address2,
-                address2.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            address3: decrypt_field(
-                rbw::db::FieldType::Address3,
-                address3.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            city: decrypt_field(
-                rbw::db::FieldType::City,
-                city.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            state: decrypt_field(
-                rbw::db::FieldType::State,
-                state.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            postal_code: decrypt_field(
-                rbw::db::FieldType::PostalCode,
-                postal_code.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            country: decrypt_field(
-                rbw::db::FieldType::Country,
-                country.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            phone: decrypt_field(
-                rbw::db::FieldType::Phone,
-                phone.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            email: decrypt_field(
-                rbw::db::FieldType::Email,
-                email.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            ssn: decrypt_field(
-                rbw::db::FieldType::Ssn,
-                ssn.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            license_number: decrypt_field(
-                rbw::db::FieldType::License,
-                license_number.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            passport_number: decrypt_field(
-                rbw::db::FieldType::Passport,
-                passport_number.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            username: decrypt_field(
-                rbw::db::FieldType::Username,
-                username.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
+            title: df(rbw::db::FieldType::Title, title.as_deref()),
+            first_name: df(rbw::db::FieldType::FirstName, first_name.as_deref()),
+            middle_name: df(rbw::db::FieldType::MiddleName, middle_name.as_deref()),
+            last_name: df(rbw::db::FieldType::LastName, last_name.as_deref()),
+            address1: df(rbw::db::FieldType::Address1, address1.as_deref()),
+            address2: df(rbw::db::FieldType::Address2, address2.as_deref()),
+            address3: df(rbw::db::FieldType::Address3, address3.as_deref()),
+            city: df(rbw::db::FieldType::City, city.as_deref()),
+            state: df(rbw::db::FieldType::State, state.as_deref()),
+            postal_code: df(rbw::db::FieldType::PostalCode, postal_code.as_deref()),
+            country: df(rbw::db::FieldType::Country, country.as_deref()),
+            phone: df(rbw::db::FieldType::Phone, phone.as_deref()),
+            email: df(rbw::db::FieldType::Email, email.as_deref()),
+            ssn: df(rbw::db::FieldType::Ssn, ssn.as_deref()),
+            license_number: df(rbw::db::FieldType::License, license_number.as_deref()),
+            passport_number: df(rbw::db::FieldType::Passport, passport_number.as_deref()),
+            username: df(rbw::db::FieldType::Username, username.as_deref()),
         },
         rbw::db::EntryData::SecureNote => EntryData::SecureNote {},
         rbw::db::EntryData::SshKey {
@@ -1642,24 +1510,9 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
             fingerprint,
             private_key,
         } => EntryData::SshKey {
-            public_key: decrypt_field(
-                rbw::db::FieldType::PublicKey,
-                public_key.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            fingerprint: decrypt_field(
-                rbw::db::FieldType::Fingerprint,
-                fingerprint.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            private_key: decrypt_field(
-                rbw::db::FieldType::PrivateKey,
-                private_key.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
+            public_key: df(rbw::db::FieldType::PublicKey, public_key.as_deref()),
+            fingerprint: df(rbw::db::FieldType::Fingerprint, fingerprint.as_deref()),
+            private_key: df(rbw::db::FieldType::PrivateKey, private_key.as_deref()),
         },
     };
 
