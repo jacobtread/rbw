@@ -616,9 +616,7 @@ impl DecryptedCipher {
     }
 
     fn display_field(&self, desc: &str, field: &str, clipboard: bool) {
-        let field = field.to_lowercase();
-        let field = field.as_str();
-        let fields = self.get_fields(field);
+        let fields = self.get_fields(&field.to_lowercase());
         fields.iter().for_each(|f| {
             val_display_or_store(clipboard, f);
         });
