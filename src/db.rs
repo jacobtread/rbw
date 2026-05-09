@@ -205,6 +205,8 @@ pub struct Entry {
     pub master_password_reprompt: crate::api::CipherRepromptType,
 }
 
+// Most impl fn don't belong here. I am talking of display ones, but looking to relocate them
+// later in the refactor process.
 impl Entry {
     pub fn master_password_reprompt(&self) -> bool {
         self.master_password_reprompt != crate::api::CipherRepromptType::None

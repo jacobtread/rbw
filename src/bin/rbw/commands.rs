@@ -56,6 +56,7 @@ pub fn parse_needle(arg: &str) -> Result<Needle, std::convert::Infallible> {
     Ok(Needle::Name(arg.to_string()))
 }
 
+/// It's a subset of db::Entry with only decrypted fields
 #[derive(Debug, serde::Serialize)]
 struct DecryptedListCipher {
     id: String,
@@ -1195,7 +1196,7 @@ fn decrypt_list_cipher(
     };
     let user = if fields.contains(&ListField::User) {
         match &entry.data {
-            rbw::db::EntryData::Login { username, .. } => decrypt_field(
+            rbw::db::EntryData::Login { username, .. } => decrypt_field_warn(
                 rbw::db::FieldType::Username,
                 username.as_deref(),
                 entry.key.as_deref(),
@@ -1222,7 +1223,7 @@ fn decrypt_list_cipher(
             rbw::db::EntryData::Login { uris, .. } => Some(
                 uris.iter()
                     .filter_map(|s| {
-                        decrypt_field(
+                        decrypt_field_warn(
                             rbw::db::FieldType::Uris,
                             Some(&s.uri),
                             entry.key.as_deref(),
@@ -1261,7 +1262,7 @@ fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSear
     let id = entry.id.clone();
     let name = crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?;
     let user = match &entry.data {
-        rbw::db::EntryData::Login { username, .. } => decrypt_field(
+        rbw::db::EntryData::Login { username, .. } => decrypt_field_warn(
             rbw::db::FieldType::Username,
             username.as_deref(),
             entry.key.as_deref(),
@@ -1284,7 +1285,7 @@ fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSear
     let uris = if let rbw::db::EntryData::Login { uris, .. } = &entry.data {
         uris.iter()
             .filter_map(|s| {
-                decrypt_field(
+                decrypt_field_warn(
                     rbw::db::FieldType::Uris,
                     Some(&s.uri),
                     entry.key.as_deref(),
@@ -1336,23 +1337,28 @@ fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSear
     })
 }
 
-fn decrypt_field(
-    name: rbw::db::FieldType,
-    field: Option<&str>,
+/// This accepts a optional string and optionally decrypts it?
+fn decrypt_string(
+    string: Option<&str>,
     entry_key: Option<&str>,
     org_id: Option<&str>,
+) -> anyhow::Result<Option<String>> {
+    string
+        .map(|f| crate::actions::decrypt(f, entry_key, org_id))
+        .transpose()
+}
+
+/// This accepts a optional field and optionally decrypts it?
+fn decrypt_field_warn(
+    name: rbw::db::FieldType,
+    field: Option<&str>,
+    key: Option<&str>,
+    org_id: Option<&str>,
 ) -> Option<String> {
-    let field = field
-        .as_ref()
-        .map(|field| crate::actions::decrypt(field, entry_key, org_id))
-        .transpose();
-    match field {
-        Ok(field) => field,
-        Err(e) => {
-            log::warn!("failed to decrypt {name}: {e}");
-            None
-        }
-    }
+    decrypt_string(field, key, org_id).unwrap_or_else(|e| {
+        log::warn!("failed to decrypt {name}: {e}");
+        None
+    })
 }
 
 fn decrypt_cipher_fields(
@@ -1364,16 +1370,8 @@ fn decrypt_cipher_fields(
         .iter()
         .map(|field| {
             Ok(rbw::db::Field {
-                name: field
-                    .name
-                    .as_ref()
-                    .map(|name| crate::actions::decrypt(name, key, org_id))
-                    .transpose()?,
-                value: field
-                    .value
-                    .as_ref()
-                    .map(|value| crate::actions::decrypt(value, key, org_id))
-                    .transpose()?,
+                name: decrypt_string(field.name.as_deref(), key, org_id)?,
+                value: decrypt_string(field.value.as_deref(), key, org_id)?,
                 ty: field.ty,
                 linked_id: None,
             })
@@ -1428,7 +1426,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
         .collect::<anyhow::Result<_>>()?;
 
     let df = |ft, val: Option<&str>| {
-        decrypt_field(ft, val, entry.key.as_deref(), entry.org_id.as_deref())
+        decrypt_field_warn(ft, val, entry.key.as_deref(), entry.org_id.as_deref())
     };
 
     let data = match &entry.data {
