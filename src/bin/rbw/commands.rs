@@ -525,7 +525,7 @@ pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str, clipboard: bool) 
 }
 
 /// This needs to be simplified
-pub fn display_entry_long(entry: &rbw::db::Entry, desc: &str, clipboard: bool) {
+pub fn display_entry_full(entry: &rbw::db::Entry, desc: &str, clipboard: bool) {
     let mut displayed = display_entry_short(entry, desc, clipboard);
     match &entry.data {
         EntryData::Login {
@@ -622,7 +622,7 @@ pub fn display_entry_long(entry: &rbw::db::Entry, desc: &str, clipboard: bool) {
 }
 
 /// This implementation mirror the `fn display_fied` method on which field to list
-pub fn display_fields_list(entry: &rbw::db::Entry) {
+pub fn display_entry_fields_list(entry: &rbw::db::Entry) {
     match &entry.data {
         EntryData::Login {
             username,
@@ -761,7 +761,7 @@ pub fn display_fields_list(entry: &rbw::db::Entry) {
     }
 }
 
-pub fn display_json(entry: &rbw::db::Entry, desc: &str) -> anyhow::Result<()> {
+pub fn display_entry_json(entry: &rbw::db::Entry, desc: &str) -> anyhow::Result<()> {
     serde_json::to_writer_pretty(std::io::stdout(), entry)
         .context(format!("failed to write entry '{desc}' to stdout"))?;
     println!();
@@ -793,10 +793,11 @@ pub fn get(
 
     let (_, decrypted) = find_entry(&db, needle, user, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+
     if list_fields {
-        display_fields_list(&decrypted);
+        display_entry_fields_list(&decrypted);
     } else if raw {
-        display_json(&decrypted, &desc)?;
+        display_entry_json(&decrypted, &desc)?;
     } else {
         // if clipboard {
         //     match clipboard_store(password) {
@@ -808,7 +809,7 @@ pub fn get(
         //     }
         // }
         if full {
-            display_entry_long(&decrypted, &desc, clipboard);
+            display_entry_full(&decrypted, &desc, clipboard);
         } else if let Some(field) = field {
             display_entry_field(&decrypted, &desc, field, clipboard);
         } else {
