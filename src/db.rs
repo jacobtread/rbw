@@ -266,6 +266,23 @@ impl Entry {
         val_display_or_store(clipboard, &short)
     }
 
+    fn get_dynamic_fields(&self, name: &str) -> Vec<Option<String>> {
+        self.fields
+            .iter()
+            .map(|f| {
+                if let Some(fname) = &f.name {
+                    if fname.to_lowercase().contains(name) {
+                        f.value.clone()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// This function is sh*t but I need it for now
     /// Given a textual representation of a field, like "username", "password" or "card number",
     /// check which type of entry EntryData is and extract the "username" or "cardnumber" field if
@@ -317,31 +334,7 @@ impl Entry {
                     // self.display_short(desc, clipboard);
                     vec![self.get_short()]
                 }
-                _ => {
-                    self.fields
-                        .iter()
-                        .map(|f| {
-                            if let Some(name) = &f.name {
-                                if name.to_lowercase().contains(field) {
-                                    f.value.clone()
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                        .collect()
-
-                    // for f in &self.fields {
-                    //     if let Some(name) = &f.name {
-                    //         if name.to_lowercase().as_str().contains(field) {
-                    //             val_display_or_store(clipboard, f.value.as_deref().unwrap_or(""));
-                    //             break;
-                    //         }
-                    //     }
-                    // }
-                }
+                _ => self.get_dynamic_fields(field),
             },
             EntryData::Card {
                 cardholder_name,
@@ -366,21 +359,7 @@ impl Entry {
                 Ok(FieldType::Name | FieldType::Cardholder) => vec![cardholder_name.clone()],
                 Ok(FieldType::Brand) => vec![brand.clone()],
                 Ok(FieldType::Notes) => vec![self.notes.clone()],
-                _ => self
-                    .fields
-                    .iter()
-                    .map(|f| {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().contains(field) {
-                                f.value.clone()
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
+                _ => self.get_dynamic_fields(field),
             },
             EntryData::Identity {
                 address1,
@@ -430,40 +409,12 @@ impl Entry {
                 Ok(FieldType::Passport) => vec![passport_number.clone()],
                 Ok(FieldType::Username) => vec![username.clone()],
                 Ok(FieldType::Notes) => vec![self.notes.clone()],
-                _ => self
-                    .fields
-                    .iter()
-                    .map(|f| {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().contains(field) {
-                                f.value.clone()
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
+                _ => self.get_dynamic_fields(field),
             },
 
             EntryData::SecureNote => match field.parse() {
                 Ok(FieldType::Notes) => vec![self.get_short()],
-                _ => self
-                    .fields
-                    .iter()
-                    .map(|f| {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().contains(field) {
-                                f.value.clone()
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
+                _ => self.get_dynamic_fields(field),
             },
 
             EntryData::SshKey {
@@ -475,21 +426,7 @@ impl Entry {
                 Ok(FieldType::PublicKey) => vec![self.get_short()],
                 Ok(FieldType::PrivateKey) => vec![private_key.clone()],
                 Ok(FieldType::Notes) => vec![self.notes.clone()],
-                _ => self
-                    .fields
-                    .iter()
-                    .map(|f| {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().contains(field) {
-                                f.value.clone()
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
+                _ => self.get_dynamic_fields(field),
             },
         };
 
