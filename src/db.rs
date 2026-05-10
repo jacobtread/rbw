@@ -412,10 +412,144 @@ impl Entry {
     }
 }
 
+fn writefield(
+    f: &mut std::fmt::Formatter<'_>,
+    label: &str,
+    field: &Option<String>,
+    displayed: &mut bool,
+) -> std::fmt::Result {
+    if let Some(field) = field {
+        *displayed = true;
+        writeln!(f, "{label}: {field}")
+    } else {
+        Ok(())
+    }
+}
+
+impl Display for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(short) = self.get_short() {
+            writeln!(f, "{short}")?;
+        }
+
+        let mut d = false;
+
+        match &self.data {
+            EntryData::Login {
+                username,
+                totp,
+                uris,
+                ..
+            } => {
+                writefield(f, "Username", username, &mut d)?;
+                writefield(f, "TOTP Secret", totp, &mut d)?;
+
+                for uri in uris {
+                    d = true;
+                    write!(f, "{uri}")?;
+                }
+
+                for field in &self.fields {
+                    d = true;
+                    writeln!(
+                        f,
+                        "{}: {}",
+                        field.name.as_deref().unwrap_or("(null)"),
+                        field.value.as_deref().unwrap_or("")
+                    )?;
+                }
+            }
+            EntryData::Card {
+                cardholder_name,
+                brand,
+                exp_month,
+                exp_year,
+                code,
+                ..
+            } => {
+                if let (Some(m), Some(y)) = (exp_month, exp_year) {
+                    writefield(f, "Expiration", &Some(format!("{m}/{y}")), &mut d)?;
+                }
+
+                writefield(f, "CVV", code, &mut d)?;
+                writefield(f, "Name", cardholder_name, &mut d)?;
+                writefield(f, "Brand", brand, &mut d)?;
+            }
+            EntryData::Identity {
+                address1,
+                address2,
+                address3,
+                city,
+                state,
+                postal_code,
+                country,
+                phone,
+                email,
+                ssn,
+                license_number,
+                passport_number,
+                username,
+                ..
+            } => {
+                writefield(f, "Address", address1, &mut d)?;
+                writefield(f, "Address", address2, &mut d)?;
+                writefield(f, "Address", address3, &mut d)?;
+                writefield(f, "City", city, &mut d)?;
+                writefield(f, "State", state, &mut d)?;
+                writefield(f, "Postcode", postal_code, &mut d)?;
+                writefield(f, "Country", country, &mut d)?;
+                writefield(f, "Phone", phone, &mut d)?;
+                writefield(f, "Email", email, &mut d)?;
+                writefield(f, "SSN", ssn, &mut d)?;
+                writefield(f, "License", license_number, &mut d)?;
+                writefield(f, "Passport", passport_number, &mut d)?;
+                writefield(f, "Username", username, &mut d)?;
+            }
+            EntryData::SecureNote => {}
+            EntryData::SshKey { fingerprint, .. } => {
+                writefield(f, "Fingerprint", fingerprint, &mut d)?;
+
+                for field in &self.fields {
+                    d = true;
+                    writeln!(
+                        f,
+                        "{}: {}",
+                        field.name.as_deref().unwrap_or("(null)"),
+                        field.value.as_deref().unwrap_or("")
+                    )?;
+                }
+            }
+        }
+
+        if !matches!(self.data, EntryData::SecureNote) {
+            if let Some(notes) = &self.notes {
+                if d {
+                    println!();
+                }
+                println!("{notes}");
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(serde::Serialize, Debug, Clone, Eq, PartialEq)]
 pub struct Uri {
     pub uri: String,
     pub match_type: Option<crate::api::UriMatchType>,
+}
+
+impl Display for Uri {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "URI: {}", &self.uri)?;
+
+        if let Some(ty) = self.match_type {
+            writeln!(f, "Match type: {ty}")?;
+        }
+
+        Ok(())
+    }
 }
 
 // backwards compatibility

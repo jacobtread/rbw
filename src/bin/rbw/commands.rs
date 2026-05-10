@@ -501,7 +501,7 @@ pub fn display_entry_field(entry: &rbw::db::Entry, desc: &str, field: &str, clip
     let fields = entry.get_field(&field.to_lowercase(), generate_totp);
     if fields.is_empty() {
         // TODO: This is not 100% compatible text output with the project before refactor.
-        println!("entry for '{desc}' had no default field");
+        eprintln!("entry for '{desc}' had no default field");
     } else {
         fields.iter().for_each(|f| {
             val_display_or_store(clipboard, f);
@@ -527,103 +527,6 @@ pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str, clipboard: bool) 
     };
 
     val_display_or_store(clipboard, &short)
-}
-
-/// This needs to be simplified
-pub fn display_entry_full(entry: &rbw::db::Entry, desc: &str, clipboard: bool) {
-    let mut displayed = display_entry_short(entry, desc, clipboard);
-    match &entry.data {
-        EntryData::Login {
-            username,
-            totp,
-            uris,
-            ..
-        } => {
-            displayed |= display_field("Username", username.as_deref(), clipboard);
-            displayed |= display_field("TOTP Secret", totp.as_deref(), clipboard);
-
-            for uri in uris {
-                displayed |= display_field("URI", Some(&uri.uri), clipboard);
-                let match_type = uri.match_type.map(|ty| format!("{ty}"));
-                displayed |= display_field("Match type", match_type.as_deref(), clipboard);
-            }
-
-            for field in &entry.fields {
-                displayed |= display_field(
-                    field.name.as_deref().unwrap_or("(null)"),
-                    Some(field.value.as_deref().unwrap_or("")),
-                    clipboard,
-                );
-            }
-        }
-        EntryData::Card {
-            cardholder_name,
-            brand,
-            exp_month,
-            exp_year,
-            code,
-            ..
-        } => {
-            if let (Some(exp_month), Some(exp_year)) = (exp_month, exp_year) {
-                println!("Expiration: {exp_month}/{exp_year}");
-                displayed = true;
-            }
-            displayed |= display_field("CVV", code.as_deref(), clipboard);
-            displayed |= display_field("Name", cardholder_name.as_deref(), clipboard);
-            displayed |= display_field("Brand", brand.as_deref(), clipboard);
-        }
-        EntryData::Identity {
-            address1,
-            address2,
-            address3,
-            city,
-            state,
-            postal_code,
-            country,
-            phone,
-            email,
-            ssn,
-            license_number,
-            passport_number,
-            username,
-            ..
-        } => {
-            displayed |= display_field("Address", address1.as_deref(), clipboard);
-            displayed |= display_field("Address", address2.as_deref(), clipboard);
-            displayed |= display_field("Address", address3.as_deref(), clipboard);
-            displayed |= display_field("City", city.as_deref(), clipboard);
-            displayed |= display_field("State", state.as_deref(), clipboard);
-            displayed |= display_field("Postcode", postal_code.as_deref(), clipboard);
-            displayed |= display_field("Country", country.as_deref(), clipboard);
-            displayed |= display_field("Phone", phone.as_deref(), clipboard);
-            displayed |= display_field("Email", email.as_deref(), clipboard);
-            displayed |= display_field("SSN", ssn.as_deref(), clipboard);
-            displayed |= display_field("License", license_number.as_deref(), clipboard);
-            displayed |= display_field("Passport", passport_number.as_deref(), clipboard);
-            displayed |= display_field("Username", username.as_deref(), clipboard);
-        }
-        EntryData::SecureNote => {}
-        EntryData::SshKey { fingerprint, .. } => {
-            displayed |= display_field("Fingerprint", fingerprint.as_deref(), clipboard);
-
-            for field in &entry.fields {
-                displayed |= display_field(
-                    field.name.as_deref().unwrap_or("(null)"),
-                    Some(field.value.as_deref().unwrap_or("")),
-                    clipboard,
-                );
-            }
-        }
-    }
-
-    if !matches!(entry.data, EntryData::SecureNote) {
-        if let Some(notes) = &entry.notes {
-            if displayed {
-                println!();
-            }
-            println!("{notes}");
-        }
-    }
 }
 
 /// This implementation mirror the `fn display_fied` method on which field to list
@@ -814,7 +717,11 @@ pub fn get(
         //     }
         // }
         if full {
-            display_entry_full(&decrypted, &desc, clipboard);
+            if decrypted.get_short().is_none() {
+                eprintln!("entry for '{desc}' had no default field");
+            }
+
+            print!("{decrypted}");
         } else if let Some(field) = field {
             display_entry_field(&decrypted, &desc, field, clipboard);
         } else {
