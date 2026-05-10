@@ -498,7 +498,7 @@ fn display_field(name: &str, field: Option<&str>, clipboard: bool) -> bool {
 }
 
 pub fn display_entry_field(entry: &rbw::db::Entry, desc: &str, field: &str, clipboard: bool) {
-    let fields = entry.get_fields(&field.to_lowercase(), generate_totp);
+    let fields = entry.get_field(&field.to_lowercase(), generate_totp);
     if fields.is_empty() {
         // TODO: This is not 100% compatible text output with the project before refactor.
         println!("entry for '{desc}' had no default field");

@@ -263,8 +263,9 @@ impl Entry {
     /// check which type of entry EntryData is and extract the "username" or "cardnumber" field if
     /// available from the "static" fields, else go check for the dynamic ones.
     /// For example, if the EntryData is of type EntryData::Login, try to extract the username from the
-    /// static fields, but if the field param is "state", search for it through the dynamic ones.
-    pub fn get_fields(
+    /// static username field, but if the field param is not within the static fields, search for it through the dynamic ones.
+    /// The dynamic fields are the user's added ones and labeled as "Custom field" in GUI apps.
+    pub fn get_field(
         &self,
         field: &str,
         generate_totp: fn(&str) -> anyhow::Result<String>,
