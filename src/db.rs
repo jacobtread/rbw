@@ -267,6 +267,11 @@ impl Entry {
     }
 
     /// This function is sh*t but I need it for now
+    /// Given a textual representation of a field, like "username", "password" or "card number",
+    /// check which type of entry EntryData is and extract the "username" or "cardnumber" field if
+    /// available from the "static" fields, else go check for the dynamic ones.
+    /// For example, if the EntryData is of type EntryData::Login, try to extract the username from the
+    /// static fields, but if the field param is "state", search for it through the dynamic ones.
     fn get_fields(
         &self,
         field: &str,
