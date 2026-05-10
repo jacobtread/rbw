@@ -210,6 +210,8 @@ impl Entry {
         self.master_password_reprompt != crate::api::CipherRepromptType::None
     }
 
+    /// The "short" is the first field that comes to mind when speaking of a entry, like the
+    /// password for the Login , the number for the Card, etc.
     pub fn get_short(&self) -> Option<String> {
         match &self.data {
             EntryData::Login { password, .. } => password.clone(),
@@ -407,7 +409,6 @@ impl Entry {
 
         ret.into_iter().flatten().collect()
     }
-
 }
 
 #[derive(serde::Serialize, Debug, Clone, Eq, PartialEq)]
