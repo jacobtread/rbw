@@ -3,13 +3,12 @@ use crate::prelude::*;
 use std::{
     fmt::Display,
     io::{Read as _, Write as _},
-    str::FromStr,
 };
 
 use anyhow::Context as _;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FieldType {
     Notes,
     Username,
@@ -45,13 +44,12 @@ pub enum FieldType {
     FirstName,
     MiddleName,
     LastName,
+    Custom(String),
 }
 
-impl FromStr for FieldType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> anyhow::Result<Self, Self::Err> {
-        Ok(match s.to_lowercase().as_str() {
+impl From<&str> for FieldType {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
             "notes" | "note" => Self::Notes,
             "username" | "user" => Self::Username,
             "password" => Self::Password,
@@ -87,8 +85,8 @@ impl FromStr for FieldType {
             "first_name" => Self::FirstName,
             "middle_name" => Self::MiddleName,
             "last_name" => Self::LastName,
-            _ => anyhow::bail!("unknown field {s}"),
-        })
+            _ => Self::Custom(s.to_string()),
+        }
     }
 }
 
@@ -129,6 +127,7 @@ impl Display for FieldType {
             Self::FirstName => "first_name",
             Self::MiddleName => "middle_name",
             Self::LastName => "last_name",
+            Self::Custom(name) => name,
         })
     }
 }
@@ -294,17 +293,17 @@ impl Entry {
         field: &str,
         generate_totp: fn(&str) -> anyhow::Result<String>,
     ) -> Vec<String> {
+        let ftype: FieldType = field.into();
         let ret: Vec<Option<String>> = match &self.data {
             EntryData::Login {
                 username,
                 totp,
                 uris,
                 ..
-            } => match field.parse() {
-                Ok(FieldType::Notes) => vec![self.notes.clone()],
-                Ok(FieldType::Username) => vec![username.clone()],
-
-                Ok(FieldType::Totp) => {
+            } => match &ftype {
+                FieldType::Notes => vec![self.notes.clone()],
+                FieldType::Username => vec![username.clone()],
+                FieldType::Totp => {
                     if let Some(totp) = totp {
                         match generate_totp(totp) {
                             Ok(code) => {
@@ -321,7 +320,7 @@ impl Entry {
                         vec![]
                     }
                 }
-                Ok(FieldType::Uris) => {
+                FieldType::Uris => {
                     if !uris.is_empty() {
                         let uri_strs: Vec<_> = uris.iter().map(|uri| uri.uri.clone()).collect();
                         // val_display_or_store(clipboard, &uri_strs.join("\n"));
@@ -330,10 +329,11 @@ impl Entry {
                         vec![]
                     }
                 }
-                Ok(FieldType::Password) => {
+                FieldType::Password => {
                     // self.display_short(desc, clipboard);
                     vec![self.get_short()]
                 }
+                // This should be Custom
                 _ => self.get_dynamic_fields(field),
             },
             EntryData::Card {
@@ -343,9 +343,9 @@ impl Entry {
                 exp_year,
                 code,
                 ..
-            } => match field.parse() {
-                Ok(FieldType::CardNumber) => vec![self.get_short()],
-                Ok(FieldType::Expiration) => {
+            } => match &ftype {
+                FieldType::CardNumber => vec![self.get_short()],
+                FieldType::Expiration => {
                     if let (Some(month), Some(year)) = (exp_month, exp_year) {
                         vec![Some(format!("{month}/{year}"))]
                         //val_display_or_store(clipboard, &format!("{month}/{year}"));
@@ -353,12 +353,13 @@ impl Entry {
                         vec![]
                     }
                 }
-                Ok(FieldType::ExpMonth) => vec![exp_month.clone()],
-                Ok(FieldType::ExpYear) => vec![exp_year.clone()],
-                Ok(FieldType::Cvv) => vec![code.clone()],
-                Ok(FieldType::Name | FieldType::Cardholder) => vec![cardholder_name.clone()],
-                Ok(FieldType::Brand) => vec![brand.clone()],
-                Ok(FieldType::Notes) => vec![self.notes.clone()],
+                FieldType::ExpMonth => vec![exp_month.clone()],
+                FieldType::ExpYear => vec![exp_year.clone()],
+                FieldType::Cvv => vec![code.clone()],
+                FieldType::Name | FieldType::Cardholder => vec![cardholder_name.clone()],
+                FieldType::Brand => vec![brand.clone()],
+                FieldType::Notes => vec![self.notes.clone()],
+                // This should be Custom
                 _ => self.get_dynamic_fields(field),
             },
             EntryData::Identity {
@@ -376,10 +377,10 @@ impl Entry {
                 passport_number,
                 username,
                 ..
-            } => match field.parse() {
-                Ok(FieldType::Name) => vec![self.get_short()],
-                Ok(FieldType::Email) => vec![email.clone()],
-                Ok(FieldType::Address) => {
+            } => match &ftype {
+                FieldType::Name => vec![self.get_short()],
+                FieldType::Email => vec![email.clone()],
+                FieldType::Address => {
                     let mut strs = vec![];
 
                     if let Some(address1) = address1 {
@@ -399,21 +400,21 @@ impl Entry {
                         vec![]
                     }
                 }
-                Ok(FieldType::City) => vec![city.clone()],
-                Ok(FieldType::State) => vec![state.clone()],
-                Ok(FieldType::PostalCode) => vec![postal_code.clone()],
-                Ok(FieldType::Country) => vec![country.clone()],
-                Ok(FieldType::Phone) => vec![phone.clone()],
-                Ok(FieldType::Ssn) => vec![ssn.clone()],
-                Ok(FieldType::License) => vec![license_number.clone()],
-                Ok(FieldType::Passport) => vec![passport_number.clone()],
-                Ok(FieldType::Username) => vec![username.clone()],
-                Ok(FieldType::Notes) => vec![self.notes.clone()],
+                FieldType::City => vec![city.clone()],
+                FieldType::State => vec![state.clone()],
+                FieldType::PostalCode => vec![postal_code.clone()],
+                FieldType::Country => vec![country.clone()],
+                FieldType::Phone => vec![phone.clone()],
+                FieldType::Ssn => vec![ssn.clone()],
+                FieldType::License => vec![license_number.clone()],
+                FieldType::Passport => vec![passport_number.clone()],
+                FieldType::Username => vec![username.clone()],
+                FieldType::Notes => vec![self.notes.clone()],
                 _ => self.get_dynamic_fields(field),
             },
 
-            EntryData::SecureNote => match field.parse() {
-                Ok(FieldType::Notes) => vec![self.get_short()],
+            EntryData::SecureNote => match &ftype {
+                FieldType::Notes => vec![self.get_short()],
                 _ => self.get_dynamic_fields(field),
             },
 
@@ -421,11 +422,11 @@ impl Entry {
                 fingerprint,
                 private_key,
                 ..
-            } => match field.parse() {
-                Ok(FieldType::Fingerprint) => vec![fingerprint.clone()],
-                Ok(FieldType::PublicKey) => vec![self.get_short()],
-                Ok(FieldType::PrivateKey) => vec![private_key.clone()],
-                Ok(FieldType::Notes) => vec![self.notes.clone()],
+            } => match &ftype {
+                FieldType::Fingerprint => vec![fingerprint.clone()],
+                FieldType::PublicKey => vec![self.get_short()],
+                FieldType::PrivateKey => vec![private_key.clone()],
+                FieldType::Notes => vec![self.notes.clone()],
                 _ => self.get_dynamic_fields(field),
             },
         };
