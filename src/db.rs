@@ -241,6 +241,8 @@ impl Entry {
         }
     }
 
+    /// Get all the custom fields defined by the user with the same name. Yes there can be more
+    /// than one custom field with the same name. Don't ask me why.
     fn get_dynamic_fields(&self, name: &str) -> Vec<Option<String>> {
         self.fields
             .iter()
@@ -426,6 +428,9 @@ fn writefield(
     }
 }
 
+/// Display impl is a bit messy as we need to support previous output format.
+/// I would, for example, yank this displayed bool and always print Notes after ---.
+/// I would avoid printing the "short" field this way too, but rather print it as a normal field.
 impl Display for Entry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(short) = self.get_short() {

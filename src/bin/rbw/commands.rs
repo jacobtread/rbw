@@ -490,26 +490,19 @@ pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn display_field(name: &str, field: Option<&str>, clipboard: bool) -> bool {
-    field.map_or_else(
-        || false,
-        |field| val_display_or_store(clipboard, &format!("{name}: {field}")),
-    )
-}
-
-pub fn display_entry_field(entry: &rbw::db::Entry, desc: &str, field: &str, clipboard: bool) {
+pub fn display_entry_field(entry: &rbw::db::Entry, desc: &str, field: &str) {
     let fields = entry.get_field(&field.to_lowercase(), generate_totp);
     if fields.is_empty() {
         // TODO: This is not 100% compatible text output with the project before refactor.
         eprintln!("entry for '{desc}' had no default field");
     } else {
         fields.iter().for_each(|f| {
-            val_display_or_store(clipboard, f);
+            println!("{f}");
         });
     }
 }
 
-pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str, clipboard: bool) -> bool {
+pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str) -> bool {
     let short = entry.get_short();
     let Some(short) = short else {
         // Would be cool if self.data had a method named main_field_name :D
@@ -526,7 +519,8 @@ pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str, clipboard: bool) 
         return false;
     };
 
-    val_display_or_store(clipboard, &short)
+    println!("{short}");
+    true
 }
 
 /// This implementation mirror the `fn display_fied` method on which field to list
@@ -707,25 +701,38 @@ pub fn get(
     } else if raw {
         display_entry_json(&decrypted, &desc)?;
     } else {
-        // if clipboard {
-        //     match clipboard_store(password) {
-        //         Ok(()) => true,
-        //         Err(e) => {
-        //             eprintln!("{e}");
-        //             false
-        //         }
-        //     }
-        // }
+        let short = decrypted.get_short();
+
+        if clipboard {
+            if let Some(field) = &field {
+                let value = decrypted.get_field(field, generate_totp);
+                if let Err(e) = clipboard_store(&value.join(" ")) {
+                    eprintln!("{e}");
+                }
+            } else if let Some(short) = &short {
+                if let Err(e) = clipboard_store(short) {
+                    eprintln!("{e}");
+                }
+            }
+        }
+
         if full {
-            if decrypted.get_short().is_none() {
+            // NOTE: In the previous version this printed "password", etc, the name of the "short"
+            // field.
+            if short.is_none() {
                 eprintln!("entry for '{desc}' had no default field");
             }
 
+            // NOTE: This printing is 99% backwards compatible, but the previous version was putting
+            // EVERY field in the clipboard sequentially, leaving only the last at the end of course.
+            // This behavior is unwanted, unnecessary and makes the code messy and for these reason
+            // it has been removed. Now when specifying --clipboard, only the "short" field or the
+            // --field value gets copied.
             print!("{decrypted}");
         } else if let Some(field) = field {
-            display_entry_field(&decrypted, &desc, field, clipboard);
+            display_entry_field(&decrypted, &desc, field);
         } else {
-            display_entry_short(&decrypted, &desc, clipboard);
+            display_entry_short(&decrypted, &desc);
         }
     }
 
