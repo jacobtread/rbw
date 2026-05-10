@@ -665,6 +665,51 @@ pub fn code(
     Ok(())
 }
 
+fn find_or_create_folder(
+    access_token: &mut String,
+    refresh_token: &str,
+    db: &mut rbw::db::Db,
+    folder: &str,
+) -> anyhow::Result<String> {
+    let (new_access_token, folders) = rbw::actions::list_folders(&access_token, refresh_token)?;
+
+    if let Some(new_access_token) = new_access_token {
+        access_token.clone_from(&new_access_token);
+        db.access_token = Some(new_access_token);
+        save_db(&db)?;
+    }
+
+    let folders: Vec<(String, String)> = folders
+        .iter()
+        .cloned()
+        .map(|(id, name)| Ok((id, crate::actions::decrypt(&name, None, None)?)))
+        .collect::<anyhow::Result<_>>()?;
+
+    let folder_id = folders
+        .into_iter()
+        .find_map(|(id, name)| if name == folder { Some(id) } else { None });
+
+    let folder_id = if let Some(folder_id) = folder_id {
+        folder_id
+    } else {
+        let (new_access_token, id) = rbw::actions::create_folder(
+            &access_token,
+            refresh_token,
+            &crate::actions::encrypt(folder, None)?,
+        )?;
+
+        if let Some(new_access_token) = new_access_token {
+            access_token.clone_from(&new_access_token);
+            db.access_token = Some(new_access_token);
+            save_db(&db)?;
+        }
+
+        id
+    };
+
+    Ok(folder_id)
+}
+
 pub fn add(
     name: &str,
     username: Option<&str>,
@@ -677,7 +722,7 @@ pub fn add(
     // unwrap is safe here because the call to unlock above is guaranteed to
     // populate these or error
     let mut access_token = db.access_token.as_ref().unwrap().clone();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
+    let refresh_token = db.refresh_token.as_ref().unwrap().clone();
 
     let name = crate::actions::encrypt(name, None)?;
 
@@ -704,44 +749,19 @@ pub fn add(
         })
         .collect::<anyhow::Result<_>>()?;
 
-    let mut folder_id = None;
-    if let Some(folder_name) = folder {
-        let (new_access_token, folders) = rbw::actions::list_folders(&access_token, refresh_token)?;
-        if let Some(new_access_token) = new_access_token {
-            access_token.clone_from(&new_access_token);
-            db.access_token = Some(new_access_token);
-            save_db(&db)?;
-        }
-
-        let folders: Vec<(String, String)> = folders
-            .iter()
-            .cloned()
-            .map(|(id, name)| Ok((id, crate::actions::decrypt(&name, None, None)?)))
-            .collect::<anyhow::Result<_>>()?;
-
-        for (id, name) in folders {
-            if name == folder_name {
-                folder_id = Some(id);
-            }
-        }
-        if folder_id.is_none() {
-            let (new_access_token, id) = rbw::actions::create_folder(
-                &access_token,
-                refresh_token,
-                &crate::actions::encrypt(folder_name, None)?,
-            )?;
-            if let Some(new_access_token) = new_access_token {
-                access_token.clone_from(&new_access_token);
-                db.access_token = Some(new_access_token);
-                save_db(&db)?;
-            }
-            folder_id = Some(id);
-        }
-    }
+    let folder_id = match folder {
+        Some(folder) => Some(find_or_create_folder(
+            &mut access_token,
+            &refresh_token,
+            &mut db,
+            folder,
+        )?),
+        None => None,
+    };
 
     if let (Some(access_token), ()) = rbw::actions::add(
         &access_token,
-        refresh_token,
+        &refresh_token,
         &name,
         &rbw::db::EntryData::Login {
             username,
@@ -779,7 +799,7 @@ pub fn generate(
         // unwrap is safe here because the call to unlock above is guaranteed
         // to populate these or error
         let mut access_token = db.access_token.as_ref().unwrap().clone();
-        let refresh_token = db.refresh_token.as_ref().unwrap();
+        let refresh_token = db.refresh_token.as_ref().unwrap().clone();
 
         let name = crate::actions::encrypt(name, None)?;
         let username = username
@@ -796,45 +816,19 @@ pub fn generate(
             })
             .collect::<anyhow::Result<_>>()?;
 
-        let mut folder_id = None;
-        if let Some(folder_name) = folder {
-            let (new_access_token, folders) =
-                rbw::actions::list_folders(&access_token, refresh_token)?;
-            if let Some(new_access_token) = new_access_token {
-                access_token.clone_from(&new_access_token);
-                db.access_token = Some(new_access_token);
-                save_db(&db)?;
-            }
-
-            let folders: Vec<(String, String)> = folders
-                .iter()
-                .cloned()
-                .map(|(id, name)| Ok((id, crate::actions::decrypt(&name, None, None)?)))
-                .collect::<anyhow::Result<_>>()?;
-
-            for (id, name) in folders {
-                if name == folder_name {
-                    folder_id = Some(id);
-                }
-            }
-            if folder_id.is_none() {
-                let (new_access_token, id) = rbw::actions::create_folder(
-                    &access_token,
-                    refresh_token,
-                    &crate::actions::encrypt(folder_name, None)?,
-                )?;
-                if let Some(new_access_token) = new_access_token {
-                    access_token.clone_from(&new_access_token);
-                    db.access_token = Some(new_access_token);
-                    save_db(&db)?;
-                }
-                folder_id = Some(id);
-            }
-        }
+        let folder_id = match folder {
+            Some(folder) => Some(find_or_create_folder(
+                &mut access_token,
+                &refresh_token,
+                &mut db,
+                folder,
+            )?),
+            None => None,
+        };
 
         if let (Some(access_token), ()) = rbw::actions::add(
             &access_token,
-            refresh_token,
+            &refresh_token,
             &name,
             &rbw::db::EntryData::Login {
                 username,
