@@ -5,7 +5,6 @@ use std::{
     io::{Read as _, Write as _},
 };
 
-use anyhow::Context as _;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -211,7 +210,7 @@ impl Entry {
         self.master_password_reprompt != crate::api::CipherRepromptType::None
     }
 
-    fn get_short(&self) -> Option<String> {
+    pub fn get_short(&self) -> Option<String> {
         match &self.data {
             EntryData::Login { password, .. } => password.clone(),
             EntryData::Card { number, .. } => number.clone(),
@@ -240,31 +239,6 @@ impl Entry {
         }
     }
 
-    pub fn display_short(
-        &self,
-        desc: &str,
-        clipboard: bool,
-        val_display_or_store: fn(bool, &str) -> bool,
-    ) -> bool {
-        let short = self.get_short();
-        let Some(short) = short else {
-            // Would be cool if self.data had a method named main_field_name :D
-            eprintln!(
-                "entry for '{desc}' had no {}",
-                match &self.data {
-                    EntryData::Login { .. } => "password",
-                    EntryData::Card { .. } => "card number",
-                    EntryData::Identity { .. } => "name",
-                    EntryData::SecureNote => "notes",
-                    EntryData::SshKey { .. } => "public key",
-                }
-            );
-            return false;
-        };
-
-        val_display_or_store(clipboard, &short)
-    }
-
     fn get_dynamic_fields(&self, name: &str) -> Vec<Option<String>> {
         self.fields
             .iter()
@@ -288,7 +262,7 @@ impl Entry {
     /// available from the "static" fields, else go check for the dynamic ones.
     /// For example, if the EntryData is of type EntryData::Login, try to extract the username from the
     /// static fields, but if the field param is "state", search for it through the dynamic ones.
-    fn get_fields(
+    pub fn get_fields(
         &self,
         field: &str,
         generate_totp: fn(&str) -> anyhow::Result<String>,
@@ -434,269 +408,6 @@ impl Entry {
         ret.into_iter().flatten().collect()
     }
 
-    pub fn display_field(
-        &self,
-        desc: &str,
-        field: &str,
-        clipboard: bool,
-        val_display_or_store: fn(bool, &str) -> bool,
-        generate_totp: fn(&str) -> anyhow::Result<String>,
-    ) {
-        let fields = self.get_fields(&field.to_lowercase(), generate_totp);
-        fields.iter().for_each(|f| {
-            val_display_or_store(clipboard, f);
-        });
-    }
-
-    pub fn display_long(
-        &self,
-        desc: &str,
-        clipboard: bool,
-        val_display_or_store: fn(bool, &str) -> bool,
-        display_field: fn(&str, Option<&str>, bool) -> bool,
-    ) {
-        let mut displayed = self.display_short(desc, clipboard, val_display_or_store);
-        match &self.data {
-            EntryData::Login {
-                username,
-                totp,
-                uris,
-                ..
-            } => {
-                displayed |= display_field("Username", username.as_deref(), clipboard);
-                displayed |= display_field("TOTP Secret", totp.as_deref(), clipboard);
-
-                for uri in uris {
-                    displayed |= display_field("URI", Some(&uri.uri), clipboard);
-                    let match_type = uri.match_type.map(|ty| format!("{ty}"));
-                    displayed |= display_field("Match type", match_type.as_deref(), clipboard);
-                }
-
-                for field in &self.fields {
-                    displayed |= display_field(
-                        field.name.as_deref().unwrap_or("(null)"),
-                        Some(field.value.as_deref().unwrap_or("")),
-                        clipboard,
-                    );
-                }
-            }
-            EntryData::Card {
-                cardholder_name,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-                ..
-            } => {
-                if let (Some(exp_month), Some(exp_year)) = (exp_month, exp_year) {
-                    println!("Expiration: {exp_month}/{exp_year}");
-                    displayed = true;
-                }
-                displayed |= display_field("CVV", code.as_deref(), clipboard);
-                displayed |= display_field("Name", cardholder_name.as_deref(), clipboard);
-                displayed |= display_field("Brand", brand.as_deref(), clipboard);
-            }
-            EntryData::Identity {
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-                ..
-            } => {
-                displayed |= display_field("Address", address1.as_deref(), clipboard);
-                displayed |= display_field("Address", address2.as_deref(), clipboard);
-                displayed |= display_field("Address", address3.as_deref(), clipboard);
-                displayed |= display_field("City", city.as_deref(), clipboard);
-                displayed |= display_field("State", state.as_deref(), clipboard);
-                displayed |= display_field("Postcode", postal_code.as_deref(), clipboard);
-                displayed |= display_field("Country", country.as_deref(), clipboard);
-                displayed |= display_field("Phone", phone.as_deref(), clipboard);
-                displayed |= display_field("Email", email.as_deref(), clipboard);
-                displayed |= display_field("SSN", ssn.as_deref(), clipboard);
-                displayed |= display_field("License", license_number.as_deref(), clipboard);
-                displayed |= display_field("Passport", passport_number.as_deref(), clipboard);
-                displayed |= display_field("Username", username.as_deref(), clipboard);
-            }
-            EntryData::SecureNote => {}
-            EntryData::SshKey { fingerprint, .. } => {
-                displayed |= display_field("Fingerprint", fingerprint.as_deref(), clipboard);
-
-                for field in &self.fields {
-                    displayed |= display_field(
-                        field.name.as_deref().unwrap_or("(null)"),
-                        Some(field.value.as_deref().unwrap_or("")),
-                        clipboard,
-                    );
-                }
-            }
-        }
-
-        if !matches!(&self.data, EntryData::SecureNote) {
-            if let Some(notes) = &self.notes {
-                if displayed {
-                    println!();
-                }
-                println!("{notes}");
-            }
-        }
-    }
-
-    /// This implementation mirror the `fn display_fied` method on which field to list
-    pub fn display_fields_list(&self) {
-        match &self.data {
-            EntryData::Login {
-                username,
-                password,
-                totp,
-                uris,
-                ..
-            } => {
-                if username.is_some() {
-                    println!("{}", FieldType::Username);
-                }
-                if totp.is_some() {
-                    println!("{}", FieldType::Totp);
-                }
-                if !uris.is_empty() {
-                    println!("{}", FieldType::Uris);
-                }
-                if password.is_some() {
-                    println!("{}", FieldType::Password);
-                }
-            }
-            EntryData::Card {
-                cardholder_name,
-                number,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-                ..
-            } => {
-                if number.is_some() {
-                    println!("{}", FieldType::CardNumber);
-                }
-                if exp_month.is_some() {
-                    println!("{}", FieldType::ExpMonth);
-                }
-                if exp_year.is_some() {
-                    println!("{}", FieldType::ExpYear);
-                }
-                if code.is_some() {
-                    println!("{}", FieldType::Cvv);
-                }
-                if cardholder_name.is_some() {
-                    println!("{}", FieldType::Cardholder);
-                }
-                if brand.is_some() {
-                    println!("{}", FieldType::Brand);
-                }
-            }
-
-            EntryData::Identity {
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-                title,
-                first_name,
-                middle_name,
-                last_name,
-                ..
-            } => {
-                if [title, first_name, middle_name, last_name]
-                    .iter()
-                    .any(|f| f.is_some())
-                {
-                    // the display_field combines all these fields together.
-                    println!("name");
-                }
-                if email.is_some() {
-                    println!("{}", FieldType::Email);
-                }
-                if [address1, address2, address3].iter().any(|f| f.is_some()) {
-                    // the display_field combines all these fields together.
-                    println!("address");
-                }
-                if city.is_some() {
-                    println!("{}", FieldType::City);
-                }
-                if state.is_some() {
-                    println!("{}", FieldType::State);
-                }
-                if postal_code.is_some() {
-                    println!("{}", FieldType::PostalCode);
-                }
-                if country.is_some() {
-                    println!("{}", FieldType::Country);
-                }
-                if phone.is_some() {
-                    println!("{}", FieldType::Phone);
-                }
-                if ssn.is_some() {
-                    println!("{}", FieldType::Ssn);
-                }
-                if license_number.is_some() {
-                    println!("{}", FieldType::License);
-                }
-                if passport_number.is_some() {
-                    println!("{}", FieldType::Passport);
-                }
-                if username.is_some() {
-                    println!("{}", FieldType::Username);
-                }
-            }
-
-            EntryData::SecureNote => (), // handled at the end
-            EntryData::SshKey {
-                fingerprint,
-                public_key,
-                ..
-            } => {
-                if fingerprint.is_some() {
-                    println!("{}", FieldType::Fingerprint);
-                }
-                if public_key.is_some() {
-                    println!("{}", FieldType::PublicKey);
-                }
-            }
-        }
-
-        if self.notes.is_some() {
-            println!("{}", FieldType::Notes);
-        }
-        for f in &self.fields {
-            if let Some(name) = &f.name {
-                println!("{name}");
-            }
-        }
-    }
-
-    pub fn display_json(&self, desc: &str) -> anyhow::Result<()> {
-        serde_json::to_writer_pretty(std::io::stdout(), &self)
-            .context(format!("failed to write entry '{desc}' to stdout"))?;
-        println!();
-
-        Ok(())
-    }
 }
 
 #[derive(serde::Serialize, Debug, Clone, Eq, PartialEq)]

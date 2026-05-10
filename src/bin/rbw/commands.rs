@@ -490,6 +490,285 @@ pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn display_field(name: &str, field: Option<&str>, clipboard: bool) -> bool {
+    field.map_or_else(
+        || false,
+        |field| val_display_or_store(clipboard, &format!("{name}: {field}")),
+    )
+}
+
+pub fn display_entry_field(entry: &rbw::db::Entry, desc: &str, field: &str, clipboard: bool) {
+    let fields = entry.get_fields(&field.to_lowercase(), generate_totp);
+    fields.iter().for_each(|f| {
+        val_display_or_store(clipboard, f);
+    });
+}
+
+pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str, clipboard: bool) -> bool {
+    let short = entry.get_short();
+    let Some(short) = short else {
+        // Would be cool if self.data had a method named main_field_name :D
+        eprintln!(
+            "entry for '{desc}' had no {}",
+            match entry.data {
+                EntryData::Login { .. } => "password",
+                EntryData::Card { .. } => "card number",
+                EntryData::Identity { .. } => "name",
+                EntryData::SecureNote => "notes",
+                EntryData::SshKey { .. } => "public key",
+            }
+        );
+        return false;
+    };
+
+    val_display_or_store(clipboard, &short)
+}
+
+/// This needs to be simplified
+pub fn display_entry_long(entry: &rbw::db::Entry, desc: &str, clipboard: bool) {
+    let mut displayed = display_entry_short(entry, desc, clipboard);
+    match &entry.data {
+        EntryData::Login {
+            username,
+            totp,
+            uris,
+            ..
+        } => {
+            displayed |= display_field("Username", username.as_deref(), clipboard);
+            displayed |= display_field("TOTP Secret", totp.as_deref(), clipboard);
+
+            for uri in uris {
+                displayed |= display_field("URI", Some(&uri.uri), clipboard);
+                let match_type = uri.match_type.map(|ty| format!("{ty}"));
+                displayed |= display_field("Match type", match_type.as_deref(), clipboard);
+            }
+
+            for field in &entry.fields {
+                displayed |= display_field(
+                    field.name.as_deref().unwrap_or("(null)"),
+                    Some(field.value.as_deref().unwrap_or("")),
+                    clipboard,
+                );
+            }
+        }
+        EntryData::Card {
+            cardholder_name,
+            brand,
+            exp_month,
+            exp_year,
+            code,
+            ..
+        } => {
+            if let (Some(exp_month), Some(exp_year)) = (exp_month, exp_year) {
+                println!("Expiration: {exp_month}/{exp_year}");
+                displayed = true;
+            }
+            displayed |= display_field("CVV", code.as_deref(), clipboard);
+            displayed |= display_field("Name", cardholder_name.as_deref(), clipboard);
+            displayed |= display_field("Brand", brand.as_deref(), clipboard);
+        }
+        EntryData::Identity {
+            address1,
+            address2,
+            address3,
+            city,
+            state,
+            postal_code,
+            country,
+            phone,
+            email,
+            ssn,
+            license_number,
+            passport_number,
+            username,
+            ..
+        } => {
+            displayed |= display_field("Address", address1.as_deref(), clipboard);
+            displayed |= display_field("Address", address2.as_deref(), clipboard);
+            displayed |= display_field("Address", address3.as_deref(), clipboard);
+            displayed |= display_field("City", city.as_deref(), clipboard);
+            displayed |= display_field("State", state.as_deref(), clipboard);
+            displayed |= display_field("Postcode", postal_code.as_deref(), clipboard);
+            displayed |= display_field("Country", country.as_deref(), clipboard);
+            displayed |= display_field("Phone", phone.as_deref(), clipboard);
+            displayed |= display_field("Email", email.as_deref(), clipboard);
+            displayed |= display_field("SSN", ssn.as_deref(), clipboard);
+            displayed |= display_field("License", license_number.as_deref(), clipboard);
+            displayed |= display_field("Passport", passport_number.as_deref(), clipboard);
+            displayed |= display_field("Username", username.as_deref(), clipboard);
+        }
+        EntryData::SecureNote => {}
+        EntryData::SshKey { fingerprint, .. } => {
+            displayed |= display_field("Fingerprint", fingerprint.as_deref(), clipboard);
+
+            for field in &entry.fields {
+                displayed |= display_field(
+                    field.name.as_deref().unwrap_or("(null)"),
+                    Some(field.value.as_deref().unwrap_or("")),
+                    clipboard,
+                );
+            }
+        }
+    }
+
+    if !matches!(entry.data, EntryData::SecureNote) {
+        if let Some(notes) = &entry.notes {
+            if displayed {
+                println!();
+            }
+            println!("{notes}");
+        }
+    }
+}
+
+/// This implementation mirror the `fn display_fied` method on which field to list
+pub fn display_fields_list(entry: &rbw::db::Entry) {
+    match &entry.data {
+        EntryData::Login {
+            username,
+            password,
+            totp,
+            uris,
+            ..
+        } => {
+            if username.is_some() {
+                println!("{}", rbw::db::FieldType::Username);
+            }
+            if totp.is_some() {
+                println!("{}", rbw::db::FieldType::Totp);
+            }
+            if !uris.is_empty() {
+                println!("{}", rbw::db::FieldType::Uris);
+            }
+            if password.is_some() {
+                println!("{}", rbw::db::FieldType::Password);
+            }
+        }
+        EntryData::Card {
+            cardholder_name,
+            number,
+            brand,
+            exp_month,
+            exp_year,
+            code,
+            ..
+        } => {
+            if number.is_some() {
+                println!("{}", rbw::db::FieldType::CardNumber);
+            }
+            if exp_month.is_some() {
+                println!("{}", rbw::db::FieldType::ExpMonth);
+            }
+            if exp_year.is_some() {
+                println!("{}", rbw::db::FieldType::ExpYear);
+            }
+            if code.is_some() {
+                println!("{}", rbw::db::FieldType::Cvv);
+            }
+            if cardholder_name.is_some() {
+                println!("{}", rbw::db::FieldType::Cardholder);
+            }
+            if brand.is_some() {
+                println!("{}", rbw::db::FieldType::Brand);
+            }
+        }
+
+        EntryData::Identity {
+            address1,
+            address2,
+            address3,
+            city,
+            state,
+            postal_code,
+            country,
+            phone,
+            email,
+            ssn,
+            license_number,
+            passport_number,
+            username,
+            title,
+            first_name,
+            middle_name,
+            last_name,
+            ..
+        } => {
+            if [title, first_name, middle_name, last_name]
+                .iter()
+                .any(|f| f.is_some())
+            {
+                // the display_field combines all these fields together.
+                println!("name");
+            }
+            if email.is_some() {
+                println!("{}", rbw::db::FieldType::Email);
+            }
+            if [address1, address2, address3].iter().any(|f| f.is_some()) {
+                // the display_field combines all these fields together.
+                println!("address");
+            }
+            if city.is_some() {
+                println!("{}", rbw::db::FieldType::City);
+            }
+            if state.is_some() {
+                println!("{}", rbw::db::FieldType::State);
+            }
+            if postal_code.is_some() {
+                println!("{}", rbw::db::FieldType::PostalCode);
+            }
+            if country.is_some() {
+                println!("{}", rbw::db::FieldType::Country);
+            }
+            if phone.is_some() {
+                println!("{}", rbw::db::FieldType::Phone);
+            }
+            if ssn.is_some() {
+                println!("{}", rbw::db::FieldType::Ssn);
+            }
+            if license_number.is_some() {
+                println!("{}", rbw::db::FieldType::License);
+            }
+            if passport_number.is_some() {
+                println!("{}", rbw::db::FieldType::Passport);
+            }
+            if username.is_some() {
+                println!("{}", rbw::db::FieldType::Username);
+            }
+        }
+
+        EntryData::SecureNote => (), // handled at the end
+        EntryData::SshKey {
+            fingerprint,
+            public_key,
+            ..
+        } => {
+            if fingerprint.is_some() {
+                println!("{}", rbw::db::FieldType::Fingerprint);
+            }
+            if public_key.is_some() {
+                println!("{}", rbw::db::FieldType::PublicKey);
+            }
+        }
+    }
+
+    if entry.notes.is_some() {
+        println!("{}", rbw::db::FieldType::Notes);
+    }
+    for f in &entry.fields {
+        if let Some(name) = &f.name {
+            println!("{name}");
+        }
+    }
+}
+
+pub fn display_json(entry: &rbw::db::Entry, desc: &str) -> anyhow::Result<()> {
+    serde_json::to_writer_pretty(std::io::stdout(), entry)
+        .context(format!("failed to write entry '{desc}' to stdout"))?;
+    println!();
+
+    Ok(())
+}
+
 #[allow(clippy::fn_params_excessive_bools)]
 pub fn get(
     needle: Needle,
@@ -515,9 +794,9 @@ pub fn get(
     let (_, decrypted) = find_entry(&db, needle, user, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
     if list_fields {
-        decrypted.display_fields_list();
+        display_fields_list(&decrypted);
     } else if raw {
-        decrypted.display_json(&desc)?;
+        display_json(&decrypted, &desc)?;
     } else {
         // if clipboard {
         //     match clipboard_store(password) {
@@ -529,17 +808,18 @@ pub fn get(
         //     }
         // }
         if full {
-            decrypted.display_long(&desc, clipboard, val_display_or_store, display_field);
+            display_entry_long(&decrypted, &desc, clipboard);
         } else if let Some(field) = field {
-            decrypted.display_field(&desc, field, clipboard, val_display_or_store, generate_totp);
+            display_entry_field(&decrypted, &desc, field, clipboard);
         } else {
-            decrypted.display_short(&desc, clipboard, val_display_or_store);
+            display_entry_short(&decrypted, &desc, clipboard);
         }
     }
 
     Ok(())
 }
 
+/// Used in "search" and "list"
 fn print_entry_list(
     entries: &[DecryptedListCipher],
     fields: &[ListField],
@@ -1690,13 +1970,6 @@ fn generate_totp(secret: &str) -> anyhow::Result<String> {
         }
         Steam => Ok(TOTP::new_steam(totp_params.secret).generate_current()?),
     }
-}
-
-fn display_field(name: &str, field: Option<&str>, clipboard: bool) -> bool {
-    field.map_or_else(
-        || false,
-        |field| val_display_or_store(clipboard, &format!("{name}: {field}")),
-    )
 }
 
 #[cfg(test)]
