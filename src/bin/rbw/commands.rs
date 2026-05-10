@@ -1579,7 +1579,7 @@ fn remove_db() -> anyhow::Result<()> {
 
 struct TotpParams {
     secret: Vec<u8>,
-    algorithm: String,
+    algorithm: totp_rs::Algorithm,
     digits: usize,
     period: u64,
 }
@@ -1600,6 +1600,19 @@ fn decode_totp_secret(secret: &str) -> anyhow::Result<Vec<u8>> {
     Err(anyhow::anyhow!("totp secret was not valid base32"))
 }
 
+// This function exists for the sake of making the generate_totp function less
+// densely packed and more readable
+fn generate_totp_algorithm_type(alg: &str) -> anyhow::Result<totp_rs::Algorithm> {
+    use totp_rs::Algorithm::*;
+    match alg {
+        "SHA1" => Ok(SHA1),
+        "SHA256" => Ok(SHA256),
+        "SHA512" => Ok(SHA512),
+        "STEAM" => Ok(Steam),
+        _ => anyhow::bail!("{alg} is not a valid algorithm"),
+    }
+}
+
 fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
     if let Ok(u) = url::Url::parse(secret) {
         match u.scheme() {
@@ -1615,15 +1628,19 @@ fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
                         .get("secret")
                         .ok_or_else(|| anyhow::anyhow!("totp secret url must have secret"))?,
                 )?;
-                let algorithm = query
-                    .get("algorithm")
-                    .map_or_else(|| String::from("SHA1"), ToString::to_string);
+
+                let algorithm = query.get("algorithm").map_or_else(
+                    || Ok(totp_rs::Algorithm::SHA1),
+                    |a| generate_totp_algorithm_type(&ToString::to_string(a)),
+                )?;
+
                 let digits = match query.get("digits") {
                     Some(dig) => dig.parse::<usize>().map_err(|_| {
                         anyhow::anyhow!("digits parameter in totp url must be a valid integer.")
                     })?,
                     None => 6,
                 };
+
                 let period = match query.get("period") {
                     Some(dig) => dig.parse::<u64>().map_err(|_| {
                         anyhow::anyhow!("period parameter in totp url must be a valid integer.")
@@ -1643,7 +1660,7 @@ fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
 
                 Ok(TotpParams {
                     secret: decode_totp_secret(steam_secret)?,
-                    algorithm: String::from("STEAM"),
+                    algorithm: totp_rs::Algorithm::Steam,
                     digits: 5,
                     period: TOTP_DEFAULT_STEP,
                 })
@@ -1655,42 +1672,29 @@ fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
     } else {
         Ok(TotpParams {
             secret: decode_totp_secret(secret)?,
-            algorithm: String::from("SHA1"),
+            algorithm: totp_rs::Algorithm::SHA1,
             digits: 6,
             period: TOTP_DEFAULT_STEP,
         })
     }
 }
 
-// This function exists for the sake of making the generate_totp function less
-// densely packed and more readable
-fn generate_totp_algorithm_type(alg: &str) -> anyhow::Result<totp_rs::Algorithm> {
-    match alg {
-        "SHA1" => Ok(totp_rs::Algorithm::SHA1),
-        "SHA256" => Ok(totp_rs::Algorithm::SHA256),
-        "SHA512" => Ok(totp_rs::Algorithm::SHA512),
-        "STEAM" => Ok(totp_rs::Algorithm::Steam),
-        _ => Err(anyhow::anyhow!(format!("{alg} is not a valid algorithm"))),
-    }
-}
-
 fn generate_totp(secret: &str) -> anyhow::Result<String> {
+    use totp_rs::{Algorithm::*, TOTP};
     let totp_params = parse_totp_secret(secret)?;
-    let alg = totp_params.algorithm.as_str();
 
-    match alg {
-        "SHA1" | "SHA256" | "SHA512" => Ok(totp_rs::TOTP::new_unchecked(
-            generate_totp_algorithm_type(alg)?,
-            totp_params.digits,
-            1, // the library docs say this should be a 1
-            totp_params.period,
-            totp_params.secret,
-        )
-        .generate_current()?),
-        "STEAM" => Ok(totp_rs::TOTP::new_steam(totp_params.secret).generate_current()?),
-        _ => Err(anyhow::anyhow!(format!(
-            "{alg} is not a valid totp algorithm"
-        ))),
+    match totp_params.algorithm {
+        SHA1 | SHA256 | SHA512 => {
+            Ok(TOTP::new_unchecked(
+                totp_params.algorithm,
+                totp_params.digits,
+                1, // the library docs say this should be a 1
+                totp_params.period,
+                totp_params.secret,
+            )
+            .generate_current()?)
+        }
+        Steam => Ok(TOTP::new_steam(totp_params.secret).generate_current()?),
     }
 }
 
