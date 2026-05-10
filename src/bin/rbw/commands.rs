@@ -499,9 +499,14 @@ fn display_field(name: &str, field: Option<&str>, clipboard: bool) -> bool {
 
 pub fn display_entry_field(entry: &rbw::db::Entry, desc: &str, field: &str, clipboard: bool) {
     let fields = entry.get_fields(&field.to_lowercase(), generate_totp);
-    fields.iter().for_each(|f| {
-        val_display_or_store(clipboard, f);
-    });
+    if fields.is_empty() {
+        // TODO: This is not 100% compatible text output with the project before refactor.
+        println!("entry for '{desc}' had no default field");
+    } else {
+        fields.iter().for_each(|f| {
+            val_display_or_store(clipboard, f);
+        });
+    }
 }
 
 pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str, clipboard: bool) -> bool {
