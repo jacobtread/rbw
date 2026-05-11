@@ -73,7 +73,7 @@ impl State {
     // if the agent gets a request for any of those cipherstrings that it saw
     // marked as master password reprompt during the most recent sync, it
     // forces a reprompt.
-    pub fn set_master_password_reprompt(&mut self, entries: &[rbw::db::Entry]) {
+    pub fn set_master_password_reprompt<T>(&mut self, entries: &[rbw::db::Entry<T>]) {
         self.master_password_reprompt.clear();
 
         let mut hasher = sha2::Sha256::new();

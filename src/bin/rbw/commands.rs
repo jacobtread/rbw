@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use rbw::db::{EntryData, Uri};
+use rbw::db::{Decrypted, Encrypted, EntryData, Uri};
 
 // The default number of seconds the generated TOTP
 // code lasts for before a new one must be generated
@@ -475,7 +475,7 @@ pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn display_entry_field(entry: &rbw::db::Entry, desc: &str, field: &str) {
+pub fn display_entry_field(entry: &rbw::db::Entry<Decrypted>, desc: &str, field: &str) {
     let fields = entry.get_field(&field.to_lowercase(), generate_totp);
     if fields.is_empty() {
         // TODO: This is not 100% compatible text output with the project before refactor.
@@ -487,7 +487,7 @@ pub fn display_entry_field(entry: &rbw::db::Entry, desc: &str, field: &str) {
     }
 }
 
-pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str) -> bool {
+pub fn display_entry_short(entry: &rbw::db::Entry<Decrypted>, desc: &str) -> bool {
     let short = entry.get_short();
     let Some(short) = short else {
         // Would be cool if self.data had a method named main_field_name :D
@@ -509,7 +509,7 @@ pub fn display_entry_short(entry: &rbw::db::Entry, desc: &str) -> bool {
 }
 
 /// This implementation mirror the `fn display_fied` method on which field to list
-pub fn display_entry_fields_list(entry: &rbw::db::Entry) {
+pub fn display_entry_fields_list(entry: &rbw::db::Entry<Decrypted>) {
     match &entry.data {
         EntryData::Login {
             username,
@@ -648,7 +648,7 @@ pub fn display_entry_fields_list(entry: &rbw::db::Entry) {
     }
 }
 
-pub fn display_entry_json(entry: &rbw::db::Entry, desc: &str) -> anyhow::Result<()> {
+pub fn display_entry_json(entry: &rbw::db::Entry<Decrypted>, desc: &str) -> anyhow::Result<()> {
     serde_json::to_writer_pretty(std::io::stdout(), entry)
         .context(format!("failed to write entry '{desc}' to stdout"))?;
     println!();
@@ -1287,34 +1287,34 @@ fn find_entry(
     username: Option<&str>,
     folder: Option<&str>,
     ignore_case: bool,
-) -> anyhow::Result<(rbw::db::Entry, rbw::db::Entry)> {
+) -> anyhow::Result<(rbw::db::Entry<Encrypted>, rbw::db::Entry<Decrypted>)> {
     if let Needle::Uuid(uuid, s) = needle {
         for cipher in &db.entries {
             if uuid::Uuid::parse_str(&cipher.id) == Ok(uuid) {
-                return Ok((cipher.clone(), decrypt_cipher(cipher)?));
+                return Ok((cipher.clone(), decrypt_entry(&cipher)?));
             }
         }
         needle = Needle::Name(s);
     }
 
-    let ciphers: Vec<(rbw::db::Entry, DecryptedSearchCipher)> = db
+    let ciphers: Vec<(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)> = db
         .entries
         .iter()
         .map(|entry| decrypt_search_cipher(entry).map(|decrypted| (entry.clone(), decrypted)))
         .collect::<anyhow::Result<_>>()?;
     let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
-    let decrypted_entry = decrypt_cipher(&entry)?;
+    let decrypted_entry = decrypt_entry(&entry)?;
     Ok((entry, decrypted_entry))
 }
 
 fn find_entry_raw(
-    entries: &[(rbw::db::Entry, DecryptedSearchCipher)],
+    entries: &[(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)],
     needle: &Needle,
     username: Option<&str>,
     folder: Option<&str>,
     ignore_case: bool,
-) -> anyhow::Result<(rbw::db::Entry, DecryptedSearchCipher)> {
-    let mut matches: Vec<(rbw::db::Entry, DecryptedSearchCipher)> = vec![];
+) -> anyhow::Result<(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)> {
+    let mut matches: Vec<(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)> = vec![];
 
     let find_matches = |strict_username, strict_folder, exact| {
         entries
@@ -1367,7 +1367,7 @@ fn find_entry_raw(
 }
 
 fn decrypt_list_cipher(
-    entry: &rbw::db::Entry,
+    entry: &rbw::db::Entry<Encrypted>,
     fields: &[ListField],
 ) -> anyhow::Result<DecryptedListCipher> {
     let id = entry.id.clone();
@@ -1444,7 +1444,7 @@ fn decrypt_list_cipher(
     })
 }
 
-fn decrypt_search_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedSearchCipher> {
+fn decrypt_search_cipher(entry: &rbw::db::Entry<Encrypted>) -> anyhow::Result<DecryptedSearchCipher> {
     let id = entry.id.clone();
     let name = crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?;
     let user = match &entry.data {
@@ -1565,7 +1565,7 @@ fn decrypt_cipher_fields(
         .collect::<anyhow::Result<_>>()
 }
 
-fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
+fn decrypt_entry(entry: &rbw::db::Entry<Encrypted>) -> anyhow::Result<rbw::db::Entry<Decrypted>> {
     // folder name should always be decrypted with the local key because
     // folders are local to a specific user's vault, not the organization
     let folder = entry
@@ -1700,7 +1700,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
         },
     };
 
-    Ok(rbw::db::Entry {
+    Ok(rbw::db::Entry::<Decrypted> {
         id: entry.id.clone(),
         folder,
         folder_id: None,
@@ -1712,6 +1712,7 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<rbw::db::Entry> {
         notes,
         history,
         master_password_reprompt: rbw::api::CipherRepromptType::None,
+        _state: std::marker::PhantomData,
     })
 }
 
@@ -2898,7 +2899,7 @@ mod test {
 
     #[track_caller]
     fn one_match(
-        entries: &[(rbw::db::Entry, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -2920,7 +2921,7 @@ mod test {
 
     #[track_caller]
     fn no_matches(
-        entries: &[(rbw::db::Entry, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -2942,7 +2943,7 @@ mod test {
 
     #[track_caller]
     fn many_matches(
-        entries: &[(rbw::db::Entry, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -2964,8 +2965,8 @@ mod test {
 
     #[track_caller]
     fn entries_eq(
-        a: &(rbw::db::Entry, DecryptedSearchCipher),
-        b: &(rbw::db::Entry, DecryptedSearchCipher),
+        a: &(rbw::db::Entry<Encrypted>, DecryptedSearchCipher),
+        b: &(rbw::db::Entry<Encrypted>, DecryptedSearchCipher),
     ) -> bool {
         a.0 == b.0 && a.1 == b.1
     }
@@ -2975,10 +2976,10 @@ mod test {
         username: Option<&str>,
         folder: Option<&str>,
         uris: &[(&str, Option<rbw::api::UriMatchType>)],
-    ) -> (rbw::db::Entry, DecryptedSearchCipher) {
+    ) -> (rbw::db::Entry<Encrypted>, DecryptedSearchCipher) {
         let id = uuid::Uuid::new_v4();
         (
-            rbw::db::Entry {
+            rbw::db::Entry::<Encrypted> {
                 id: id.to_string(),
                 org_id: None,
                 folder: folder.map(|_| "encrypted folder name".to_string()),
@@ -3001,6 +3002,7 @@ mod test {
                 history: vec![],
                 key: None,
                 master_password_reprompt: rbw::api::CipherRepromptType::None,
+                _state: std::marker::PhantomData
             },
             DecryptedSearchCipher {
                 id: id.to_string(),

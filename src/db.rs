@@ -188,8 +188,15 @@ pub struct HistoryEntry {
     pub password: String,
 }
 
+// These are markers for type state pattern
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Encrypted;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Decrypted;
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq)]
-pub struct Entry {
+pub struct Entry<State> {
     pub id: String,
     pub org_id: Option<String>,
     pub folder: Option<String>,
@@ -201,15 +208,19 @@ pub struct Entry {
     pub history: Vec<HistoryEntry>,
     pub key: Option<String>,
     pub master_password_reprompt: crate::api::CipherRepromptType,
+    #[serde(skip)]
+    pub _state: std::marker::PhantomData<State>,
 }
 
 // Most impl fn don't belong here. I am talking of display ones, but looking to relocate them
 // later in the refactor process.
-impl Entry {
+impl<T> Entry<T> {
     pub fn master_password_reprompt(&self) -> bool {
         self.master_password_reprompt != crate::api::CipherRepromptType::None
     }
+}
 
+impl Entry<Decrypted> {
     /// The "short" is the first field that comes to mind when speaking of a entry, like the
     /// password for the Login , the number for the Card, etc.
     pub fn get_short(&self) -> Option<String> {
@@ -431,7 +442,7 @@ fn writefield(
 /// Display impl is a bit messy as we need to support previous output format.
 /// I would, for example, yank this displayed bool and always print Notes after ---.
 /// I would avoid printing the "short" field this way too, but rather print it as a normal field.
-impl Display for Entry {
+impl Display for Entry<Decrypted> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(short) = self.get_short() {
             writeln!(f, "{short}")?;
@@ -634,7 +645,7 @@ pub struct Db {
     pub protected_private_key: Option<String>,
     pub protected_org_keys: std::collections::HashMap<String, String>,
 
-    pub entries: Vec<Entry>,
+    pub entries: Vec<Entry<Encrypted>>,
 }
 
 impl Db {

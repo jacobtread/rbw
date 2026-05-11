@@ -3,10 +3,14 @@
 #![allow(clippy::as_conversions)]
 
 use std::{
-    collections::HashMap, fmt::Display, path::{Path, PathBuf}, str::FromStr, sync::Arc
+    collections::HashMap,
+    fmt::Display,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
 };
 
-use crate::prelude::*;
+use crate::{db::Encrypted, prelude::*};
 
 use rand::distr::SampleString as _;
 use serde::{Deserialize, Serialize};
@@ -421,7 +425,7 @@ struct SyncResCipher {
 }
 
 impl SyncResCipher {
-    fn to_entry(&self, folders: &[SyncResFolder]) -> Option<crate::db::Entry> {
+    fn to_entry(&self, folders: &[SyncResFolder]) -> Option<crate::db::Entry<Encrypted>> {
         if self.deleted_date.is_some() {
             return None;
         }
@@ -518,7 +522,7 @@ impl SyncResCipher {
                 })
                 .collect()
         });
-        Some(crate::db::Entry {
+        Some(crate::db::Entry::<Encrypted> {
             id: self.id.clone(),
             org_id: self.organization_id.clone(),
             folder,
@@ -530,6 +534,7 @@ impl SyncResCipher {
             history,
             key: self.key.clone(),
             master_password_reprompt: self.reprompt,
+            _state: std::marker::PhantomData,
         })
     }
 }
@@ -1253,7 +1258,7 @@ impl Client {
         String,
         String,
         HashMap<String, String>,
-        Vec<crate::db::Entry>,
+        Vec<crate::db::Entry<Encrypted>>,
     )> {
         let res = ClientRequest::Sync(access_token).req(self).await?;
         match res.status() {
@@ -1507,10 +1512,7 @@ async fn handle_sso_callback(
     }
 }
 
-fn sso_query_code(
-    params: &HashMap<String, String>,
-    state: &str,
-) -> Result<String> {
+fn sso_query_code(params: &HashMap<String, String>, state: &str) -> Result<String> {
     let sso_code = params
         .get("code")
         .ok_or(Error::FailedToProcessSSOCallback {

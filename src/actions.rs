@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{db::Encrypted, prelude::*};
 
 pub async fn register(email: &str, apikey: crate::locked::ApiKey) -> Result<()> {
     let (client, config) = api_client_async().await?;
@@ -118,7 +118,7 @@ pub async fn sync(
         String,
         String,
         std::collections::HashMap<String, String>,
-        Vec<crate::db::Entry>,
+        Vec<crate::db::Entry<Encrypted>>,
     ),
 )> {
     with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
@@ -134,7 +134,7 @@ async fn sync_once(
     String,
     String,
     std::collections::HashMap<String, String>,
-    Vec<crate::db::Entry>,
+    Vec<crate::db::Entry<Encrypted>>,
 )> {
     let (client, _) = api_client_async().await?;
     client.sync(access_token).await
