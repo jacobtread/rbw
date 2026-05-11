@@ -209,21 +209,6 @@ impl From<DecryptedSearchCipher> for DecryptedListCipher {
     }
 }
 
-fn val_display_or_store(clipboard: bool, password: &str) -> bool {
-    if clipboard {
-        match clipboard_store(password) {
-            Ok(()) => true,
-            Err(e) => {
-                eprintln!("{e}");
-                false
-            }
-        }
-    } else {
-        println!("{password}");
-        true
-    }
-}
-
 fn matches_url(
     url: &str,
     match_type: Option<rbw::api::UriMatchType>,
@@ -854,7 +839,14 @@ pub fn code(
 
     if let EntryData::Login { totp, .. } = decrypted.data {
         if let Some(totp) = totp {
-            val_display_or_store(clipboard, &generate_totp(&totp)?);
+            let code = generate_totp(&totp)?;
+            if clipboard {
+                if let Err(e) = clipboard_store(&code) {
+                    eprintln!("{e}");
+                }
+            } else {
+                println!("{code}");
+            }
         } else {
             return Err(anyhow::anyhow!("entry does not contain a totp secret"));
         }
