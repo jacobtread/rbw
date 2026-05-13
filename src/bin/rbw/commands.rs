@@ -1545,7 +1545,7 @@ fn decrypt_field_warn(
     })
 }
 
-fn decrypt_cipher_fields(
+fn decrypt_entry_custom_fields(
     fields: &[rbw::db::DynamicField],
     key: Option<&str>,
     org_id: Option<&str>,
@@ -1580,7 +1580,7 @@ fn decrypt_entry(entry: &rbw::db::Entry<Encrypted>) -> anyhow::Result<rbw::db::E
     };
 
     let fields =
-        decrypt_cipher_fields(&entry.fields, entry.key.as_deref(), entry.org_id.as_deref())?;
+        decrypt_entry_custom_fields(&entry.fields, entry.key.as_deref(), entry.org_id.as_deref())?;
 
     let notes = entry
         .notes
