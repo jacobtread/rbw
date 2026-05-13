@@ -58,19 +58,20 @@ pub fn parse_needle(arg: &str) -> Result<Needle, std::convert::Infallible> {
 
 /// It's a subset of db::Entry with only decrypted fields
 #[derive(Debug, serde::Serialize)]
-struct DecryptedListCipher {
+struct ListEntry {
     id: String,
-    name: Option<String>,
-    user: Option<String>,
-    folder: Option<String>,
-    uris: Option<Vec<String>>,
     #[serde(rename = "type")]
     entry_type: Option<String>,
+    folder: Option<String>,
+    name: Option<String>,
+    user: Option<String>,
+    uris: Option<Vec<String>>,
 }
 
+/// TODO: This could be re-used as ListEntry as they have all fields
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedSearchCipher {
+struct SearchEntry {
     id: String,
     #[serde(rename = "type")]
     entry_type: String,
@@ -82,7 +83,7 @@ struct DecryptedSearchCipher {
     notes: Option<String>,
 }
 
-impl DecryptedSearchCipher {
+impl SearchEntry {
     fn display_name(&self) -> String {
         self.user
             .as_ref()
@@ -196,8 +197,8 @@ impl DecryptedSearchCipher {
     }
 }
 
-impl From<DecryptedSearchCipher> for DecryptedListCipher {
-    fn from(value: DecryptedSearchCipher) -> Self {
+impl From<SearchEntry> for ListEntry {
+    fn from(value: SearchEntry) -> Self {
         Self {
             id: value.id,
             entry_type: Some(value.entry_type),
@@ -271,6 +272,7 @@ fn host_port(url: &url::Url) -> Option<String> {
     )
 }
 
+// TODO: This could be a dup of FieldType?
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ListField {
     Id,
@@ -463,7 +465,7 @@ pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
     unlock()?;
 
     let db = load_db()?;
-    let mut entries: Vec<DecryptedListCipher> = db
+    let mut entries: Vec<ListEntry> = db
         .entries
         .iter()
         .map(|entry| decrypt_list_cipher(entry, &fields))
@@ -725,11 +727,7 @@ pub fn get(
 }
 
 /// Used in "search" and "list"
-fn print_entry_list(
-    entries: &[DecryptedListCipher],
-    fields: &[ListField],
-    raw: bool,
-) -> anyhow::Result<()> {
+fn print_entry_list(entries: &[ListEntry], fields: &[ListField], raw: bool) -> anyhow::Result<()> {
     if raw {
         serde_json::to_writer_pretty(std::io::stdout(), &entries)
             .context("failed to write entries to stdout".to_string())?;
@@ -798,7 +796,7 @@ pub fn search(
 
     let db = load_db()?;
 
-    let mut entries: Vec<DecryptedListCipher> = db
+    let mut entries: Vec<ListEntry> = db
         .entries
         .iter()
         .map(decrypt_search_cipher)
@@ -1297,7 +1295,7 @@ fn find_entry(
         needle = Needle::Name(s);
     }
 
-    let ciphers: Vec<(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)> = db
+    let ciphers: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = db
         .entries
         .iter()
         .map(|entry| decrypt_search_cipher(entry).map(|decrypted| (entry.clone(), decrypted)))
@@ -1308,13 +1306,13 @@ fn find_entry(
 }
 
 fn find_entry_raw(
-    entries: &[(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)],
+    entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
     needle: &Needle,
     username: Option<&str>,
     folder: Option<&str>,
     ignore_case: bool,
-) -> anyhow::Result<(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)> {
-    let mut matches: Vec<(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)> = vec![];
+) -> anyhow::Result<(rbw::db::Entry<Encrypted>, SearchEntry)> {
+    let mut matches: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = vec![];
 
     let find_matches = |strict_username, strict_folder, exact| {
         entries
@@ -1369,7 +1367,7 @@ fn find_entry_raw(
 fn decrypt_list_cipher(
     entry: &rbw::db::Entry<Encrypted>,
     fields: &[ListField],
-) -> anyhow::Result<DecryptedListCipher> {
+) -> anyhow::Result<ListEntry> {
     let id = entry.id.clone();
     let name = if fields.contains(&ListField::Name) {
         Some(crate::actions::decrypt(
@@ -1434,7 +1432,7 @@ fn decrypt_list_cipher(
         })
         .map(str::to_string);
 
-    Ok(DecryptedListCipher {
+    Ok(ListEntry {
         id,
         name,
         user,
@@ -1444,7 +1442,7 @@ fn decrypt_list_cipher(
     })
 }
 
-fn decrypt_search_cipher(entry: &rbw::db::Entry<Encrypted>) -> anyhow::Result<DecryptedSearchCipher> {
+fn decrypt_search_cipher(entry: &rbw::db::Entry<Encrypted>) -> anyhow::Result<SearchEntry> {
     let id = entry.id.clone();
     let name = crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?;
     let user = match &entry.data {
@@ -1511,7 +1509,7 @@ fn decrypt_search_cipher(entry: &rbw::db::Entry<Encrypted>) -> anyhow::Result<De
     })
     .to_string();
 
-    Ok(DecryptedSearchCipher {
+    Ok(SearchEntry {
         id,
         entry_type,
         folder,
@@ -1548,14 +1546,14 @@ fn decrypt_field_warn(
 }
 
 fn decrypt_cipher_fields(
-    fields: &[rbw::db::Field],
+    fields: &[rbw::db::DynamicField],
     key: Option<&str>,
     org_id: Option<&str>,
-) -> anyhow::Result<Vec<rbw::db::Field>> {
+) -> anyhow::Result<Vec<rbw::db::DynamicField>> {
     fields
         .iter()
         .map(|field| {
-            Ok(rbw::db::Field {
+            Ok(rbw::db::DynamicField {
                 name: decrypt_string(field.name.as_deref(), key, org_id)?,
                 value: decrypt_string(field.value.as_deref(), key, org_id)?,
                 ty: field.ty,
@@ -2899,7 +2897,7 @@ mod test {
 
     #[track_caller]
     fn one_match(
-        entries: &[(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -2921,7 +2919,7 @@ mod test {
 
     #[track_caller]
     fn no_matches(
-        entries: &[(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -2943,7 +2941,7 @@ mod test {
 
     #[track_caller]
     fn many_matches(
-        entries: &[(rbw::db::Entry<Encrypted>, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -2965,8 +2963,8 @@ mod test {
 
     #[track_caller]
     fn entries_eq(
-        a: &(rbw::db::Entry<Encrypted>, DecryptedSearchCipher),
-        b: &(rbw::db::Entry<Encrypted>, DecryptedSearchCipher),
+        a: &(rbw::db::Entry<Encrypted>, SearchEntry),
+        b: &(rbw::db::Entry<Encrypted>, SearchEntry),
     ) -> bool {
         a.0 == b.0 && a.1 == b.1
     }
@@ -2976,7 +2974,7 @@ mod test {
         username: Option<&str>,
         folder: Option<&str>,
         uris: &[(&str, Option<rbw::api::UriMatchType>)],
-    ) -> (rbw::db::Entry<Encrypted>, DecryptedSearchCipher) {
+    ) -> (rbw::db::Entry<Encrypted>, SearchEntry) {
         let id = uuid::Uuid::new_v4();
         (
             rbw::db::Entry::<Encrypted> {
@@ -3002,9 +3000,9 @@ mod test {
                 history: vec![],
                 key: None,
                 master_password_reprompt: rbw::api::CipherRepromptType::None,
-                _state: std::marker::PhantomData
+                _state: std::marker::PhantomData,
             },
-            DecryptedSearchCipher {
+            SearchEntry {
                 id: id.to_string(),
                 entry_type: "Login".to_string(),
                 folder: folder.map(ToString::to_string),

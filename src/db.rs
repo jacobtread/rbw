@@ -131,8 +131,9 @@ impl Display for FieldType {
     }
 }
 
+/// Used to describe custom fields in the application.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq)]
-pub struct Field {
+pub struct DynamicField {
     pub ty: Option<crate::api::FieldType>,
     pub name: Option<String>,
     pub value: Option<String>,
@@ -203,7 +204,7 @@ pub struct Entry<State> {
     pub folder_id: Option<String>,
     pub name: String,
     pub data: EntryData,
-    pub fields: Vec<Field>,
+    pub fields: Vec<DynamicField>,
     pub notes: Option<String>,
     pub history: Vec<HistoryEntry>,
     pub key: Option<String>,

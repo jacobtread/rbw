@@ -172,7 +172,7 @@ pub fn edit(
     org_id: Option<&str>,
     name: &str,
     data: &crate::db::EntryData,
-    fields: &[crate::db::Field],
+    fields: &[crate::db::DynamicField],
     notes: Option<&str>,
     folder_uuid: Option<&str>,
     history: &[crate::db::HistoryEntry],

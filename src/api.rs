@@ -514,7 +514,7 @@ impl SyncResCipher {
         let fields = self.fields.as_ref().map_or_else(Vec::new, |fields| {
             fields
                 .iter()
-                .map(|field| crate::db::Field {
+                .map(|field| crate::db::DynamicField {
                     ty: field.ty,
                     name: field.name.clone(),
                     value: field.value.clone(),
@@ -1323,7 +1323,7 @@ impl Client {
         org_id: Option<&str>,
         name: &str,
         data: &crate::db::EntryData,
-        fields: &[crate::db::Field],
+        fields: &[crate::db::DynamicField],
         notes: Option<&str>,
         folder_uuid: Option<&str>,
         history: &[crate::db::HistoryEntry],
