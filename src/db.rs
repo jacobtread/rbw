@@ -426,6 +426,165 @@ impl Entry<Decrypted> {
     }
 }
 
+pub trait Decrypter {
+    fn decrypt_field(&mut self, entry: &Entry<Encrypted>, field: &str) -> anyhow::Result<String>;
+}
+
+impl Entry<Encrypted> {
+    fn decrypt_optstring(
+        &self,
+        optstring: &Option<String>,
+        decrypter: &mut impl Decrypter,
+    ) -> anyhow::Result<Option<String>> {
+        Ok(match optstring {
+            Some(s) => Some(decrypter.decrypt_field(&self, s)?),
+            None => None,
+        })
+    }
+
+    pub fn decrypt_custom_fields(
+        &self,
+        decrypter: &mut impl Decrypter,
+    ) -> anyhow::Result<Vec<DynamicField>> {
+        self.fields
+            .iter()
+            .map(|field| {
+                Ok(DynamicField {
+                    name: self.decrypt_optstring(&field.name, decrypter)?,
+                    value: self.decrypt_optstring(&field.value, decrypter)?,
+                    ty: field.ty,
+                    linked_id: None, // TODO: Check if None here is correct
+                })
+            })
+            .collect()
+    }
+
+    pub fn decrypt(&self, decrypter: &mut impl Decrypter) -> anyhow::Result<Entry<Decrypted>> {
+        // folder name should always be decrypted with the local key because
+        // folders are local to a specific user's vault, not the organization
+        let folder = self.decrypt_optstring(&self.folder, decrypter)?;
+
+        let fields = self.decrypt_custom_fields(decrypter)?;
+
+        let notes = self.decrypt_optstring(&self.notes, decrypter)?;
+
+        let history = self
+            .history
+            .iter()
+            .map(|he| {
+                Ok(HistoryEntry {
+                    last_used_date: he.last_used_date.clone(),
+                    password: decrypter.decrypt_field(&self, &he.password)?,
+                })
+            })
+            .collect::<anyhow::Result<_>>()?;
+
+        let mut df = |ft, val: &Option<String>| self.decrypt_optstring(&val, decrypter);
+
+        let data = match &self.data {
+            EntryData::Login {
+                username,
+                password,
+                totp,
+                uris,
+            } => EntryData::Login {
+                username: df(FieldType::Username, username)?,
+                password: df(FieldType::Password, password)?,
+                totp: df(FieldType::Totp, totp)?,
+                uris: uris
+                    .iter()
+                    .map(|s| {
+                        Ok(df(FieldType::Uris, &Some(s.uri.clone()))?.map(|uri| Uri {
+                            uri,
+                            match_type: s.match_type,
+                        }))
+                    })
+                    .collect::<anyhow::Result<Vec<Option<Uri>>>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+            },
+            EntryData::Card {
+                cardholder_name,
+                number,
+                brand,
+                exp_month,
+                exp_year,
+                code,
+            } => EntryData::Card {
+                cardholder_name: df(FieldType::Cardholder, cardholder_name)?,
+                number: df(FieldType::CardNumber, number)?,
+                brand: df(FieldType::Brand, brand)?,
+                exp_month: df(FieldType::ExpMonth, exp_month)?,
+                exp_year: df(FieldType::ExpYear, exp_year)?,
+                code: df(FieldType::Cvv, code)?,
+            },
+            EntryData::Identity {
+                title,
+                first_name,
+                middle_name,
+                last_name,
+                address1,
+                address2,
+                address3,
+                city,
+                state,
+                postal_code,
+                country,
+                phone,
+                email,
+                ssn,
+                license_number,
+                passport_number,
+                username,
+            } => EntryData::Identity {
+                title: df(FieldType::Title, title)?,
+                first_name: df(FieldType::FirstName, first_name)?,
+                middle_name: df(FieldType::MiddleName, middle_name)?,
+                last_name: df(FieldType::LastName, last_name)?,
+                address1: df(FieldType::Address1, address1)?,
+                address2: df(FieldType::Address2, address2)?,
+                address3: df(FieldType::Address3, address3)?,
+                city: df(FieldType::City, city)?,
+                state: df(FieldType::State, state)?,
+                postal_code: df(FieldType::PostalCode, postal_code)?,
+                country: df(FieldType::Country, country)?,
+                phone: df(FieldType::Phone, phone)?,
+                email: df(FieldType::Email, email)?,
+                ssn: df(FieldType::Ssn, ssn)?,
+                license_number: df(FieldType::License, license_number)?,
+                passport_number: df(FieldType::Passport, passport_number)?,
+                username: df(FieldType::Username, username)?,
+            },
+            EntryData::SecureNote => EntryData::SecureNote {},
+            EntryData::SshKey {
+                public_key,
+                fingerprint,
+                private_key,
+            } => EntryData::SshKey {
+                public_key: df(FieldType::PublicKey, public_key)?,
+                fingerprint: df(FieldType::Fingerprint, fingerprint)?,
+                private_key: df(FieldType::PrivateKey, private_key)?,
+            },
+        };
+
+        Ok(Entry::<Decrypted> {
+            id: self.id.clone(),
+            folder,
+            folder_id: None,
+            org_id: None,
+            key: None,
+            name: decrypter.decrypt_field(&self, &self.name)?,
+            data,
+            fields,
+            notes,
+            history,
+            master_password_reprompt: crate::api::CipherRepromptType::None,
+            _state: std::marker::PhantomData,
+        })
+    }
+}
+
 fn writefield(
     f: &mut std::fmt::Formatter<'_>,
     label: &str,

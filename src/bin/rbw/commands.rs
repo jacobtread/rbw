@@ -56,6 +56,22 @@ pub fn parse_needle(arg: &str) -> Result<Needle, std::convert::Infallible> {
     Ok(Needle::Name(arg.to_string()))
 }
 
+struct Decrypter {}
+
+impl rbw::db::Decrypter for Decrypter {
+    fn decrypt_field(
+        &mut self,
+        entry: &rbw::db::Entry<Encrypted>,
+        field: &str,
+    ) -> anyhow::Result<String> {
+        Ok(crate::actions::decrypt(
+            field,
+            entry.key.as_deref(),
+            entry.org_id.as_deref(),
+        )?)
+    }
+}
+
 /// It's a subset of db::Entry with only decrypted fields
 #[derive(Debug, serde::Serialize)]
 struct ListEntry {
@@ -1289,7 +1305,7 @@ fn find_entry(
     if let Needle::Uuid(uuid, s) = needle {
         for cipher in &db.entries {
             if uuid::Uuid::parse_str(&cipher.id) == Ok(uuid) {
-                return Ok((cipher.clone(), decrypt_entry(&cipher)?));
+                return Ok((cipher.clone(), cipher.decrypt(&mut Decrypter {})?));
             }
         }
         needle = Needle::Name(s);
@@ -1301,7 +1317,7 @@ fn find_entry(
         .map(|entry| decrypt_search_cipher(entry).map(|decrypted| (entry.clone(), decrypted)))
         .collect::<anyhow::Result<_>>()?;
     let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
-    let decrypted_entry = decrypt_entry(&entry)?;
+    let decrypted_entry = entry.decrypt(&mut Decrypter {})?;
     Ok((entry, decrypted_entry))
 }
 
@@ -1542,175 +1558,6 @@ fn decrypt_field_warn(
     decrypt_string(field, key, org_id).unwrap_or_else(|e| {
         log::warn!("failed to decrypt {name}: {e}");
         None
-    })
-}
-
-fn decrypt_entry_custom_fields(
-    fields: &[rbw::db::DynamicField],
-    key: Option<&str>,
-    org_id: Option<&str>,
-) -> anyhow::Result<Vec<rbw::db::DynamicField>> {
-    fields
-        .iter()
-        .map(|field| {
-            Ok(rbw::db::DynamicField {
-                name: decrypt_string(field.name.as_deref(), key, org_id)?,
-                value: decrypt_string(field.value.as_deref(), key, org_id)?,
-                ty: field.ty,
-                linked_id: None,
-            })
-        })
-        .collect::<anyhow::Result<_>>()
-}
-
-fn decrypt_entry(entry: &rbw::db::Entry<Encrypted>) -> anyhow::Result<rbw::db::Entry<Decrypted>> {
-    // folder name should always be decrypted with the local key because
-    // folders are local to a specific user's vault, not the organization
-    let folder = entry
-        .folder
-        .as_ref()
-        .map(|folder| crate::actions::decrypt(folder, None, None))
-        .transpose();
-    let folder = match folder {
-        Ok(folder) => folder,
-        Err(e) => {
-            log::warn!("failed to decrypt folder name: {e}");
-            None
-        }
-    };
-
-    let fields =
-        decrypt_entry_custom_fields(&entry.fields, entry.key.as_deref(), entry.org_id.as_deref())?;
-
-    let notes = entry
-        .notes
-        .as_ref()
-        .map(|notes| crate::actions::decrypt(notes, entry.key.as_deref(), entry.org_id.as_deref()))
-        .transpose();
-    let notes = match notes {
-        Ok(notes) => notes,
-        Err(e) => {
-            log::warn!("failed to decrypt notes: {e}");
-            None
-        }
-    };
-    let history = entry
-        .history
-        .iter()
-        .map(|history_entry| {
-            Ok(rbw::db::HistoryEntry {
-                last_used_date: history_entry.last_used_date.clone(),
-                password: crate::actions::decrypt(
-                    &history_entry.password,
-                    entry.key.as_deref(),
-                    entry.org_id.as_deref(),
-                )?,
-            })
-        })
-        .collect::<anyhow::Result<_>>()?;
-
-    let df = |ft, val: Option<&str>| {
-        decrypt_field_warn(ft, val, entry.key.as_deref(), entry.org_id.as_deref())
-    };
-
-    let data = match &entry.data {
-        rbw::db::EntryData::Login {
-            username,
-            password,
-            totp,
-            uris,
-        } => EntryData::Login {
-            username: df(rbw::db::FieldType::Username, username.as_deref()),
-            password: df(rbw::db::FieldType::Password, password.as_deref()),
-            totp: df(rbw::db::FieldType::Totp, totp.as_deref()),
-            uris: uris
-                .iter()
-                .map(|s| {
-                    df(rbw::db::FieldType::Uris, Some(&s.uri)).map(|uri| Uri {
-                        uri,
-                        match_type: s.match_type,
-                    })
-                })
-                .flatten()
-                .collect(),
-        },
-        rbw::db::EntryData::Card {
-            cardholder_name,
-            number,
-            brand,
-            exp_month,
-            exp_year,
-            code,
-        } => EntryData::Card {
-            cardholder_name: df(rbw::db::FieldType::Cardholder, cardholder_name.as_deref()),
-            number: df(rbw::db::FieldType::CardNumber, number.as_deref()),
-            brand: df(rbw::db::FieldType::Brand, brand.as_deref()),
-            exp_month: df(rbw::db::FieldType::ExpMonth, exp_month.as_deref()),
-            exp_year: df(rbw::db::FieldType::ExpYear, exp_year.as_deref()),
-            code: df(rbw::db::FieldType::Cvv, code.as_deref()),
-        },
-        rbw::db::EntryData::Identity {
-            title,
-            first_name,
-            middle_name,
-            last_name,
-            address1,
-            address2,
-            address3,
-            city,
-            state,
-            postal_code,
-            country,
-            phone,
-            email,
-            ssn,
-            license_number,
-            passport_number,
-            username,
-        } => EntryData::Identity {
-            title: df(rbw::db::FieldType::Title, title.as_deref()),
-            first_name: df(rbw::db::FieldType::FirstName, first_name.as_deref()),
-            middle_name: df(rbw::db::FieldType::MiddleName, middle_name.as_deref()),
-            last_name: df(rbw::db::FieldType::LastName, last_name.as_deref()),
-            address1: df(rbw::db::FieldType::Address1, address1.as_deref()),
-            address2: df(rbw::db::FieldType::Address2, address2.as_deref()),
-            address3: df(rbw::db::FieldType::Address3, address3.as_deref()),
-            city: df(rbw::db::FieldType::City, city.as_deref()),
-            state: df(rbw::db::FieldType::State, state.as_deref()),
-            postal_code: df(rbw::db::FieldType::PostalCode, postal_code.as_deref()),
-            country: df(rbw::db::FieldType::Country, country.as_deref()),
-            phone: df(rbw::db::FieldType::Phone, phone.as_deref()),
-            email: df(rbw::db::FieldType::Email, email.as_deref()),
-            ssn: df(rbw::db::FieldType::Ssn, ssn.as_deref()),
-            license_number: df(rbw::db::FieldType::License, license_number.as_deref()),
-            passport_number: df(rbw::db::FieldType::Passport, passport_number.as_deref()),
-            username: df(rbw::db::FieldType::Username, username.as_deref()),
-        },
-        rbw::db::EntryData::SecureNote => EntryData::SecureNote {},
-        rbw::db::EntryData::SshKey {
-            public_key,
-            fingerprint,
-            private_key,
-        } => EntryData::SshKey {
-            public_key: df(rbw::db::FieldType::PublicKey, public_key.as_deref()),
-            fingerprint: df(rbw::db::FieldType::Fingerprint, fingerprint.as_deref()),
-            private_key: df(rbw::db::FieldType::PrivateKey, private_key.as_deref()),
-        },
-    };
-
-    Ok(rbw::db::Entry::<Decrypted> {
-        id: entry.id.clone(),
-        folder,
-        folder_id: None,
-        org_id: None,
-        key: None,
-        name: crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?,
-        data,
-        fields,
-        notes,
-        history,
-        master_password_reprompt: rbw::api::CipherRepromptType::None,
-        _state: std::marker::PhantomData,
     })
 }
 
