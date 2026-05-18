@@ -468,32 +468,6 @@ pub fn sync() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
-    let fields: Vec<ListField> = if raw {
-        ListField::all()
-    } else {
-        fields
-            .iter()
-            .map(TryFrom::try_from)
-            .collect::<anyhow::Result<_>>()?
-    };
-
-    unlock()?;
-
-    let db = load_db()?;
-    let mut entries: Vec<ListEntry> = db
-        .entries
-        .iter()
-        .map(TryInto::<SearchEntry>::try_into)
-        .map(|entry| entry.map(Into::into))
-        .collect::<anyhow::Result<_>>()?;
-    entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-
-    print_entry_list(&entries, &fields, raw)?;
-
-    Ok(())
-}
-
 pub fn display_entry_field(entry: &rbw::db::Entry<Decrypted>, desc: &str, field: &str) {
     let fields = entry.get_field(&field.to_lowercase(), generate_totp);
     if fields.is_empty() {
@@ -830,6 +804,10 @@ pub fn search(
     print_entry_list(&entries, &fields, raw)?;
 
     Ok(())
+}
+
+pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
+    search("", fields, None, raw)
 }
 
 pub fn code(
