@@ -484,7 +484,8 @@ pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
     let mut entries: Vec<ListEntry> = db
         .entries
         .iter()
-        .map(|entry| decrypt_list_cipher(entry, &fields))
+        .map(TryInto::<SearchEntry>::try_into)
+        .map(|entry| entry.map(Into::into))
         .collect::<anyhow::Result<_>>()?;
     entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
@@ -1380,84 +1381,6 @@ fn find_entry_raw(
     }
 }
 
-fn decrypt_list_cipher(
-    entry: &rbw::db::Entry<Encrypted>,
-    fields: &[ListField],
-) -> anyhow::Result<ListEntry> {
-    let id = entry.id.clone();
-    let name = if fields.contains(&ListField::Name) {
-        Some(crate::actions::decrypt(
-            &entry.name,
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        )?)
-    } else {
-        None
-    };
-    let user = if fields.contains(&ListField::User) {
-        match &entry.data {
-            rbw::db::EntryData::Login { username, .. } => decrypt_field_warn(
-                rbw::db::FieldType::Username,
-                username.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            _ => None,
-        }
-    } else {
-        None
-    };
-    let folder = if fields.contains(&ListField::Folder) {
-        // folder name should always be decrypted with the local key because
-        // folders are local to a specific user's vault, not the organization
-        entry
-            .folder
-            .as_ref()
-            .map(|folder| crate::actions::decrypt(folder, None, None))
-            .transpose()?
-    } else {
-        None
-    };
-    let uris = if fields.contains(&ListField::Uri) {
-        match &entry.data {
-            rbw::db::EntryData::Login { uris, .. } => Some(
-                uris.iter()
-                    .filter_map(|s| {
-                        decrypt_field_warn(
-                            rbw::db::FieldType::Uris,
-                            Some(&s.uri),
-                            entry.key.as_deref(),
-                            entry.org_id.as_deref(),
-                        )
-                    })
-                    .collect(),
-            ),
-            _ => None,
-        }
-    } else {
-        None
-    };
-    let entry_type = fields
-        .contains(&ListField::EntryType)
-        .then_some(match &entry.data {
-            rbw::db::EntryData::Login { .. } => "Login",
-            rbw::db::EntryData::Identity { .. } => "Identity",
-            rbw::db::EntryData::SshKey { .. } => "SSH Key",
-            rbw::db::EntryData::SecureNote => "Note",
-            rbw::db::EntryData::Card { .. } => "Card",
-        })
-        .map(str::to_string);
-
-    Ok(ListEntry {
-        id,
-        name,
-        user,
-        folder,
-        uris,
-        entry_type,
-    })
-}
-
 impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
     type Error = anyhow::Error;
 
@@ -1511,30 +1434,6 @@ impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
             notes,
         })
     }
-}
-
-/// This accepts a optional string and optionally decrypts it?
-fn decrypt_string(
-    string: Option<&str>,
-    entry_key: Option<&str>,
-    org_id: Option<&str>,
-) -> anyhow::Result<Option<String>> {
-    string
-        .map(|f| crate::actions::decrypt(f, entry_key, org_id))
-        .transpose()
-}
-
-/// This accepts a optional field and optionally decrypts it?
-fn decrypt_field_warn(
-    name: rbw::db::FieldType,
-    field: Option<&str>,
-    key: Option<&str>,
-    org_id: Option<&str>,
-) -> Option<String> {
-    decrypt_string(field, key, org_id).unwrap_or_else(|e| {
-        log::warn!("failed to decrypt {name}: {e}");
-        None
-    })
 }
 
 fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
