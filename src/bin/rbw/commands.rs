@@ -187,10 +187,8 @@ impl SearchEntry {
     }
 
     fn search_match(&self, term: &str, folder: Option<&str>) -> bool {
-        if let Some(folder) = folder {
-            if self.folder.as_deref() != Some(folder) {
-                return false;
-            }
+        if folder.is_some() && self.folder.as_deref() != folder {
+            return false;
         }
 
         let mut fields = vec![self.name.clone()];
