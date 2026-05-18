@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use rbw::db::{Decrypted, Encrypted, EntryData, Uri};
+use rbw::db::{Decrypted, Encrypted, EntryData};
 
 // The default number of seconds the generated TOTP
 // code lasts for before a new one must be generated
@@ -815,11 +815,11 @@ pub fn search(
     let mut entries: Vec<ListEntry> = db
         .entries
         .iter()
-        .map(decrypt_search_cipher)
+        .map(TryInto::try_into)
         .filter(|entry| {
             entry
                 .as_ref()
-                .map(|entry| entry.search_match(term, folder))
+                .map(|entry: &SearchEntry| entry.search_match(term, folder))
                 .unwrap_or(true)
         })
         .map(|entry| entry.map(Into::into))
@@ -1314,7 +1314,7 @@ fn find_entry(
     let ciphers: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = db
         .entries
         .iter()
-        .map(|entry| decrypt_search_cipher(entry).map(|decrypted| (entry.clone(), decrypted)))
+        .map(|entry| entry.try_into().map(|decrypted| (entry.clone(), decrypted)))
         .collect::<anyhow::Result<_>>()?;
     let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
     let decrypted_entry = entry.decrypt(&mut Decrypter {})?;
@@ -1458,83 +1458,59 @@ fn decrypt_list_cipher(
     })
 }
 
-fn decrypt_search_cipher(entry: &rbw::db::Entry<Encrypted>) -> anyhow::Result<SearchEntry> {
-    let id = entry.id.clone();
-    let name = crate::actions::decrypt(&entry.name, entry.key.as_deref(), entry.org_id.as_deref())?;
-    let user = match &entry.data {
-        rbw::db::EntryData::Login { username, .. } => decrypt_field_warn(
-            rbw::db::FieldType::Username,
-            username.as_deref(),
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        ),
-        _ => None,
-    };
-    // folder name should always be decrypted with the local key because
-    // folders are local to a specific user's vault, not the organization
-    let folder = entry
-        .folder
-        .as_ref()
-        .map(|folder| crate::actions::decrypt(folder, None, None))
-        .transpose()?;
-    let notes = entry
-        .notes
-        .as_ref()
-        .map(|notes| crate::actions::decrypt(notes, entry.key.as_deref(), entry.org_id.as_deref()))
-        .transpose();
-    let uris = if let rbw::db::EntryData::Login { uris, .. } = &entry.data {
-        uris.iter()
-            .filter_map(|s| {
-                decrypt_field_warn(
-                    rbw::db::FieldType::Uris,
-                    Some(&s.uri),
-                    entry.key.as_deref(),
-                    entry.org_id.as_deref(),
-                )
-                .map(|uri| (uri, s.match_type))
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-    let fields = entry
-        .fields
-        .iter()
-        .filter_map(|field| {
-            if field.ty == Some(rbw::api::FieldType::Hidden) {
-                None
-            } else {
-                field.value.as_ref()
-            }
-        })
-        .map(|value| crate::actions::decrypt(value, entry.key.as_deref(), entry.org_id.as_deref()))
-        .collect::<anyhow::Result<_>>()?;
-    let notes = match notes {
-        Ok(notes) => notes,
-        Err(e) => {
-            log::warn!("failed to decrypt notes: {e}");
-            None
-        }
-    };
-    let entry_type = (match &entry.data {
-        rbw::db::EntryData::Login { .. } => "Login",
-        rbw::db::EntryData::Identity { .. } => "Identity",
-        rbw::db::EntryData::SshKey { .. } => "SSH Key",
-        rbw::db::EntryData::SecureNote => "Note",
-        rbw::db::EntryData::Card { .. } => "Card",
-    })
-    .to_string();
+impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
+    type Error = anyhow::Error;
 
-    Ok(SearchEntry {
-        id,
-        entry_type,
-        folder,
-        name,
-        user,
-        uris,
-        fields,
-        notes,
-    })
+    fn try_from(entry: &rbw::db::Entry<Encrypted>) -> Result<Self, Self::Error> {
+        let mut dec = Decrypter {};
+
+        let user = match &entry.data {
+            EntryData::Login { username, .. } => entry.decrypt_optstring(username, &mut dec)?,
+            _ => None,
+        };
+
+        let name = entry.decrypt_string(&entry.name, &mut dec)?;
+        let folder = entry.decrypt_optstring(&entry.folder, &mut dec)?;
+        let notes = entry.decrypt_optstring(&entry.notes, &mut dec)?;
+
+        let uris = entry
+            .decrypt_uris(&mut dec)?
+            .into_iter()
+            .map(|u| (u.uri, u.match_type))
+            .collect();
+
+        let fields = entry
+            .decrypt_custom_fields(&mut dec)?
+            .into_iter()
+            .filter_map(|f| {
+                if f.ty == Some(rbw::api::FieldType::Hidden) {
+                    None
+                } else {
+                    f.value
+                }
+            })
+            .collect();
+
+        let entry_type = (match &entry.data {
+            rbw::db::EntryData::Login { .. } => "Login",
+            rbw::db::EntryData::Identity { .. } => "Identity",
+            rbw::db::EntryData::SshKey { .. } => "SSH Key",
+            rbw::db::EntryData::SecureNote => "Note",
+            rbw::db::EntryData::Card { .. } => "Card",
+        })
+        .to_string();
+
+        Ok(SearchEntry {
+            id: entry.id.clone(),
+            entry_type,
+            folder,
+            name,
+            user,
+            uris,
+            fields,
+            notes,
+        })
+    }
 }
 
 /// This accepts a optional string and optionally decrypts it?

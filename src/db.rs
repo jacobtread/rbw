@@ -431,7 +431,15 @@ pub trait Decrypter {
 }
 
 impl Entry<Encrypted> {
-    fn decrypt_optstring(
+    pub fn decrypt_string(
+        &self,
+        s: &str,
+        decrypter: &mut impl Decrypter,
+    ) -> anyhow::Result<String> {
+        decrypter.decrypt_field(&self, &s)
+    }
+
+    pub fn decrypt_optstring(
         &self,
         optstring: &Option<String>,
         decrypter: &mut impl Decrypter,
@@ -457,6 +465,21 @@ impl Entry<Encrypted> {
                 })
             })
             .collect()
+    }
+
+    pub fn decrypt_uris(&self, decrypter: &mut impl Decrypter) -> anyhow::Result<Vec<Uri>> {
+        match &self.data {
+            EntryData::Login { uris, .. } => Ok(uris
+                .iter()
+                .map(|u| -> anyhow::Result<Uri> {
+                    Ok(Uri {
+                        uri: decrypter.decrypt_field(&self, &u.uri)?,
+                        match_type: u.match_type,
+                    })
+                })
+                .collect::<anyhow::Result<Vec<Uri>>>()?),
+            _ => Ok(vec![]),
+        }
     }
 
     pub fn decrypt(&self, decrypter: &mut impl Decrypter) -> anyhow::Result<Entry<Decrypted>> {
