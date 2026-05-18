@@ -191,23 +191,14 @@ impl SearchEntry {
             return false;
         }
 
-        let mut fields = vec![self.name.clone()];
-        if let Some(notes) = &self.notes {
-            fields.push(notes.clone());
-        }
-        if let Some(user) = &self.user {
-            fields.push(user.clone());
-        }
-        fields.extend(self.uris.iter().map(|(uri, _)| uri).cloned());
-        fields.extend(self.fields.iter().cloned());
+        let term = term.to_lowercase();
 
-        for field in fields {
-            if field.to_lowercase().contains(&term.to_lowercase()) {
-                return true;
-            }
-        }
-
-        false
+        [Some(&self.name), self.notes.as_ref(), self.user.as_ref()]
+            .into_iter()
+            .flatten()
+            .chain(self.uris.iter().map(|(uri, _)| uri))
+            .chain(self.fields.iter())
+            .any(|f| f.to_lowercase().contains(&term))
     }
 }
 
