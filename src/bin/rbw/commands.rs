@@ -497,7 +497,7 @@ pub fn display_entry_field(entry: &rbw::db::Entry<Decrypted>, desc: &str, field:
     let fields = entry.get_field(&field.to_lowercase(), generate_totp);
     if fields.is_empty() {
         // TODO: This is not 100% compatible text output with the project before refactor.
-        eprintln!("entry for '{desc}' had no default field");
+        eprintln!("entry for '{desc}' had no {field} field");
     } else {
         fields.iter().for_each(|f| {
             println!("{f}");
