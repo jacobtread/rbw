@@ -479,7 +479,7 @@ impl Entry<Encrypted> {
             })
             .collect::<anyhow::Result<_>>()?;
 
-        let mut df = |ft, val: &Option<String>| self.decrypt_optstring(&val, decrypter);
+        let mut df = |_ft, val: &Option<String>| self.decrypt_optstring(&val, decrypter);
 
         let data = match &self.data {
             EntryData::Login {
