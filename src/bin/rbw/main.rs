@@ -382,6 +382,7 @@ fn main() {
                 .map(|uri| (uri.clone(), None))
                 .collect::<Vec<_>>(),
             folder.as_deref(),
+            None,
         ),
         Opt::Generate {
             len,

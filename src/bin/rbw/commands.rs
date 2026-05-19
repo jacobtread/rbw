@@ -696,6 +696,7 @@ pub fn add(
     username: Option<&str>,
     uris: &[(String, Option<rbw::api::UriMatchType>)],
     folder: Option<&str>,
+    password: Option<&str>,
 ) -> anyhow::Result<()> {
     unlock()?;
 
@@ -711,9 +712,14 @@ pub fn add(
         .map(|username| crate::actions::encrypt(username, None))
         .transpose()?;
 
-    let contents = rbw::edit::edit("", HELP_PW)?;
+    let (password, notes) = match password {
+        Some(password) => (Some(password.to_string()), None),
+        None => {
+            let contents = rbw::edit::edit("", HELP_PW)?;
+            parse_editor(&contents)
+        }
+    };
 
-    let (password, notes) = parse_editor(&contents);
     let password = password
         .map(|password| crate::actions::encrypt(&password, None))
         .transpose()?;
@@ -774,57 +780,7 @@ pub fn generate(
     println!("{password}");
 
     if let Some(name) = name {
-        unlock()?;
-
-        let mut db = load_db()?;
-        // unwrap is safe here because the call to unlock above is guaranteed
-        // to populate these or error
-        let mut access_token = db.access_token.as_ref().unwrap().clone();
-        let refresh_token = db.refresh_token.as_ref().unwrap().clone();
-
-        let name = crate::actions::encrypt(name, None)?;
-        let username = username
-            .map(|username| crate::actions::encrypt(username, None))
-            .transpose()?;
-        let password = crate::actions::encrypt(&password, None)?;
-        let uris: Vec<_> = uris
-            .iter()
-            .map(|uri| {
-                Ok(rbw::db::Uri {
-                    uri: crate::actions::encrypt(&uri.0, None)?,
-                    match_type: uri.1,
-                })
-            })
-            .collect::<anyhow::Result<_>>()?;
-
-        let folder_id = match folder {
-            Some(folder) => Some(find_or_create_folder(
-                &mut access_token,
-                &refresh_token,
-                &mut db,
-                folder,
-            )?),
-            None => None,
-        };
-
-        if let (Some(access_token), ()) = rbw::actions::add(
-            &access_token,
-            &refresh_token,
-            &name,
-            &rbw::db::EntryData::Login {
-                username,
-                password: Some(password),
-                uris,
-                totp: None,
-            },
-            None,
-            folder_id.as_deref(),
-        )? {
-            db.access_token = Some(access_token);
-            save_db(&db)?;
-        }
-
-        crate::actions::sync()?;
+        add(name, username, uris, folder, Some(&password))?;
     }
 
     Ok(())
