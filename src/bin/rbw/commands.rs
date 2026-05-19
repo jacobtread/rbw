@@ -714,22 +714,13 @@ fn print_entry_list(entries: &[ListEntry], fields: &[ListField], raw: bool) -> a
         println!();
     } else {
         for entry in entries {
-            let values: Vec<String> = fields
+            let values: Vec<&str> = fields
                 .iter()
                 .map(|field| match field {
-                    ListField::Id => entry.id.clone(),
-                    ListField::Name => entry
-                        .name
-                        .as_ref()
-                        .map_or_else(String::new, ToString::to_string),
-                    ListField::User => entry
-                        .user
-                        .as_ref()
-                        .map_or_else(String::new, ToString::to_string),
-                    ListField::Folder => entry
-                        .folder
-                        .as_ref()
-                        .map_or_else(String::new, ToString::to_string),
+                    ListField::Id => &entry.id,
+                    ListField::Name => entry.name.as_deref().unwrap_or(""),
+                    ListField::User => entry.user.as_deref().unwrap_or(""),
+                    ListField::Folder => entry.folder.as_deref().unwrap_or(""),
                     ListField::Uri => {
                         // "uri" is not listed in the TryFrom
                         // implementation, so there's no way to try to
@@ -738,10 +729,7 @@ fn print_entry_list(entries: &[ListEntry], fields: &[ListField], raw: bool) -> a
                         // string)
                         unreachable!()
                     }
-                    ListField::EntryType => entry
-                        .entry_type
-                        .as_ref()
-                        .map_or_else(String::new, ToString::to_string),
+                    ListField::EntryType => entry.entry_type.as_deref().unwrap_or(""),
                 })
                 .collect();
 
