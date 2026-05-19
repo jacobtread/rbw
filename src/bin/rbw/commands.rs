@@ -464,154 +464,6 @@ pub fn display_entry_short(entry: &rbw::db::Entry<Decrypted>, desc: &str) -> boo
     true
 }
 
-/// This implementation mirror the `fn display_fied` method on which field to list
-pub fn display_entry_fields_list(entry: &rbw::db::Entry<Decrypted>) {
-    match &entry.data {
-        EntryData::Login {
-            username,
-            password,
-            totp,
-            uris,
-            ..
-        } => {
-            if username.is_some() {
-                println!("{}", rbw::db::FieldType::Username);
-            }
-            if totp.is_some() {
-                println!("{}", rbw::db::FieldType::Totp);
-            }
-            if !uris.is_empty() {
-                println!("{}", rbw::db::FieldType::Uris);
-            }
-            if password.is_some() {
-                println!("{}", rbw::db::FieldType::Password);
-            }
-        }
-        EntryData::Card {
-            cardholder_name,
-            number,
-            brand,
-            exp_month,
-            exp_year,
-            code,
-            ..
-        } => {
-            if number.is_some() {
-                println!("{}", rbw::db::FieldType::CardNumber);
-            }
-            if exp_month.is_some() {
-                println!("{}", rbw::db::FieldType::ExpMonth);
-            }
-            if exp_year.is_some() {
-                println!("{}", rbw::db::FieldType::ExpYear);
-            }
-            if code.is_some() {
-                println!("{}", rbw::db::FieldType::Cvv);
-            }
-            if cardholder_name.is_some() {
-                println!("{}", rbw::db::FieldType::Cardholder);
-            }
-            if brand.is_some() {
-                println!("{}", rbw::db::FieldType::Brand);
-            }
-        }
-
-        EntryData::Identity {
-            address1,
-            address2,
-            address3,
-            city,
-            state,
-            postal_code,
-            country,
-            phone,
-            email,
-            ssn,
-            license_number,
-            passport_number,
-            username,
-            title,
-            first_name,
-            middle_name,
-            last_name,
-            ..
-        } => {
-            if [title, first_name, middle_name, last_name]
-                .iter()
-                .any(|f| f.is_some())
-            {
-                // the display_field combines all these fields together.
-                println!("name");
-            }
-            if email.is_some() {
-                println!("{}", rbw::db::FieldType::Email);
-            }
-            if [address1, address2, address3].iter().any(|f| f.is_some()) {
-                // the display_field combines all these fields together.
-                println!("address");
-            }
-            if city.is_some() {
-                println!("{}", rbw::db::FieldType::City);
-            }
-            if state.is_some() {
-                println!("{}", rbw::db::FieldType::State);
-            }
-            if postal_code.is_some() {
-                println!("{}", rbw::db::FieldType::PostalCode);
-            }
-            if country.is_some() {
-                println!("{}", rbw::db::FieldType::Country);
-            }
-            if phone.is_some() {
-                println!("{}", rbw::db::FieldType::Phone);
-            }
-            if ssn.is_some() {
-                println!("{}", rbw::db::FieldType::Ssn);
-            }
-            if license_number.is_some() {
-                println!("{}", rbw::db::FieldType::License);
-            }
-            if passport_number.is_some() {
-                println!("{}", rbw::db::FieldType::Passport);
-            }
-            if username.is_some() {
-                println!("{}", rbw::db::FieldType::Username);
-            }
-        }
-
-        EntryData::SecureNote => (), // handled at the end
-        EntryData::SshKey {
-            fingerprint,
-            public_key,
-            ..
-        } => {
-            if fingerprint.is_some() {
-                println!("{}", rbw::db::FieldType::Fingerprint);
-            }
-            if public_key.is_some() {
-                println!("{}", rbw::db::FieldType::PublicKey);
-            }
-        }
-    }
-
-    if entry.notes.is_some() {
-        println!("{}", rbw::db::FieldType::Notes);
-    }
-    for f in &entry.fields {
-        if let Some(name) = &f.name {
-            println!("{name}");
-        }
-    }
-}
-
-pub fn display_entry_json(entry: &rbw::db::Entry<Decrypted>, desc: &str) -> anyhow::Result<()> {
-    serde_json::to_writer_pretty(std::io::stdout(), entry)
-        .context(format!("failed to write entry '{desc}' to stdout"))?;
-    println!();
-
-    Ok(())
-}
-
 #[allow(clippy::fn_params_excessive_bools)]
 pub fn get(
     needle: Needle,
@@ -638,9 +490,14 @@ pub fn get(
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     if list_fields {
-        display_entry_fields_list(&decrypted);
+        decrypted
+            .get_fields_list()
+            .iter()
+            .for_each(|field| println!("{field}"));
     } else if raw {
-        display_entry_json(&decrypted, &desc)?;
+        serde_json::to_writer_pretty(std::io::stdout(), &decrypted)
+            .context(format!("failed to write entry '{desc}' to stdout"))?;
+        println!();
     } else {
         let short = decrypted.get_short();
 

@@ -272,6 +272,152 @@ impl Entry<Decrypted> {
             .collect()
     }
 
+    /// Ugly function. Its job could be handled semi-automatically by the type system.
+    /// Doesn't need to be "Decrypted" to work.
+    pub fn get_fields_list(&self) -> Vec<String> {
+        let mut r: Vec<String> = vec![];
+
+        match &self.data {
+            EntryData::Login {
+                username,
+                password,
+                totp,
+                uris,
+                ..
+            } => {
+                if username.is_some() {
+                    r.push(FieldType::Username.to_string());
+                }
+                if totp.is_some() {
+                    r.push(FieldType::Totp.to_string());
+                }
+                if !uris.is_empty() {
+                    r.push(FieldType::Uris.to_string());
+                }
+                if password.is_some() {
+                    r.push(FieldType::Password.to_string());
+                }
+            }
+            EntryData::Card {
+                cardholder_name,
+                number,
+                brand,
+                exp_month,
+                exp_year,
+                code,
+                ..
+            } => {
+                if number.is_some() {
+                    r.push(FieldType::CardNumber.to_string());
+                }
+                if exp_month.is_some() {
+                    r.push(FieldType::ExpMonth.to_string());
+                }
+                if exp_year.is_some() {
+                    r.push(FieldType::ExpYear.to_string());
+                }
+                if code.is_some() {
+                    r.push(FieldType::Cvv.to_string());
+                }
+                if cardholder_name.is_some() {
+                    r.push(FieldType::Cardholder.to_string());
+                }
+                if brand.is_some() {
+                    r.push(FieldType::Brand.to_string());
+                }
+            }
+
+            EntryData::Identity {
+                address1,
+                address2,
+                address3,
+                city,
+                state,
+                postal_code,
+                country,
+                phone,
+                email,
+                ssn,
+                license_number,
+                passport_number,
+                username,
+                title,
+                first_name,
+                middle_name,
+                last_name,
+                ..
+            } => {
+                if [title, first_name, middle_name, last_name]
+                    .iter()
+                    .any(|f| f.is_some())
+                {
+                    // the display_field combines all these fields together.
+                    r.push("name".to_string());
+                }
+                if email.is_some() {
+                    r.push(FieldType::Email.to_string());
+                }
+                if [address1, address2, address3].iter().any(|f| f.is_some()) {
+                    // the display_field combines all these fields together.
+                    r.push("address".to_string());
+                }
+                if city.is_some() {
+                    r.push(FieldType::City.to_string());
+                }
+                if state.is_some() {
+                    r.push(FieldType::State.to_string());
+                }
+                if postal_code.is_some() {
+                    r.push(FieldType::PostalCode.to_string());
+                }
+                if country.is_some() {
+                    r.push(FieldType::Country.to_string());
+                }
+                if phone.is_some() {
+                    r.push(FieldType::Phone.to_string());
+                }
+                if ssn.is_some() {
+                    r.push(FieldType::Ssn.to_string());
+                }
+                if license_number.is_some() {
+                    r.push(FieldType::License.to_string());
+                }
+                if passport_number.is_some() {
+                    r.push(FieldType::Passport.to_string());
+                }
+                if username.is_some() {
+                    r.push(FieldType::Username.to_string());
+                }
+            }
+
+            EntryData::SecureNote => (), // handled at the end
+            EntryData::SshKey {
+                fingerprint,
+                public_key,
+                ..
+            } => {
+                if fingerprint.is_some() {
+                    r.push(FieldType::Fingerprint.to_string());
+                }
+                if public_key.is_some() {
+                    r.push(FieldType::PublicKey.to_string());
+                }
+            }
+        }
+
+        if self.notes.is_some() {
+            r.push(FieldType::Notes.to_string());
+        }
+
+        for f in &self.fields {
+            if let Some(name) = &f.name {
+                r.push(name.clone());
+            }
+        }
+
+        r
+    }
+
     /// This function is sh*t but I need it for now
     /// Given a textual representation of a field, like "username", "password" or "card number",
     /// check which type of entry EntryData is and extract the "username" or "cardnumber" field if
