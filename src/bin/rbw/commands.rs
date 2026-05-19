@@ -263,8 +263,8 @@ enum ListField {
 }
 
 impl ListField {
-    fn all() -> Vec<Self> {
-        vec![
+    fn all() -> &'static [Self] {
+        &[
             Self::Id,
             Self::Name,
             Self::User,
@@ -587,7 +587,7 @@ pub fn search(
     raw: bool,
 ) -> anyhow::Result<()> {
     let fields: Vec<ListField> = if raw {
-        ListField::all()
+        ListField::all().to_vec()
     } else {
         fields
             .iter()
