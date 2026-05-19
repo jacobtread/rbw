@@ -189,6 +189,14 @@ impl SearchEntry {
     }
 }
 
+fn host_port(url: &url::Url) -> Option<String> {
+    let host = url.host_str()?;
+    Some(
+        url.port()
+            .map_or_else(|| host.to_string(), |port| format!("{host}:{port}")),
+    )
+}
+
 fn matches_url(
     url: &str,
     match_type: Option<rbw::api::UriMatchType>,
@@ -225,14 +233,6 @@ fn matches_url(
         }
         rbw::api::UriMatchType::Never => false,
     }
-}
-
-fn host_port(url: &url::Url) -> Option<String> {
-    let host = url.host_str()?;
-    Some(
-        url.port()
-            .map_or_else(|| host.to_string(), |port| format!("{host}:{port}")),
-    )
 }
 
 // TODO: This could be a dup of FieldType?
