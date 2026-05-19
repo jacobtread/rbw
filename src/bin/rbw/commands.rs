@@ -72,19 +72,6 @@ impl rbw::db::Decrypter for Decrypter {
     }
 }
 
-/// It's a subset of db::Entry with only decrypted fields
-#[derive(Debug, serde::Serialize)]
-struct ListEntry {
-    id: String,
-    #[serde(rename = "type")]
-    entry_type: Option<String>,
-    folder: Option<String>,
-    name: Option<String>,
-    user: Option<String>,
-    uris: Option<Vec<String>>,
-}
-
-/// TODO: This could be re-used as ListEntry as they have all fields
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(test, derive(Eq, PartialEq))]
 struct SearchEntry {
@@ -199,19 +186,6 @@ impl SearchEntry {
             .chain(self.uris.iter().map(|(uri, _)| uri))
             .chain(self.fields.iter())
             .any(|f| f.to_lowercase().contains(&term))
-    }
-}
-
-impl From<SearchEntry> for ListEntry {
-    fn from(value: SearchEntry) -> Self {
-        Self {
-            id: value.id,
-            entry_type: Some(value.entry_type),
-            name: Some(value.name),
-            user: value.user,
-            folder: value.folder,
-            uris: Some(value.uris.into_iter().map(|(s, _)| s).collect()),
-        }
     }
 }
 
@@ -707,7 +681,11 @@ pub fn get(
 }
 
 /// Used in "search" and "list"
-fn print_entry_list(entries: &[ListEntry], fields: &[ListField], raw: bool) -> anyhow::Result<()> {
+fn print_entry_list(
+    entries: &[SearchEntry],
+    fields: &[ListField],
+    raw: bool,
+) -> anyhow::Result<()> {
     if raw {
         serde_json::to_writer_pretty(std::io::stdout(), &entries)
             .context("failed to write entries to stdout".to_string())?;
@@ -718,7 +696,7 @@ fn print_entry_list(entries: &[ListEntry], fields: &[ListField], raw: bool) -> a
                 .iter()
                 .map(|field| match field {
                     ListField::Id => &entry.id,
-                    ListField::Name => entry.name.as_deref().unwrap_or(""),
+                    ListField::Name => &entry.name,
                     ListField::User => entry.user.as_deref().unwrap_or(""),
                     ListField::Folder => entry.folder.as_deref().unwrap_or(""),
                     ListField::Uri => {
@@ -729,7 +707,7 @@ fn print_entry_list(entries: &[ListEntry], fields: &[ListField], raw: bool) -> a
                         // string)
                         unreachable!()
                     }
-                    ListField::EntryType => entry.entry_type.as_deref().unwrap_or(""),
+                    ListField::EntryType => &entry.entry_type,
                 })
                 .collect();
 
@@ -764,7 +742,7 @@ pub fn search(
 
     let db = load_db()?;
 
-    let mut entries: Vec<ListEntry> = db
+    let mut entries: Vec<SearchEntry> = db
         .entries
         .iter()
         .map(TryInto::try_into)
