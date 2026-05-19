@@ -691,6 +691,27 @@ fn find_or_create_folder(
     Ok(folder_id)
 }
 
+fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
+    let mut lines = contents.lines();
+
+    let password = lines.next().map(ToString::to_string);
+
+    let mut notes: String = lines
+        .skip_while(|line| line.is_empty())
+        .filter(|line| !line.starts_with('#'))
+        .fold(String::new(), |mut notes, line| {
+            notes.push_str(line);
+            notes.push('\n');
+            notes
+        });
+    while notes.ends_with('\n') {
+        notes.pop();
+    }
+    let notes = if notes.is_empty() { None } else { Some(notes) };
+
+    (password, notes)
+}
+
 pub fn add(
     name: &str,
     username: Option<&str>,
@@ -1164,27 +1185,6 @@ impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
             notes,
         })
     }
-}
-
-fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
-    let mut lines = contents.lines();
-
-    let password = lines.next().map(ToString::to_string);
-
-    let mut notes: String = lines
-        .skip_while(|line| line.is_empty())
-        .filter(|line| !line.starts_with('#'))
-        .fold(String::new(), |mut notes, line| {
-            notes.push_str(line);
-            notes.push('\n');
-            notes
-        });
-    while notes.ends_with('\n') {
-        notes.pop();
-    }
-    let notes = if notes.is_empty() { None } else { Some(notes) };
-
-    (password, notes)
 }
 
 fn load_db() -> anyhow::Result<rbw::db::Db> {
