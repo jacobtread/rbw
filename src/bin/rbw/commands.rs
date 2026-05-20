@@ -733,17 +733,12 @@ fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
 
     let password = lines.next().map(ToString::to_string);
 
-    let mut notes: String = lines
+    let notes: String = lines
         .skip_while(|line| line.is_empty())
         .filter(|line| !line.starts_with('#'))
-        .fold(String::new(), |mut notes, line| {
-            notes.push_str(line);
-            notes.push('\n');
-            notes
-        });
-    while notes.ends_with('\n') {
-        notes.pop();
-    }
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
     let notes = if notes.is_empty() { None } else { Some(notes) };
 
     (password, notes)
