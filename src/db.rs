@@ -573,12 +573,12 @@ impl Entry<Decrypted> {
 }
 
 pub trait Decrypter {
-    fn decrypt_field(&mut self, entry: &Entry<Encrypted>, field: &str) -> Result<String>;
+    fn decrypt_field(&mut self, entry: Option<&Entry<Encrypted>>, field: &str) -> Result<String>;
 }
 
 impl Entry<Encrypted> {
     pub fn decrypt_string(&self, s: &str, decrypter: &mut impl Decrypter) -> Result<String> {
-        decrypter.decrypt_field(&self, &s)
+        decrypter.decrypt_field(Some(&self), &s)
     }
 
     pub fn decrypt_optstring(
@@ -587,7 +587,7 @@ impl Entry<Encrypted> {
         decrypter: &mut impl Decrypter,
     ) -> Result<Option<String>> {
         Ok(match optstring {
-            Some(s) => Some(decrypter.decrypt_field(&self, s)?),
+            Some(s) => Some(decrypter.decrypt_field(Some(&self), s)?),
             None => None,
         })
     }
@@ -615,7 +615,7 @@ impl Entry<Encrypted> {
                 .iter()
                 .map(|u| -> Result<Uri> {
                     Ok(Uri {
-                        uri: decrypter.decrypt_field(&self, &u.uri)?,
+                        uri: decrypter.decrypt_field(Some(&self), &u.uri)?,
                         match_type: u.match_type,
                     })
                 })
@@ -639,7 +639,7 @@ impl Entry<Encrypted> {
             .map(|he| {
                 Ok(HistoryEntry {
                     last_used_date: he.last_used_date.clone(),
-                    password: decrypter.decrypt_field(&self, &he.password)?,
+                    password: decrypter.decrypt_field(Some(&self), &he.password)?,
                 })
             })
             .collect::<Result<_>>()?;
@@ -739,7 +739,7 @@ impl Entry<Encrypted> {
             folder_id: None,
             org_id: None,
             key: None,
-            name: decrypter.decrypt_field(&self, &self.name)?,
+            name: decrypter.decrypt_field(Some(&self), &self.name)?,
             data,
             fields,
             notes,

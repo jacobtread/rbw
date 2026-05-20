@@ -1,13 +1,9 @@
 use std::{
-    fmt::{Display, Write as _},
-    io::Write as _,
-    os::unix::ffi::OsStrExt as _,
-    path::PathBuf,
-    time::SystemTime,
+    fmt::Display, io::Write as _, os::unix::ffi::OsStrExt as _, path::PathBuf, time::SystemTime,
 };
 
 use anyhow::Context as _;
-use rbw::db::{Decrypted, Encrypted, EntryData};
+use rbw::db::{Decrypted, Decrypter, Encrypted, EntryData};
 
 // The default number of seconds the generated TOTP
 // code lasts for before a new one must be generated
@@ -62,13 +58,15 @@ struct RemoteDecrypter {}
 impl rbw::db::Decrypter for RemoteDecrypter {
     fn decrypt_field(
         &mut self,
-        entry: &rbw::db::Entry<Encrypted>,
+        entry: Option<&rbw::db::Entry<Encrypted>>,
         field: &str,
     ) -> rbw::error::Result<String> {
-        Ok(
-            crate::actions::decrypt(field, entry.key.as_deref(), entry.org_id.as_deref())
-                .map_err(|_e| rbw::error::Error::DecryptRemote)?,
+        Ok(crate::actions::decrypt(
+            field,
+            entry.map_or(None, |e| e.key.as_deref()),
+            entry.map_or(None, |e| e.org_id.as_deref()),
         )
+        .map_err(|_e| rbw::error::Error::DecryptRemote)?)
     }
 }
 
@@ -689,6 +687,7 @@ fn find_or_create_folder(
     db: &mut rbw::db::Db,
     folder: &str,
 ) -> anyhow::Result<String> {
+    let mut dec = RemoteDecrypter {};
     let (new_access_token, folders) = rbw::actions::list_folders(&access_token, refresh_token)?;
 
     if let Some(new_access_token) = new_access_token {
@@ -698,9 +697,8 @@ fn find_or_create_folder(
     }
 
     let folders: Vec<(String, String)> = folders
-        .iter()
-        .cloned()
-        .map(|(id, name)| Ok((id, crate::actions::decrypt(&name, None, None)?)))
+        .into_iter()
+        .map(|(id, name)| Ok((id, dec.decrypt_field(None, &name)?)))
         .collect::<anyhow::Result<_>>()?;
 
     let folder_id = folders
