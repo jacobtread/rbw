@@ -871,13 +871,11 @@ pub fn edit(
 
     let (data, fields, notes, history) = match &decrypted.data {
         EntryData::Login { password, .. } => {
-            let contents = format!(
-                "{}\n{}",
-                password.as_deref().unwrap_or(""),
-                &decrypted
-                    .notes
-                    .map_or("".to_string(), |n| format!("\n{n}\n"))
-            );
+            let password = password.as_deref().unwrap_or("");
+            let notes = decrypted
+                .notes
+                .map_or("".to_string(), |n| format!("\n{n}\n"));
+            let contents = format!("{password}\n{notes}");
 
             let contents = rbw::edit::edit(&contents, HELP_PW)?;
 
