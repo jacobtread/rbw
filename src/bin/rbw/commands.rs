@@ -1239,7 +1239,7 @@ impl std::str::FromStr for TotpParams {
 
                     let algorithm = query.get("algorithm").map_or_else(
                         || Ok(totp_rs::Algorithm::SHA1),
-                        |a| generate_totp_algorithm_type(&ToString::to_string(a)),
+                        |a| generate_totp_algorithm_type(a),
                     )?;
 
                     let digits = match query.get("digits") {
