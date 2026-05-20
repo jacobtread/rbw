@@ -1218,75 +1218,79 @@ fn generate_totp_algorithm_type(alg: &str) -> anyhow::Result<totp_rs::Algorithm>
     }
 }
 
-fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
-    if let Ok(u) = url::Url::parse(secret) {
-        match u.scheme() {
-            "otpauth" => {
-                if u.host_str() != Some("totp") {
-                    return Err(anyhow::anyhow!("totp secret url must have totp host"));
+impl std::str::FromStr for TotpParams {
+    type Err = anyhow::Error;
+
+    fn from_str(secret: &str) -> anyhow::Result<Self> {
+        if let Ok(u) = url::Url::parse(secret) {
+            match u.scheme() {
+                "otpauth" => {
+                    if u.host_str() != Some("totp") {
+                        return Err(anyhow::anyhow!("totp secret url must have totp host"));
+                    }
+
+                    let query: HashMap<_, _> = u.query_pairs().collect();
+
+                    let secret = decode_totp_secret(
+                        query
+                            .get("secret")
+                            .ok_or_else(|| anyhow::anyhow!("totp secret url must have secret"))?,
+                    )?;
+
+                    let algorithm = query.get("algorithm").map_or_else(
+                        || Ok(totp_rs::Algorithm::SHA1),
+                        |a| generate_totp_algorithm_type(&ToString::to_string(a)),
+                    )?;
+
+                    let digits = match query.get("digits") {
+                        Some(dig) => dig.parse::<usize>().map_err(|_| {
+                            anyhow::anyhow!("digits parameter in totp url must be a valid integer.")
+                        })?,
+                        None => 6,
+                    };
+
+                    let period = match query.get("period") {
+                        Some(dig) => dig.parse::<u64>().map_err(|_| {
+                            anyhow::anyhow!("period parameter in totp url must be a valid integer.")
+                        })?,
+                        None => TOTP_DEFAULT_STEP,
+                    };
+
+                    Ok(Self {
+                        secret,
+                        algorithm,
+                        digits,
+                        period,
+                    })
                 }
+                "steam" => {
+                    let steam_secret = u.host_str().unwrap();
 
-                let query: HashMap<_, _> = u.query_pairs().collect();
-
-                let secret = decode_totp_secret(
-                    query
-                        .get("secret")
-                        .ok_or_else(|| anyhow::anyhow!("totp secret url must have secret"))?,
-                )?;
-
-                let algorithm = query.get("algorithm").map_or_else(
-                    || Ok(totp_rs::Algorithm::SHA1),
-                    |a| generate_totp_algorithm_type(&ToString::to_string(a)),
-                )?;
-
-                let digits = match query.get("digits") {
-                    Some(dig) => dig.parse::<usize>().map_err(|_| {
-                        anyhow::anyhow!("digits parameter in totp url must be a valid integer.")
-                    })?,
-                    None => 6,
-                };
-
-                let period = match query.get("period") {
-                    Some(dig) => dig.parse::<u64>().map_err(|_| {
-                        anyhow::anyhow!("period parameter in totp url must be a valid integer.")
-                    })?,
-                    None => TOTP_DEFAULT_STEP,
-                };
-
-                Ok(TotpParams {
-                    secret,
-                    algorithm,
-                    digits,
-                    period,
-                })
+                    Ok(Self {
+                        secret: decode_totp_secret(steam_secret)?,
+                        algorithm: totp_rs::Algorithm::Steam,
+                        digits: 5,
+                        period: TOTP_DEFAULT_STEP,
+                    })
+                }
+                _ => Err(anyhow::anyhow!(
+                    "totp secret url must have 'otpauth' or 'steam' scheme"
+                )),
             }
-            "steam" => {
-                let steam_secret = u.host_str().unwrap();
-
-                Ok(TotpParams {
-                    secret: decode_totp_secret(steam_secret)?,
-                    algorithm: totp_rs::Algorithm::Steam,
-                    digits: 5,
-                    period: TOTP_DEFAULT_STEP,
-                })
-            }
-            _ => Err(anyhow::anyhow!(
-                "totp secret url must have 'otpauth' or 'steam' scheme"
-            )),
+        } else {
+            Ok(Self {
+                secret: decode_totp_secret(secret)?,
+                algorithm: totp_rs::Algorithm::SHA1,
+                digits: 6,
+                period: TOTP_DEFAULT_STEP,
+            })
         }
-    } else {
-        Ok(TotpParams {
-            secret: decode_totp_secret(secret)?,
-            algorithm: totp_rs::Algorithm::SHA1,
-            digits: 6,
-            period: TOTP_DEFAULT_STEP,
-        })
     }
 }
 
 fn generate_totp(secret: &str) -> anyhow::Result<String> {
     use totp_rs::{Algorithm::*, TOTP};
-    let totp_params = parse_totp_secret(secret)?;
+    let totp_params: TotpParams = secret.parse()?;
 
     match totp_params.algorithm {
         SHA1 | SHA256 | SHA512 => {
