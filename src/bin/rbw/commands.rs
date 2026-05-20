@@ -190,6 +190,61 @@ impl SearchEntry {
     }
 }
 
+impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
+    type Error = anyhow::Error;
+
+    fn try_from(entry: &rbw::db::Entry<Encrypted>) -> Result<Self, Self::Error> {
+        let mut dec = RemoteDecrypter {};
+
+        let user = match &entry.data {
+            EntryData::Login { username, .. } => entry.decrypt_optstring(username, &mut dec)?,
+            _ => None,
+        };
+
+        let name = entry.decrypt_string(&entry.name, &mut dec)?;
+        let folder = entry.decrypt_optstring(&entry.folder, &mut dec)?;
+        let notes = entry.decrypt_optstring(&entry.notes, &mut dec)?;
+
+        let uris = entry
+            .decrypt_uris(&mut dec)?
+            .into_iter()
+            .map(|u| (u.uri, u.match_type))
+            .collect();
+
+        let fields = entry
+            .decrypt_custom_fields(&mut dec)?
+            .into_iter()
+            .filter_map(|f| {
+                if f.ty == Some(rbw::api::FieldType::Hidden) {
+                    None
+                } else {
+                    f.value
+                }
+            })
+            .collect();
+
+        let entry_type = (match &entry.data {
+            rbw::db::EntryData::Login { .. } => "Login",
+            rbw::db::EntryData::Identity { .. } => "Identity",
+            rbw::db::EntryData::SshKey { .. } => "SSH Key",
+            rbw::db::EntryData::SecureNote => "Note",
+            rbw::db::EntryData::Card { .. } => "Card",
+        })
+        .to_string();
+
+        Ok(SearchEntry {
+            id: entry.id.clone(),
+            entry_type,
+            folder,
+            name,
+            user,
+            uris,
+            fields,
+            notes,
+        })
+    }
+}
+
 fn host_port(url: &url::Url) -> Option<String> {
     let host = url.host_str()?;
     Some(
@@ -1099,61 +1154,6 @@ fn find_entry_raw(
             .collect();
         let entries = entries.join(", ");
         Err(anyhow::anyhow!("multiple entries found: {entries}"))
-    }
-}
-
-impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
-    type Error = anyhow::Error;
-
-    fn try_from(entry: &rbw::db::Entry<Encrypted>) -> Result<Self, Self::Error> {
-        let mut dec = RemoteDecrypter {};
-
-        let user = match &entry.data {
-            EntryData::Login { username, .. } => entry.decrypt_optstring(username, &mut dec)?,
-            _ => None,
-        };
-
-        let name = entry.decrypt_string(&entry.name, &mut dec)?;
-        let folder = entry.decrypt_optstring(&entry.folder, &mut dec)?;
-        let notes = entry.decrypt_optstring(&entry.notes, &mut dec)?;
-
-        let uris = entry
-            .decrypt_uris(&mut dec)?
-            .into_iter()
-            .map(|u| (u.uri, u.match_type))
-            .collect();
-
-        let fields = entry
-            .decrypt_custom_fields(&mut dec)?
-            .into_iter()
-            .filter_map(|f| {
-                if f.ty == Some(rbw::api::FieldType::Hidden) {
-                    None
-                } else {
-                    f.value
-                }
-            })
-            .collect();
-
-        let entry_type = (match &entry.data {
-            rbw::db::EntryData::Login { .. } => "Login",
-            rbw::db::EntryData::Identity { .. } => "Identity",
-            rbw::db::EntryData::SshKey { .. } => "SSH Key",
-            rbw::db::EntryData::SecureNote => "Note",
-            rbw::db::EntryData::Card { .. } => "Card",
-        })
-        .to_string();
-
-        Ok(SearchEntry {
-            id: entry.id.clone(),
-            entry_type,
-            folder,
-            name,
-            user,
-            uris,
-            fields,
-            notes,
-        })
     }
 }
 
