@@ -585,7 +585,7 @@ impl Entry<Encrypted> {
         &self,
         optstring: &Option<String>,
         decrypter: &mut impl Decrypter,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> Result<Option<String>> {
         Ok(match optstring {
             Some(s) => Some(decrypter.decrypt_field(&self, s)?),
             None => None,
@@ -595,7 +595,7 @@ impl Entry<Encrypted> {
     pub fn decrypt_custom_fields(
         &self,
         decrypter: &mut impl Decrypter,
-    ) -> anyhow::Result<Vec<DynamicField>> {
+    ) -> Result<Vec<DynamicField>> {
         self.fields
             .iter()
             .map(|field| {
@@ -609,22 +609,22 @@ impl Entry<Encrypted> {
             .collect()
     }
 
-    pub fn decrypt_uris(&self, decrypter: &mut impl Decrypter) -> anyhow::Result<Vec<Uri>> {
+    pub fn decrypt_uris(&self, decrypter: &mut impl Decrypter) -> Result<Vec<Uri>> {
         match &self.data {
             EntryData::Login { uris, .. } => Ok(uris
                 .iter()
-                .map(|u| -> anyhow::Result<Uri> {
+                .map(|u| -> Result<Uri> {
                     Ok(Uri {
                         uri: decrypter.decrypt_field(&self, &u.uri)?,
                         match_type: u.match_type,
                     })
                 })
-                .collect::<anyhow::Result<Vec<Uri>>>()?),
+                .collect::<Result<Vec<Uri>>>()?),
             _ => Ok(vec![]),
         }
     }
 
-    pub fn decrypt(&self, decrypter: &mut impl Decrypter) -> anyhow::Result<Entry<Decrypted>> {
+    pub fn decrypt(&self, decrypter: &mut impl Decrypter) -> Result<Entry<Decrypted>> {
         // folder name should always be decrypted with the local key because
         // folders are local to a specific user's vault, not the organization
         let folder = self.decrypt_optstring(&self.folder, decrypter)?;
@@ -642,7 +642,7 @@ impl Entry<Encrypted> {
                     password: decrypter.decrypt_field(&self, &he.password)?,
                 })
             })
-            .collect::<anyhow::Result<_>>()?;
+            .collect::<Result<_>>()?;
 
         let mut df = |_ft, val: &Option<String>| self.decrypt_optstring(&val, decrypter);
 
@@ -664,7 +664,7 @@ impl Entry<Encrypted> {
                             match_type: s.match_type,
                         }))
                     })
-                    .collect::<anyhow::Result<Vec<Option<Uri>>>>()?
+                    .collect::<Result<Vec<Option<Uri>>>>()?
                     .into_iter()
                     .flatten()
                     .collect(),
