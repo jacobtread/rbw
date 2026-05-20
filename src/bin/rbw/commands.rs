@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt::{Display, Write as _},
     io::Write as _,
     os::unix::ffi::OsStrExt as _,
@@ -1182,13 +1181,6 @@ fn remove_db() -> anyhow::Result<()> {
     })
 }
 
-struct TotpParams {
-    secret: Vec<u8>,
-    algorithm: totp_rs::Algorithm,
-    digits: usize,
-    period: u64,
-}
-
 fn decode_totp_secret(secret: &str) -> anyhow::Result<Vec<u8>> {
     let secret = secret.trim().replace(' ', "");
     let alphabets = [
@@ -1205,106 +1197,25 @@ fn decode_totp_secret(secret: &str) -> anyhow::Result<Vec<u8>> {
     Err(anyhow::anyhow!("totp secret was not valid base32"))
 }
 
-// This function exists for the sake of making the generate_totp function less
-// densely packed and more readable
-fn generate_totp_algorithm_type(alg: &str) -> anyhow::Result<totp_rs::Algorithm> {
-    use totp_rs::Algorithm::*;
-    match alg {
-        "SHA1" => Ok(SHA1),
-        "SHA256" => Ok(SHA256),
-        "SHA512" => Ok(SHA512),
-        "STEAM" => Ok(Steam),
-        _ => anyhow::bail!("{alg} is not a valid algorithm"),
-    }
-}
-
-impl std::str::FromStr for TotpParams {
-    type Err = anyhow::Error;
-
-    fn from_str(secret: &str) -> anyhow::Result<Self> {
-        if let Ok(u) = url::Url::parse(secret) {
-            match u.scheme() {
-                "otpauth" => {
-                    if u.host_str() != Some("totp") {
-                        return Err(anyhow::anyhow!("totp secret url must have totp host"));
-                    }
-
-                    let query: HashMap<_, _> = u.query_pairs().collect();
-
-                    let secret = decode_totp_secret(
-                        query
-                            .get("secret")
-                            .ok_or_else(|| anyhow::anyhow!("totp secret url must have secret"))?,
-                    )?;
-
-                    let algorithm = query.get("algorithm").map_or_else(
-                        || Ok(totp_rs::Algorithm::SHA1),
-                        |a| generate_totp_algorithm_type(a),
-                    )?;
-
-                    let digits = match query.get("digits") {
-                        Some(dig) => dig.parse::<usize>().map_err(|_| {
-                            anyhow::anyhow!("digits parameter in totp url must be a valid integer.")
-                        })?,
-                        None => 6,
-                    };
-
-                    let period = match query.get("period") {
-                        Some(dig) => dig.parse::<u64>().map_err(|_| {
-                            anyhow::anyhow!("period parameter in totp url must be a valid integer.")
-                        })?,
-                        None => TOTP_DEFAULT_STEP,
-                    };
-
-                    Ok(Self {
-                        secret,
-                        algorithm,
-                        digits,
-                        period,
-                    })
-                }
-                "steam" => {
-                    let steam_secret = u.host_str().unwrap();
-
-                    Ok(Self {
-                        secret: decode_totp_secret(steam_secret)?,
-                        algorithm: totp_rs::Algorithm::Steam,
-                        digits: 5,
-                        period: TOTP_DEFAULT_STEP,
-                    })
-                }
-                _ => Err(anyhow::anyhow!(
-                    "totp secret url must have 'otpauth' or 'steam' scheme"
-                )),
-            }
-        } else {
-            Ok(Self {
-                secret: decode_totp_secret(secret)?,
-                algorithm: totp_rs::Algorithm::SHA1,
-                digits: 6,
-                period: TOTP_DEFAULT_STEP,
-            })
-        }
-    }
-}
-
 fn generate_totp(secret: &str) -> anyhow::Result<String> {
-    use totp_rs::{Algorithm::*, TOTP};
-    let totp_params: TotpParams = secret.parse()?;
+    // Small hack that is not RFC compliant but helps with some services.
+    // Most authenticators have this built-in, included official Bitwarden clients.
+    let secret = secret.replace("algorithm=sha", "algorithm=SHA");
 
-    match totp_params.algorithm {
-        SHA1 | SHA256 | SHA512 => {
-            Ok(TOTP::new_unchecked(
-                totp_params.algorithm,
-                totp_params.digits,
-                1, // the library docs say this should be a 1
-                totp_params.period,
-                totp_params.secret,
-            )
-            .generate_current()?)
-        }
-        Steam => Ok(TOTP::new_steam(totp_params.secret).generate_current()?),
-    }
+    let totp = match totp_rs::TOTP::from_url(&secret) {
+        Ok(totp) => totp,
+        Err(_e) => totp_rs::TOTP::new_unchecked(
+            totp_rs::Algorithm::SHA1,
+            6,
+            1,
+            TOTP_DEFAULT_STEP,
+            decode_totp_secret(&secret)?,
+            None,
+            "".to_string(),
+        ),
+    };
+
+    Ok(totp.generate_current()?)
 }
 
 #[cfg(test)]
