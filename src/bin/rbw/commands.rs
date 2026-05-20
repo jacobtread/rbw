@@ -1157,31 +1157,29 @@ impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
     }
 }
 
-fn load_db() -> anyhow::Result<rbw::db::Db> {
+fn with_config<T>(f: impl FnOnce(&str, &str) -> anyhow::Result<T>) -> anyhow::Result<T> {
     let config = rbw::config::Config::load()?;
-    config.email.as_ref().map_or_else(
-        || Err(anyhow::anyhow!("failed to find email address in config")),
-        |email| rbw::db::Db::load(&config.server_name(), email).map_err(anyhow::Error::new),
-    )
+    let Some(email) = &config.email else {
+        anyhow::bail!("failed to find email address in config");
+    };
+
+    f(&config.server_name(), email)
+}
+
+fn load_db() -> anyhow::Result<rbw::db::Db> {
+    with_config(|server_name, email| {
+        rbw::db::Db::load(server_name, email).map_err(anyhow::Error::new)
+    })
 }
 
 fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {
-    let config = rbw::config::Config::load()?;
-    config.email.as_ref().map_or_else(
-        || Err(anyhow::anyhow!("failed to find email address in config")),
-        |email| {
-            db.save(&config.server_name(), email)
-                .map_err(anyhow::Error::new)
-        },
-    )
+    with_config(|server_name, email| db.save(server_name, email).map_err(anyhow::Error::new))
 }
 
 fn remove_db() -> anyhow::Result<()> {
-    let config = rbw::config::Config::load()?;
-    config.email.as_ref().map_or_else(
-        || Err(anyhow::anyhow!("failed to find email address in config")),
-        |email| rbw::db::Db::remove(&config.server_name(), email).map_err(anyhow::Error::new),
-    )
+    with_config(|server_name, email| {
+        rbw::db::Db::remove(server_name, email).map_err(anyhow::Error::new)
+    })
 }
 
 struct TotpParams {
