@@ -336,9 +336,7 @@ pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
     // be running (since this may be the user running `rbw config set
     // base_url` as the first operation), and stop_agent() already handles the
     // agent not running case gracefully.
-    stop_agent()?;
-
-    Ok(())
+    stop_agent()
 }
 
 pub fn config_unset(key: &str) -> anyhow::Result<()> {
@@ -365,55 +363,41 @@ pub fn config_unset(key: &str) -> anyhow::Result<()> {
     // be running (since this may be the user running `rbw config set
     // base_url` as the first operation), and stop_agent() already handles the
     // agent not running case gracefully.
-    stop_agent()?;
-
-    Ok(())
+    stop_agent()
 }
 
 fn clipboard_store(val: &str) -> anyhow::Result<()> {
     ensure_agent()?;
-    crate::actions::clipboard_store(val)?;
-
-    Ok(())
+    crate::actions::clipboard_store(val)
 }
 
 pub fn register() -> anyhow::Result<()> {
     ensure_agent()?;
-    crate::actions::register()?;
-
-    Ok(())
+    crate::actions::register()
 }
 
 pub fn login() -> anyhow::Result<()> {
     ensure_agent()?;
-    crate::actions::login()?;
-
-    Ok(())
+    crate::actions::login()
 }
 
 pub fn unlock() -> anyhow::Result<()> {
     ensure_agent()?;
     crate::actions::login()?;
-    crate::actions::unlock()?;
-
-    Ok(())
+    crate::actions::unlock()
 }
 
 pub fn unlocked() -> anyhow::Result<()> {
     // not ensure_agent, because we don't want `rbw unlocked` to start the
     // agent if it's not running
     let _ = check_agent_version();
-    crate::actions::unlocked()?;
-
-    Ok(())
+    crate::actions::unlocked()
 }
 
 pub fn sync() -> anyhow::Result<()> {
     ensure_agent()?;
     crate::actions::login()?;
-    crate::actions::sync()?;
-
-    Ok(())
+    crate::actions::sync()
 }
 
 pub fn display_entry_field(entry: &rbw::db::Entry<Decrypted>, desc: &str, field: &str) {
@@ -598,9 +582,7 @@ pub fn search(
         .collect::<Result<_, anyhow::Error>>()?;
     entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
-    print_entry_list(&entries, &fields, raw)?;
-
-    Ok(())
+    print_entry_list(&entries, &fields, raw)
 }
 
 pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
@@ -785,9 +767,7 @@ pub fn add(
         save_db(&db)?;
     }
 
-    crate::actions::sync()?;
-
-    Ok(())
+    crate::actions::sync()
 }
 
 pub fn generate(
@@ -801,11 +781,10 @@ pub fn generate(
     let password = rbw::pwgen::pwgen(ty, len);
     println!("{password}");
 
-    if let Some(name) = name {
-        add(name, username, uris, folder, Some(&password))?;
+    match name {
+        Some(name) => add(name, username, uris, folder, Some(&password)),
+        None => Ok(()),
     }
-
-    Ok(())
 }
 
 pub fn edit(
@@ -912,8 +891,7 @@ pub fn edit(
         save_db(&db)?;
     }
 
-    crate::actions::sync()?;
-    Ok(())
+    crate::actions::sync()
 }
 
 pub fn remove(
@@ -943,9 +921,7 @@ pub fn remove(
         save_db(&db)?;
     }
 
-    crate::actions::sync()?;
-
-    Ok(())
+    crate::actions::sync()
 }
 
 pub fn history(
@@ -975,23 +951,17 @@ pub fn history(
 
 pub fn lock() -> anyhow::Result<()> {
     ensure_agent()?;
-    crate::actions::lock()?;
-
-    Ok(())
+    crate::actions::lock()
 }
 
 pub fn purge() -> anyhow::Result<()> {
     stop_agent()?;
 
-    remove_db()?;
-
-    Ok(())
+    remove_db()
 }
 
 pub fn stop_agent() -> anyhow::Result<()> {
-    crate::actions::quit()?;
-
-    Ok(())
+    crate::actions::quit()
 }
 
 fn ensure_agent() -> anyhow::Result<()> {
@@ -1000,8 +970,7 @@ fn ensure_agent() -> anyhow::Result<()> {
         return Ok(());
     }
     run_agent()?;
-    check_agent_version()?;
-    Ok(())
+    check_agent_version()
 }
 
 fn run_agent() -> anyhow::Result<()> {
@@ -1035,9 +1004,9 @@ fn check_agent_version() -> anyhow::Result<()> {
     let agent_version = version_or_quit()?;
     if agent_version != client_version {
         crate::actions::quit()?;
-        return Err(anyhow::anyhow!(
+        anyhow::bail!(
             "client protocol version is {client_version} but agent protocol version is {agent_version}"
-        ));
+        );
     }
     Ok(())
 }
