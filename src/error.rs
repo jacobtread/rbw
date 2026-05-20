@@ -24,6 +24,9 @@ pub enum Error {
     #[error("failed to decrypt")]
     Decrypt { source: block_padding::UnpadError },
 
+    #[error("failed to decrypt remotely")]
+    DecryptRemote,
+
     #[error("failed to find free port in {range}")]
     FailedToFindFreePort { range: String },
 

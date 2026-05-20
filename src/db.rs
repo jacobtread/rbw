@@ -573,15 +573,11 @@ impl Entry<Decrypted> {
 }
 
 pub trait Decrypter {
-    fn decrypt_field(&mut self, entry: &Entry<Encrypted>, field: &str) -> anyhow::Result<String>;
+    fn decrypt_field(&mut self, entry: &Entry<Encrypted>, field: &str) -> Result<String>;
 }
 
 impl Entry<Encrypted> {
-    pub fn decrypt_string(
-        &self,
-        s: &str,
-        decrypter: &mut impl Decrypter,
-    ) -> anyhow::Result<String> {
+    pub fn decrypt_string(&self, s: &str, decrypter: &mut impl Decrypter) -> Result<String> {
         decrypter.decrypt_field(&self, &s)
     }
 

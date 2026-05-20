@@ -65,12 +65,11 @@ impl rbw::db::Decrypter for RemoteDecrypter {
         &mut self,
         entry: &rbw::db::Entry<Encrypted>,
         field: &str,
-    ) -> anyhow::Result<String> {
-        Ok(crate::actions::decrypt(
-            field,
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        )?)
+    ) -> rbw::error::Result<String> {
+        Ok(
+            crate::actions::decrypt(field, entry.key.as_deref(), entry.org_id.as_deref())
+                .map_err(|_e| rbw::error::Error::DecryptRemote)?,
+        )
     }
 }
 
