@@ -56,9 +56,11 @@ pub fn parse_needle(arg: &str) -> Result<Needle, std::convert::Infallible> {
     Ok(Needle::Name(arg.to_string()))
 }
 
-struct Decrypter {}
+/// This Decrypter implementation will send the encrypted string to the agent and wait for it to
+/// decrypt it.
+struct RemoteDecrypter {}
 
-impl rbw::db::Decrypter for Decrypter {
+impl rbw::db::Decrypter for RemoteDecrypter {
     fn decrypt_field(
         &mut self,
         entry: &rbw::db::Entry<Encrypted>,
@@ -1057,7 +1059,7 @@ fn find_entry(
     if let Needle::Uuid(uuid, s) = needle {
         for cipher in &db.entries {
             if uuid::Uuid::parse_str(&cipher.id) == Ok(uuid) {
-                return Ok((cipher.clone(), cipher.decrypt(&mut Decrypter {})?));
+                return Ok((cipher.clone(), cipher.decrypt(&mut RemoteDecrypter {})?));
             }
         }
         needle = Needle::Name(s);
@@ -1069,7 +1071,7 @@ fn find_entry(
         .map(|entry| entry.try_into().map(|decrypted| (entry.clone(), decrypted)))
         .collect::<anyhow::Result<_>>()?;
     let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
-    let decrypted_entry = entry.decrypt(&mut Decrypter {})?;
+    let decrypted_entry = entry.decrypt(&mut RemoteDecrypter {})?;
     Ok((entry, decrypted_entry))
 }
 
@@ -1136,7 +1138,7 @@ impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
     type Error = anyhow::Error;
 
     fn try_from(entry: &rbw::db::Entry<Encrypted>) -> Result<Self, Self::Error> {
-        let mut dec = Decrypter {};
+        let mut dec = RemoteDecrypter {};
 
         let user = match &entry.data {
             EntryData::Login { username, .. } => entry.decrypt_optstring(username, &mut dec)?,
