@@ -749,6 +749,14 @@ fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
     (password, notes)
 }
 
+fn update_token(db: &mut rbw::db::Db, new_token: Option<String>) -> anyhow::Result<()> {
+    if let Some(token) = new_token {
+        db.access_token = Some(token);
+        save_db(db)?;
+    }
+    Ok(())
+}
+
 pub fn add(
     name: &str,
     username: Option<&str>,
@@ -804,7 +812,7 @@ pub fn add(
         None => None,
     };
 
-    if let (Some(access_token), ()) = rbw::actions::add(
+    let (new_token, ()) = rbw::actions::add(
         &access_token,
         &refresh_token,
         &name,
@@ -816,10 +824,9 @@ pub fn add(
         },
         notes.as_deref(),
         folder_id.as_deref(),
-    )? {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
-    }
+    )?;
+
+    update_token(&mut db, new_token)?;
 
     crate::actions::sync()
 }
@@ -864,10 +871,13 @@ pub fn edit(
 
     let (data, fields, notes, history) = match &decrypted.data {
         EntryData::Login { password, .. } => {
-            let mut contents = format!("{}\n", password.as_deref().unwrap_or(""));
-            if let Some(notes) = decrypted.notes {
-                write!(contents, "\n{notes}\n").unwrap();
-            }
+            let contents = format!(
+                "{}\n{}",
+                password.as_deref().unwrap_or(""),
+                &decrypted
+                    .notes
+                    .map_or("".to_string(), |n| format!("\n{n}\n"))
+            );
 
             let contents = rbw::edit::edit(&contents, HELP_PW)?;
 
@@ -910,7 +920,7 @@ pub fn edit(
 
             let editor_content = decrypted
                 .notes
-                .map_or_else(|| "\n".to_string(), |notes| format!("{notes}\n"));
+                .map_or("\n".to_string(), |notes| format!("{notes}\n"));
             let contents = rbw::edit::edit(&editor_content, HELP_NOTES)?;
 
             // prepend blank line to be parsed as pw by `parse_editor`
@@ -929,7 +939,7 @@ pub fn edit(
         }
     };
 
-    if let (Some(access_token), ()) = rbw::actions::edit(
+    let (new_token, ()) = rbw::actions::edit(
         access_token,
         refresh_token,
         &entry.id,
@@ -940,10 +950,9 @@ pub fn edit(
         notes.as_deref(),
         entry.folder_id.as_deref(),
         &history,
-    )? {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
-    }
+    )?;
+
+    update_token(&mut db, new_token)?;
 
     crate::actions::sync()
 }
