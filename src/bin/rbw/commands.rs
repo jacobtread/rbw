@@ -472,6 +472,92 @@ pub fn sync() -> anyhow::Result<()> {
     crate::actions::sync()
 }
 
+fn find_entry(
+    db: &rbw::db::Db,
+    mut needle: Needle,
+    username: Option<&str>,
+    folder: Option<&str>,
+    ignore_case: bool,
+) -> anyhow::Result<rbw::db::Entry<Encrypted>> {
+    if let Needle::Uuid(uuid, s) = needle {
+        for cipher in &db.entries {
+            if uuid::Uuid::parse_str(&cipher.id) == Ok(uuid) {
+                return Ok(cipher.clone());
+            }
+        }
+        needle = Needle::Name(s);
+    }
+
+    let ciphers: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = db
+        .entries
+        .iter()
+        .map(|entry| entry.try_into().map(|decrypted| (entry.clone(), decrypted)))
+        .collect::<anyhow::Result<_>>()?;
+
+    let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
+
+    Ok(entry)
+}
+
+fn find_entry_raw(
+    entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
+    needle: &Needle,
+    username: Option<&str>,
+    folder: Option<&str>,
+    ignore_case: bool,
+) -> anyhow::Result<(rbw::db::Entry<Encrypted>, SearchEntry)> {
+    let mut matches: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = vec![];
+
+    let find_matches = |strict_username, strict_folder, exact| {
+        entries
+            .iter()
+            .filter(|&(_, decrypted_cipher)| {
+                decrypted_cipher.matches(
+                    needle,
+                    username,
+                    folder,
+                    ignore_case,
+                    strict_username,
+                    strict_folder,
+                    exact,
+                )
+            })
+            .cloned()
+            .collect()
+    };
+
+    for exact in [true, false] {
+        matches = find_matches(true, true, exact);
+        if matches.len() == 1 {
+            return Ok(matches[0].clone());
+        }
+
+        let strict_folder_matches = find_matches(false, true, exact);
+        let strict_username_matches = find_matches(true, false, exact);
+        if strict_folder_matches.len() == 1 && strict_username_matches.len() != 1 {
+            return Ok(strict_folder_matches[0].clone());
+        } else if strict_folder_matches.len() != 1 && strict_username_matches.len() == 1 {
+            return Ok(strict_username_matches[0].clone());
+        }
+
+        matches = find_matches(false, false, exact);
+        if matches.len() == 1 {
+            return Ok(matches[0].clone());
+        }
+    }
+
+    if matches.is_empty() {
+        Err(anyhow::anyhow!("no entry found"))
+    } else {
+        let entries: Vec<String> = matches
+            .iter()
+            .map(|(_, decrypted)| decrypted.display_name())
+            .collect();
+        let entries = entries.join(", ");
+        Err(anyhow::anyhow!("multiple entries found: {entries}"))
+    }
+}
+
 pub fn display_entry_field(entry: &rbw::db::Entry<Decrypted>, desc: &str, field: &str) {
     let fields = entry.get_field(&field.to_lowercase(), generate_totp);
     if fields.is_empty() {
@@ -1048,92 +1134,6 @@ fn version_or_quit() -> anyhow::Result<u32> {
     crate::actions::version().inspect_err(|_| {
         let _ = crate::actions::quit();
     })
-}
-
-fn find_entry(
-    db: &rbw::db::Db,
-    mut needle: Needle,
-    username: Option<&str>,
-    folder: Option<&str>,
-    ignore_case: bool,
-) -> anyhow::Result<rbw::db::Entry<Encrypted>> {
-    if let Needle::Uuid(uuid, s) = needle {
-        for cipher in &db.entries {
-            if uuid::Uuid::parse_str(&cipher.id) == Ok(uuid) {
-                return Ok(cipher.clone());
-            }
-        }
-        needle = Needle::Name(s);
-    }
-
-    let ciphers: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = db
-        .entries
-        .iter()
-        .map(|entry| entry.try_into().map(|decrypted| (entry.clone(), decrypted)))
-        .collect::<anyhow::Result<_>>()?;
-
-    let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
-
-    Ok(entry)
-}
-
-fn find_entry_raw(
-    entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
-    needle: &Needle,
-    username: Option<&str>,
-    folder: Option<&str>,
-    ignore_case: bool,
-) -> anyhow::Result<(rbw::db::Entry<Encrypted>, SearchEntry)> {
-    let mut matches: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = vec![];
-
-    let find_matches = |strict_username, strict_folder, exact| {
-        entries
-            .iter()
-            .filter(|&(_, decrypted_cipher)| {
-                decrypted_cipher.matches(
-                    needle,
-                    username,
-                    folder,
-                    ignore_case,
-                    strict_username,
-                    strict_folder,
-                    exact,
-                )
-            })
-            .cloned()
-            .collect()
-    };
-
-    for exact in [true, false] {
-        matches = find_matches(true, true, exact);
-        if matches.len() == 1 {
-            return Ok(matches[0].clone());
-        }
-
-        let strict_folder_matches = find_matches(false, true, exact);
-        let strict_username_matches = find_matches(true, false, exact);
-        if strict_folder_matches.len() == 1 && strict_username_matches.len() != 1 {
-            return Ok(strict_folder_matches[0].clone());
-        } else if strict_folder_matches.len() != 1 && strict_username_matches.len() == 1 {
-            return Ok(strict_username_matches[0].clone());
-        }
-
-        matches = find_matches(false, false, exact);
-        if matches.len() == 1 {
-            return Ok(matches[0].clone());
-        }
-    }
-
-    if matches.is_empty() {
-        Err(anyhow::anyhow!("no entry found"))
-    } else {
-        let entries: Vec<String> = matches
-            .iter()
-            .map(|(_, decrypted)| decrypted.display_name())
-            .collect();
-        let entries = entries.join(", ");
-        Err(anyhow::anyhow!("multiple entries found: {entries}"))
-    }
 }
 
 fn with_config<T>(f: impl FnOnce(&str, &str) -> anyhow::Result<T>) -> anyhow::Result<T> {
