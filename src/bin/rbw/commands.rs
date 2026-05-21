@@ -520,6 +520,7 @@ pub fn get(
     unlock()?;
 
     let db = load_db()?;
+    let mut dec = RemoteDecrypter {};
 
     let desc = format!(
         "{}{}",
@@ -527,8 +528,10 @@ pub fn get(
         needle
     );
 
-    let (_, decrypted) = find_entry(&db, needle, user, folder, ignore_case)
+    let entry = find_entry(&db, needle, user, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+
+    let decrypted = entry.decrypt(&mut dec)?;
 
     if list_fields {
         decrypted
@@ -671,6 +674,7 @@ pub fn code(
     unlock()?;
 
     let db = load_db()?;
+    let mut dec = RemoteDecrypter {};
 
     let desc = format!(
         "{}{}",
@@ -678,10 +682,12 @@ pub fn code(
         needle
     );
 
-    let (_, decrypted) = find_entry(&db, needle, user, folder, ignore_case)
+    let entry = find_entry(&db, needle, user, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
-    if let EntryData::Login { totp, .. } = decrypted.data {
+    if let EntryData::Login { totp, .. } = &entry.data {
+        let totp = entry.decrypt_optstring(totp, &mut dec)?;
+
         if let Some(totp) = totp {
             let code = generate_totp(&totp)?;
             if clipboard {
@@ -871,7 +877,7 @@ pub fn edit(
         name
     );
 
-    let (mut entry, _decrypted) = find_entry(&db, name, username, folder, ignore_case)
+    let mut entry = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     let dec_notes = entry
@@ -935,7 +941,7 @@ pub fn remove(
         name
     );
 
-    let (entry, _) = find_entry(&db, name, username, folder, ignore_case)
+    let entry = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     let (new_access_token, ()) = rbw::actions::remove(
@@ -966,7 +972,7 @@ pub fn history(
         name
     );
 
-    let (entry, _) = find_entry(&db, name, username, folder, ignore_case)
+    let entry = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     for history in entry.decrypt_history(&mut dec)? {
@@ -1050,11 +1056,11 @@ fn find_entry(
     username: Option<&str>,
     folder: Option<&str>,
     ignore_case: bool,
-) -> anyhow::Result<(rbw::db::Entry<Encrypted>, rbw::db::Entry<Decrypted>)> {
+) -> anyhow::Result<rbw::db::Entry<Encrypted>> {
     if let Needle::Uuid(uuid, s) = needle {
         for cipher in &db.entries {
             if uuid::Uuid::parse_str(&cipher.id) == Ok(uuid) {
-                return Ok((cipher.clone(), cipher.decrypt(&mut RemoteDecrypter {})?));
+                return Ok(cipher.clone());
             }
         }
         needle = Needle::Name(s);
@@ -1065,10 +1071,10 @@ fn find_entry(
         .iter()
         .map(|entry| entry.try_into().map(|decrypted| (entry.clone(), decrypted)))
         .collect::<anyhow::Result<_>>()?;
+
     let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
-    // TODO: Consider if full decryption is necessary
-    let decrypted_entry = entry.decrypt(&mut RemoteDecrypter {})?;
-    Ok((entry, decrypted_entry))
+
+    Ok(entry)
 }
 
 fn find_entry_raw(
