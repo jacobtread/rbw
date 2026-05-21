@@ -857,6 +857,8 @@ pub fn edit(
     unlock()?;
 
     let mut enc = RemoteEncrypter {};
+    let mut dec = RemoteDecrypter {};
+
     let mut db = load_db()?;
 
     let desc = format!(
@@ -865,78 +867,58 @@ pub fn edit(
         name
     );
 
-    let (mut entry, decrypted) = find_entry(&db, name, username, folder, ignore_case)
+    let (mut entry, _decrypted) = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
-    let (data, fields, notes, history) = match &decrypted.data {
-        EntryData::Login { password, .. } => {
-            let password = password.as_deref().unwrap_or("");
-            let notes = decrypted
-                .notes
-                .map_or("".to_string(), |n| format!("\n{n}\n"));
-            let contents = format!("{password}\n{notes}");
-
-            let contents = rbw::edit::edit(&contents, HELP_PW)?;
-
-            let (password, notes) = parse_editor(&contents);
-            let password = entry.encrypt_optstring(&password, &mut enc)?;
-            let notes = entry.encrypt_optstring(&notes, &mut enc)?;
-
-            let mut history = entry.history.clone();
-            let rbw::db::EntryData::Login {
-                username: entry_username,
-                password: entry_password,
-                uris: entry_uris,
-                totp: entry_totp,
-            } = &entry.data
-            else {
-                unreachable!();
-            };
-
-            if let Some(prev_password) = entry_password.clone() {
-                let new_history_entry = rbw::db::HistoryEntry {
-                    last_used_date: format!("{}", humantime::format_rfc3339(SystemTime::now())),
-                    password: prev_password,
-                };
-                history.insert(0, new_history_entry);
-            }
-
-            let data = rbw::db::EntryData::Login {
-                username: entry_username.clone(),
-                password,
-                uris: entry_uris.clone(),
-                totp: entry_totp.clone(),
-            };
-            (data, entry.fields, notes, history)
-        }
-        EntryData::SecureNote => {
-            let data = rbw::db::EntryData::SecureNote {};
-
-            let editor_content = decrypted
-                .notes
-                .map_or("\n".to_string(), |notes| format!("{notes}\n"));
-            let contents = rbw::edit::edit(&editor_content, HELP_NOTES)?;
-
-            // prepend blank line to be parsed as pw by `parse_editor`
-            let (_, notes) = parse_editor(&format!("\n{contents}\n"));
-
-            let notes = notes
-                .map(|notes| entry.encrypt_string(&notes, &mut enc))
-                .transpose()?;
-
-            (data, entry.fields, notes, entry.history)
-        }
+    let (dec_password, dec_notes, help) = match &entry.data {
+        EntryData::Login { password, .. } => (
+            entry.decrypt_optstring(&password, &mut dec)?,
+            entry.decrypt_optstring(&entry.notes, &mut dec)?,
+            HELP_PW,
+        ),
+        EntryData::SecureNote => (
+            None,
+            entry.decrypt_optstring(&entry.notes, &mut dec)?,
+            HELP_NOTES,
+        ),
         _ => {
-            return Err(anyhow::anyhow!(
-                "modifications are only supported for login and note entries"
-            ));
+            anyhow::bail!("modifications are only supported for login and note entries")
         }
     };
 
-    entry.data = data;
-    entry.fields = fields;
-    entry.notes = notes;
-    entry.history = history;
+    // TODO: This is VERY ugly
+    let contents = format!(
+        "{}{}{}",
+        dec_password.as_deref().unwrap_or(""),
+        if matches!(entry.data, EntryData::Login { .. }) {
+            "\n"
+        } else {
+            ""
+        },
+        dec_notes.map_or_else(String::new, |n| format!("\n{n}\n"))
+    );
+
+    let contents = rbw::edit::edit(&contents, help)?;
+
+    let (dec_password, dec_notes) = parse_editor(&contents);
+
+    let new_enc_password = entry.encrypt_optstring(&dec_password, &mut enc)?;
+
+    if let EntryData::Login { password, .. } = &mut entry.data {
+        if let Some(prev_password) = password {
+            entry.history.insert(
+                0,
+                rbw::db::HistoryEntry {
+                    last_used_date: format!("{}", humantime::format_rfc3339(SystemTime::now())),
+                    password: prev_password.clone(),
+                },
+            );
+        }
+
+        password.clone_from(&&new_enc_password);
+    }
+
+    entry.notes = entry.encrypt_optstring(&dec_notes, &mut enc)?;
 
     let (new_token, ()) = rbw::actions::edit(
         db.access_token.as_ref().unwrap(),
@@ -1094,6 +1076,7 @@ fn find_entry(
         .map(|entry| entry.try_into().map(|decrypted| (entry.clone(), decrypted)))
         .collect::<anyhow::Result<_>>()?;
     let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
+    // TODO: Consider if full decryption is necessary
     let decrypted_entry = entry.decrypt(&mut RemoteDecrypter {})?;
     Ok((entry, decrypted_entry))
 }
