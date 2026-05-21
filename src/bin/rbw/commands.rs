@@ -75,10 +75,10 @@ impl<T> rbw::db::Encrypter<T> for RemoteEncrypter {
 /// decrypt it.
 struct RemoteDecrypter {}
 
-impl rbw::db::Decrypter for RemoteDecrypter {
+impl<T> rbw::db::Decrypter<T> for RemoteDecrypter {
     fn decrypt_field(
         &mut self,
-        entry: Option<&rbw::db::Entry<Encrypted>>,
+        entry: Option<&rbw::db::Entry<T>>,
         field: &str,
     ) -> rbw::error::Result<String> {
         Ok(crate::actions::decrypt(
@@ -703,7 +703,7 @@ pub fn code(
 
 fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<String> {
     let enc: &mut dyn Encrypter<()> = &mut RemoteEncrypter {}; // fat ptr trick
-    let mut dec = RemoteDecrypter {};
+    let dec: &mut dyn Decrypter<()> = &mut RemoteDecrypter {};
 
     let (new_access_token, folders) = rbw::actions::list_folders(
         db.access_token.as_ref().unwrap(),

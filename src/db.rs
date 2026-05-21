@@ -572,11 +572,11 @@ impl Entry<Decrypted> {
     }
 }
 
-pub trait Decrypter {
-    fn decrypt_field(&mut self, entry: Option<&Entry<Encrypted>>, field: &str) -> Result<String>;
+pub trait Decrypter<T> {
+    fn decrypt_field(&mut self, entry: Option<&Entry<T>>, field: &str) -> Result<String>;
     fn decrypt_optfield(
         &mut self,
-        entry: Option<&Entry<Encrypted>>,
+        entry: Option<&Entry<T>>,
         field: &Option<&str>,
     ) -> Result<Option<String>> {
         Ok(match field {
@@ -604,24 +604,24 @@ impl<T> Entry<T> {
     pub fn encrypt_string(&self, s: &str, encrypter: &mut impl Encrypter<T>) -> Result<String> {
         encrypter.encrypt_field(Some(&self), &s)
     }
-}
 
-impl Entry<Encrypted> {
-    pub fn decrypt_string(&self, s: &str, decrypter: &mut impl Decrypter) -> Result<String> {
+    pub fn decrypt_string(&self, s: &str, decrypter: &mut impl Decrypter<T>) -> Result<String> {
         decrypter.decrypt_field(Some(&self), &s)
     }
 
     pub fn decrypt_optstring(
         &self,
         optstring: &Option<String>,
-        decrypter: &mut impl Decrypter,
+        decrypter: &mut impl Decrypter<T>,
     ) -> Result<Option<String>> {
         decrypter.decrypt_optfield(Some(&self), &optstring.as_deref())
     }
+}
 
+impl Entry<Encrypted> {
     pub fn decrypt_custom_fields(
         &self,
-        decrypter: &mut impl Decrypter,
+        decrypter: &mut impl Decrypter<Encrypted>,
     ) -> Result<Vec<DynamicField>> {
         self.fields
             .iter()
@@ -636,7 +636,7 @@ impl Entry<Encrypted> {
             .collect()
     }
 
-    pub fn decrypt_uris(&self, decrypter: &mut impl Decrypter) -> Result<Vec<Uri>> {
+    pub fn decrypt_uris(&self, decrypter: &mut impl Decrypter<Encrypted>) -> Result<Vec<Uri>> {
         match &self.data {
             EntryData::Login { uris, .. } => Ok(uris
                 .iter()
@@ -651,7 +651,7 @@ impl Entry<Encrypted> {
         }
     }
 
-    pub fn decrypt(&self, decrypter: &mut impl Decrypter) -> Result<Entry<Decrypted>> {
+    pub fn decrypt(&self, decrypter: &mut impl Decrypter<Encrypted>) -> Result<Entry<Decrypted>> {
         // folder name should always be decrypted with the local key because
         // folders are local to a specific user's vault, not the organization
         let folder = self.decrypt_optstring(&self.folder, decrypter)?;
