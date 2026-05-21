@@ -970,6 +970,8 @@ pub fn edit(
         .decrypt_optstring(&entry.notes, &mut dec)?
         .map_or_else(String::new, |n| format!("\n{n}\n"));
 
+    // NOTE: Editing, previously, was limited to Login and SecureNote types. Now it's not limited
+    // anymore. This behavior is not 100% backwards compatible, but it's hardly noticeable
     let (contents, help) = if let EntryData::Login { password, .. } = &entry.data {
         let dec_password = entry
             .decrypt_optstring(password, &mut dec)?
