@@ -743,12 +743,16 @@ fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
 
     let password = lines.next().map(ToString::to_string);
 
-    let notes: String = lines
+    let mut notes: String = lines
         .skip_while(|line| line.is_empty())
         .filter(|line| !line.starts_with('#'))
-        .map(|s| s.to_string())
         .collect::<Vec<_>>()
         .join("\n");
+
+    if notes.ends_with("\n") {
+        notes.pop();
+    }
+
     let notes = if notes.is_empty() { None } else { Some(notes) };
 
     (password, notes)
@@ -870,28 +874,18 @@ pub fn edit(
     let (mut entry, _decrypted) = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
-    let (contents, help) = match &entry.data {
-        EntryData::Login { password, .. } => {
-            let dec_password = entry
-                .decrypt_optstring(password, &mut dec)?
-                .unwrap_or("".to_string());
+    let dec_notes = entry
+        .decrypt_optstring(&entry.notes, &mut dec)?
+        .map_or_else(String::new, |n| format!("\n{n}\n"));
 
-            let dec_notes = entry
-                .decrypt_optstring(&entry.notes, &mut dec)?
-                .map_or_else(String::new, |n| format!("\n{n}\n"));
+    let (contents, help) = if let EntryData::Login { password, .. } = &entry.data {
+        let dec_password = entry
+            .decrypt_optstring(password, &mut dec)?
+            .unwrap_or("".to_string());
 
-            (format!("{dec_password}\n{dec_notes}"), HELP_PW)
-        }
-        EntryData::SecureNote => {
-            let dec_notes = entry
-                .decrypt_optstring(&entry.notes, &mut dec)?
-                .map_or_else(String::new, |n| format!("\n{n}\n"));
-
-            (format!("{dec_notes}"), HELP_NOTES)
-        }
-        _ => {
-            anyhow::bail!("modifications are only supported for login and note entries")
-        }
+        (format!("{dec_password}\n{dec_notes}"), HELP_PW)
+    } else {
+        (dec_notes, HELP_NOTES)
     };
 
     let contents = rbw::edit::edit(&contents, help)?;
