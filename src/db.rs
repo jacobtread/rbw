@@ -1,6 +1,7 @@
 use crate::prelude::*;
 
 use std::{
+    collections::HashMap,
     fmt::Display,
     io::{Read as _, Write as _},
 };
@@ -253,169 +254,20 @@ impl Entry<Decrypted> {
         }
     }
 
-    /// Get all the custom fields defined by the user with the same name. Yes there can be more
-    /// than one custom field with the same name. Don't ask me why.
-    fn get_dynamic_fields(&self, name: &str) -> Vec<Option<String>> {
-        self.fields
-            .iter()
-            .map(|f| {
-                if let Some(fname) = &f.name {
-                    if fname.to_lowercase().contains(name) {
-                        f.value.clone()
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
     /// Ugly function. Its job could be handled semi-automatically by the type system.
     /// Doesn't need to be "Decrypted" to work.
     pub fn get_fields_list(&self) -> Vec<String> {
-        let mut r: Vec<String> = vec![];
+        let mut ret = vec![];
 
-        match &self.data {
-            EntryData::Login {
-                username,
-                password,
-                totp,
-                uris,
-                ..
-            } => {
-                if username.is_some() {
-                    r.push(FieldType::Username.to_string());
-                }
-                if totp.is_some() {
-                    r.push(FieldType::Totp.to_string());
-                }
-                if !uris.is_empty() {
-                    r.push(FieldType::Uris.to_string());
-                }
-                if password.is_some() {
-                    r.push(FieldType::Password.to_string());
-                }
-            }
-            EntryData::Card {
-                cardholder_name,
-                number,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-                ..
-            } => {
-                if number.is_some() {
-                    r.push(FieldType::CardNumber.to_string());
-                }
-                if exp_month.is_some() {
-                    r.push(FieldType::ExpMonth.to_string());
-                }
-                if exp_year.is_some() {
-                    r.push(FieldType::ExpYear.to_string());
-                }
-                if code.is_some() {
-                    r.push(FieldType::Cvv.to_string());
-                }
-                if cardholder_name.is_some() {
-                    r.push(FieldType::Cardholder.to_string());
-                }
-                if brand.is_some() {
-                    r.push(FieldType::Brand.to_string());
-                }
-            }
-
-            EntryData::Identity {
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-                title,
-                first_name,
-                middle_name,
-                last_name,
-                ..
-            } => {
-                if [title, first_name, middle_name, last_name]
-                    .iter()
-                    .any(|f| f.is_some())
-                {
-                    // the display_field combines all these fields together.
-                    r.push("name".to_string());
-                }
-                if email.is_some() {
-                    r.push(FieldType::Email.to_string());
-                }
-                if [address1, address2, address3].iter().any(|f| f.is_some()) {
-                    // the display_field combines all these fields together.
-                    r.push("address".to_string());
-                }
-                if city.is_some() {
-                    r.push(FieldType::City.to_string());
-                }
-                if state.is_some() {
-                    r.push(FieldType::State.to_string());
-                }
-                if postal_code.is_some() {
-                    r.push(FieldType::PostalCode.to_string());
-                }
-                if country.is_some() {
-                    r.push(FieldType::Country.to_string());
-                }
-                if phone.is_some() {
-                    r.push(FieldType::Phone.to_string());
-                }
-                if ssn.is_some() {
-                    r.push(FieldType::Ssn.to_string());
-                }
-                if license_number.is_some() {
-                    r.push(FieldType::License.to_string());
-                }
-                if passport_number.is_some() {
-                    r.push(FieldType::Passport.to_string());
-                }
-                if username.is_some() {
-                    r.push(FieldType::Username.to_string());
-                }
-            }
-
-            EntryData::SecureNote => (), // handled at the end
-            EntryData::SshKey {
-                fingerprint,
-                public_key,
-                ..
-            } => {
-                if fingerprint.is_some() {
-                    r.push(FieldType::Fingerprint.to_string());
-                }
-                if public_key.is_some() {
-                    r.push(FieldType::PublicKey.to_string());
-                }
-            }
+        for (k, _) in self.static_fields() {
+            ret.push(k.to_string());
         }
 
-        if self.notes.is_some() {
-            r.push(FieldType::Notes.to_string());
+        for (k, _) in self.custom_fields() {
+            ret.push(k);
         }
 
-        for f in &self.fields {
-            if let Some(name) = &f.name {
-                r.push(name.clone());
-            }
-        }
-
-        r
+        ret
     }
 
     /// This function is sh*t but I need it for now
@@ -430,76 +282,92 @@ impl Entry<Decrypted> {
         field: &str,
         generate_totp: fn(&str) -> anyhow::Result<String>,
     ) -> Vec<String> {
-        let ftype: FieldType = field.into();
-        let ret: Vec<Option<String>> = match &self.data {
-            EntryData::Login {
-                username,
-                totp,
-                uris,
-                ..
-            } => match &ftype {
-                FieldType::Notes => vec![self.notes.clone()],
-                FieldType::Username => vec![username.clone()],
-                FieldType::Totp => {
-                    if let Some(totp) = totp {
-                        match generate_totp(totp) {
-                            Ok(code) => {
-                                vec![Some(code)]
+        let mut ret = vec![];
+        let field: FieldType = field.into();
 
-                                // val_display_or_store(clipboard, &code);
-                            }
+        if let FieldType::Custom(field) = field {
+            for (k, v) in self.custom_fields() {
+                if k == field {
+                    v.into_iter().for_each(|i| ret.push(i));
+                }
+            }
+        } else {
+            for (ft, value) in self.static_fields() {
+                if ft == field {
+                    let value = if ft == FieldType::Totp {
+                        match generate_totp(&value) {
+                            Ok(totp) => totp,
                             Err(e) => {
                                 eprintln!("{e}");
-                                vec![]
+                                String::new()
                             }
                         }
                     } else {
-                        vec![]
-                    }
+                        value
+                    };
+
+                    ret.push(value);
                 }
-                FieldType::Uris => {
-                    if !uris.is_empty() {
-                        let uri_strs: Vec<_> = uris.iter().map(|uri| uri.uri.clone()).collect();
-                        // val_display_or_store(clipboard, &uri_strs.join("\n"));
-                        vec![Some(uri_strs.join("\n"))]
-                    } else {
-                        vec![]
-                    }
+            }
+        }
+
+        ret
+    }
+
+    pub fn static_fields(&self) -> HashMap<FieldType, String> {
+        let mut map = HashMap::new();
+
+        let mut ins = |k, v: &Option<String>| {
+            if let Some(v) = v {
+                map.insert(k, v.clone());
+            }
+        };
+
+        match &self.data {
+            EntryData::Login {
+                username,
+                password,
+                totp,
+                uris,
+            } => {
+                ins(FieldType::Username, username);
+                ins(FieldType::Password, password);
+                ins(FieldType::Totp, totp);
+                if !uris.is_empty() {
+                    ins(
+                        FieldType::Uris,
+                        &Some(
+                            uris.iter()
+                                .map(|u| u.uri.clone())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        ),
+                    );
                 }
-                FieldType::Password => {
-                    // self.display_short(desc, clipboard);
-                    vec![self.get_short()]
-                }
-                // This should be Custom
-                _ => self.get_dynamic_fields(field),
-            },
+            }
             EntryData::Card {
                 cardholder_name,
+                number,
                 brand,
                 exp_month,
                 exp_year,
                 code,
-                ..
-            } => match &ftype {
-                FieldType::CardNumber => vec![self.get_short()],
-                FieldType::Expiration => {
-                    if let (Some(month), Some(year)) = (exp_month, exp_year) {
-                        vec![Some(format!("{month}/{year}"))]
-                        //val_display_or_store(clipboard, &format!("{month}/{year}"));
-                    } else {
-                        vec![]
-                    }
+            } => {
+                ins(FieldType::CardNumber, number);
+                ins(FieldType::Cvv, code);
+                ins(FieldType::Cardholder, cardholder_name);
+                ins(FieldType::Brand, brand);
+                ins(FieldType::ExpMonth, exp_month);
+                ins(FieldType::ExpYear, exp_year);
+                if let (Some(m), Some(y)) = (exp_month, exp_year) {
+                    ins(FieldType::Expiration, &Some(format!("{m}/{y}")));
                 }
-                FieldType::ExpMonth => vec![exp_month.clone()],
-                FieldType::ExpYear => vec![exp_year.clone()],
-                FieldType::Cvv => vec![code.clone()],
-                FieldType::Name | FieldType::Cardholder => vec![cardholder_name.clone()],
-                FieldType::Brand => vec![brand.clone()],
-                FieldType::Notes => vec![self.notes.clone()],
-                // This should be Custom
-                _ => self.get_dynamic_fields(field),
-            },
+            }
             EntryData::Identity {
+                title,
+                first_name,
+                middle_name,
+                last_name,
                 address1,
                 address2,
                 address3,
@@ -513,62 +381,63 @@ impl Entry<Decrypted> {
                 license_number,
                 passport_number,
                 username,
-                ..
-            } => match &ftype {
-                FieldType::Name => vec![self.get_short()],
-                FieldType::Email => vec![email.clone()],
-                FieldType::Address => {
-                    let mut strs = vec![];
-
-                    if let Some(address1) = address1 {
-                        strs.push(address1.clone());
-                    }
-                    if let Some(address2) = address2 {
-                        strs.push(address2.clone());
-                    }
-                    if let Some(address3) = address3 {
-                        strs.push(address3.clone());
-                    }
-
-                    if !strs.is_empty() {
-                        vec![Some(strs.join("\n"))]
-                        //val_display_or_store(clipboard, &strs.join("\n"));
-                    } else {
-                        vec![]
-                    }
+            } => {
+                let name: Vec<String> = [title, first_name, middle_name, last_name]
+                    .iter()
+                    .copied()
+                    .flatten()
+                    .cloned()
+                    .collect();
+                if !name.is_empty() {
+                    ins(FieldType::Name, &Some(name.join(" ")));
                 }
-                FieldType::City => vec![city.clone()],
-                FieldType::State => vec![state.clone()],
-                FieldType::PostalCode => vec![postal_code.clone()],
-                FieldType::Country => vec![country.clone()],
-                FieldType::Phone => vec![phone.clone()],
-                FieldType::Ssn => vec![ssn.clone()],
-                FieldType::License => vec![license_number.clone()],
-                FieldType::Passport => vec![passport_number.clone()],
-                FieldType::Username => vec![username.clone()],
-                FieldType::Notes => vec![self.notes.clone()],
-                _ => self.get_dynamic_fields(field),
-            },
 
-            EntryData::SecureNote => match &ftype {
-                FieldType::Notes => vec![self.get_short()],
-                _ => self.get_dynamic_fields(field),
-            },
+                let address: Vec<String> = [address1, address2, address3]
+                    .iter()
+                    .copied()
+                    .flatten()
+                    .cloned()
+                    .collect();
+                if !address.is_empty() {
+                    ins(FieldType::Address, &Some(address.join("\n")));
+                }
 
+                ins(FieldType::City, city);
+                ins(FieldType::State, state);
+                ins(FieldType::PostalCode, postal_code);
+                ins(FieldType::Country, country);
+                ins(FieldType::Phone, phone);
+                ins(FieldType::Email, email);
+                ins(FieldType::Ssn, ssn);
+                ins(FieldType::License, license_number);
+                ins(FieldType::Passport, passport_number);
+                ins(FieldType::Username, username);
+            }
+            EntryData::SecureNote => {}
             EntryData::SshKey {
-                fingerprint,
                 private_key,
-                ..
-            } => match &ftype {
-                FieldType::Fingerprint => vec![fingerprint.clone()],
-                FieldType::PublicKey => vec![self.get_short()],
-                FieldType::PrivateKey => vec![private_key.clone()],
-                FieldType::Notes => vec![self.notes.clone()],
-                _ => self.get_dynamic_fields(field),
-            },
-        };
+                public_key,
+                fingerprint,
+            } => {
+                ins(FieldType::PrivateKey, private_key);
+                ins(FieldType::PublicKey, public_key);
+                ins(FieldType::Fingerprint, fingerprint);
+            }
+        }
 
-        ret.into_iter().flatten().collect()
+        ins(FieldType::Notes, &self.notes);
+
+        map
+    }
+
+    pub fn custom_fields(&self) -> HashMap<String, Vec<String>> {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        for f in &self.fields {
+            if let (Some(name), Some(value)) = (&f.name, &f.value) {
+                map.entry(name.clone()).or_default().push(value.clone());
+            }
+        }
+        map
     }
 }
 
