@@ -777,8 +777,8 @@ impl Entry<Encrypted> {
         Ok(Entry::<Decrypted> {
             id: self.id.clone(),
             folder,
-            folder_id: None,
-            org_id: None,
+            folder_id: self.folder_id.clone(),
+            org_id: self.org_id.clone(),
             key: None,
             name: decrypter.decrypt_field(Some(&self), &self.name)?,
             data,
