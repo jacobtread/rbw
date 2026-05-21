@@ -958,6 +958,7 @@ pub fn history(
     unlock()?;
 
     let db = load_db()?;
+    let mut dec = RemoteDecrypter {};
 
     let desc = format!(
         "{}{}",
@@ -965,9 +966,10 @@ pub fn history(
         name
     );
 
-    let (_, decrypted) = find_entry(&db, name, username, folder, ignore_case)
+    let (entry, _) = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
-    for history in decrypted.history {
+
+    for history in entry.decrypt_history(&mut dec)? {
         println!("{}: {}", history.last_used_date, history.password);
     }
 

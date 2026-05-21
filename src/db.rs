@@ -659,6 +659,21 @@ impl Entry<Encrypted> {
         }
     }
 
+    pub fn decrypt_history(
+        &self,
+        decrypter: &mut impl Decrypter<Encrypted>,
+    ) -> Result<Vec<HistoryEntry>> {
+        self.history
+            .iter()
+            .map(|he| {
+                Ok(HistoryEntry {
+                    last_used_date: he.last_used_date.clone(),
+                    password: decrypter.decrypt_field(Some(&self), &he.password)?,
+                })
+            })
+            .collect::<Result<_>>()
+    }
+
     pub fn decrypt(&self, decrypter: &mut impl Decrypter<Encrypted>) -> Result<Entry<Decrypted>> {
         // folder name should always be decrypted with the local key because
         // folders are local to a specific user's vault, not the organization
@@ -668,16 +683,7 @@ impl Entry<Encrypted> {
 
         let notes = self.decrypt_optstring(&self.notes, decrypter)?;
 
-        let history = self
-            .history
-            .iter()
-            .map(|he| {
-                Ok(HistoryEntry {
-                    last_used_date: he.last_used_date.clone(),
-                    password: decrypter.decrypt_field(Some(&self), &he.password)?,
-                })
-            })
-            .collect::<Result<_>>()?;
+        let history = self.decrypt_history(decrypter)?;
 
         let mut df = |_ft, val: &Option<String>| self.decrypt_optstring(&val, decrypter);
 
