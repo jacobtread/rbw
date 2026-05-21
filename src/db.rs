@@ -574,6 +574,36 @@ impl Entry<Decrypted> {
 
 pub trait Decrypter {
     fn decrypt_field(&mut self, entry: Option<&Entry<Encrypted>>, field: &str) -> Result<String>;
+    fn decrypt_optfield(
+        &mut self,
+        entry: Option<&Entry<Encrypted>>,
+        field: &Option<&str>,
+    ) -> Result<Option<String>> {
+        Ok(match field {
+            Some(field) => Some(self.decrypt_field(entry, field)?),
+            None => None,
+        })
+    }
+}
+
+pub trait Encrypter<T> {
+    fn encrypt_field(&mut self, entry: Option<&Entry<T>>, field: &str) -> Result<String>;
+    fn encrypt_optfield(
+        &mut self,
+        entry: Option<&Entry<T>>,
+        field: &Option<&str>,
+    ) -> Result<Option<String>> {
+        Ok(match field {
+            Some(field) => Some(self.encrypt_field(entry, field)?),
+            None => None,
+        })
+    }
+}
+
+impl<T> Entry<T> {
+    pub fn encrypt_string(&self, s: &str, encrypter: &mut impl Encrypter<T>) -> Result<String> {
+        encrypter.encrypt_field(Some(&self), &s)
+    }
 }
 
 impl Entry<Encrypted> {
@@ -586,10 +616,7 @@ impl Entry<Encrypted> {
         optstring: &Option<String>,
         decrypter: &mut impl Decrypter,
     ) -> Result<Option<String>> {
-        Ok(match optstring {
-            Some(s) => Some(decrypter.decrypt_field(Some(&self), s)?),
-            None => None,
-        })
+        decrypter.decrypt_optfield(Some(&self), &optstring.as_deref())
     }
 
     pub fn decrypt_custom_fields(

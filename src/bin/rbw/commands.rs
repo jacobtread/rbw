@@ -3,7 +3,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use rbw::db::{Decrypted, Decrypter, Encrypted, EntryData};
+use rbw::db::{Decrypted, Decrypter, Encrypted, Encrypter, EntryData};
 
 // The default number of seconds the generated TOTP
 // code lasts for before a new one must be generated
@@ -50,6 +50,25 @@ pub fn parse_needle(arg: &str) -> Result<Needle, std::convert::Infallible> {
     }
 
     Ok(Needle::Name(arg.to_string()))
+}
+
+/// This Encrypter implementation will send the decrypted string to the agent and wait for it to
+/// encrypt it.
+struct RemoteEncrypter {}
+
+impl<T> rbw::db::Encrypter<T> for RemoteEncrypter {
+    fn encrypt_field(
+        &mut self,
+        entry: Option<&rbw::db::Entry<T>>,
+        field: &str,
+    ) -> rbw::error::Result<String> {
+        Ok(crate::actions::encrypt(
+            field,
+            // entry.map_or(None, |e| e.key.as_deref()),
+            entry.map_or(None, |e| e.org_id.as_deref()),
+        )
+        .map_err(|_e| rbw::error::Error::EncryptRemote)?)
+    }
 }
 
 /// This Decrypter implementation will send the encrypted string to the agent and wait for it to
@@ -683,6 +702,7 @@ pub fn code(
 }
 
 fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<String> {
+    let enc: &mut dyn Encrypter<()> = &mut RemoteEncrypter {}; // fat ptr trick
     let mut dec = RemoteDecrypter {};
 
     let (new_access_token, folders) = rbw::actions::list_folders(
@@ -707,7 +727,7 @@ fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<S
         let (new_access_token, id) = rbw::actions::create_folder(
             db.access_token.as_ref().unwrap(),
             db.refresh_token.as_ref().unwrap(),
-            &crate::actions::encrypt(folder, None)?,
+            &enc.encrypt_field(None, &folder)?,
         )?;
 
         update_token(db, new_access_token)?;
@@ -749,16 +769,18 @@ pub fn add(
     folder: Option<&str>,
     password: Option<&str>,
 ) -> anyhow::Result<()> {
+    let enc: &mut dyn Encrypter<()> = &mut RemoteEncrypter {}; // fat ptr trick
+
     unlock()?;
 
     let mut db = load_db()?;
     // unwrap is safe here because the call to unlock above is guaranteed to
     // populate these or error
 
-    let name = crate::actions::encrypt(name, None)?;
+    let name = enc.encrypt_field(None, &name)?;
 
     let username = username
-        .map(|username| crate::actions::encrypt(username, None))
+        .map(|username| enc.encrypt_field(None, &username))
         .transpose()?;
 
     let (password, notes) = match password {
@@ -770,16 +792,16 @@ pub fn add(
     };
 
     let password = password
-        .map(|password| crate::actions::encrypt(&password, None))
+        .map(|password| enc.encrypt_field(None, &password))
         .transpose()?;
     let notes = notes
-        .map(|notes| crate::actions::encrypt(&notes, None))
+        .map(|notes| enc.encrypt_field(None, &notes))
         .transpose()?;
     let uris: Vec<_> = uris
         .iter()
         .map(|uri| {
             Ok(rbw::db::Uri {
-                uri: crate::actions::encrypt(&uri.0, None)?,
+                uri: enc.encrypt_field(None, &uri.0)?,
                 match_type: uri.1,
             })
         })
@@ -834,6 +856,7 @@ pub fn edit(
 ) -> anyhow::Result<()> {
     unlock()?;
 
+    let mut enc = RemoteEncrypter {};
     let mut db = load_db()?;
 
     let desc = format!(
@@ -857,10 +880,10 @@ pub fn edit(
 
             let (password, notes) = parse_editor(&contents);
             let password = password
-                .map(|password| crate::actions::encrypt(&password, entry.org_id.as_deref()))
+                .map(|password| entry.encrypt_string(&password, &mut enc))
                 .transpose()?;
             let notes = notes
-                .map(|notes| crate::actions::encrypt(&notes, entry.org_id.as_deref()))
+                .map(|notes| entry.encrypt_string(&notes, &mut enc))
                 .transpose()?;
             let mut history = entry.history.clone();
             let rbw::db::EntryData::Login {
@@ -901,7 +924,7 @@ pub fn edit(
             let (_, notes) = parse_editor(&format!("\n{contents}\n"));
 
             let notes = notes
-                .map(|notes| crate::actions::encrypt(&notes, entry.org_id.as_deref()))
+                .map(|notes| entry.encrypt_string(&notes, &mut enc))
                 .transpose()?;
 
             (data, entry.fields, notes, entry.history)

@@ -21,6 +21,9 @@ pub enum Error {
     #[error("failed to create sso callback server: {err}")]
     CreateSSOCallbackServer { err: std::io::Error },
 
+    #[error("failed to encrypt remotely")]
+    EncryptRemote,
+
     #[error("failed to decrypt")]
     Decrypt { source: block_padding::UnpadError },
 
