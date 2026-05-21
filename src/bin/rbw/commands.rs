@@ -860,10 +860,10 @@ pub fn edit(
 ) -> anyhow::Result<()> {
     unlock()?;
 
+    let mut db = load_db()?;
+
     let mut enc = RemoteEncrypter {};
     let mut dec = RemoteDecrypter {};
-
-    let mut db = load_db()?;
 
     let desc = format!(
         "{}{}",
@@ -881,16 +881,14 @@ pub fn edit(
     let (contents, help) = if let EntryData::Login { password, .. } = &entry.data {
         let dec_password = entry
             .decrypt_optstring(password, &mut dec)?
-            .unwrap_or("".to_string());
+            .unwrap_or_else(String::new);
 
         (format!("{dec_password}\n{dec_notes}"), HELP_PW)
     } else {
         (dec_notes, HELP_NOTES)
     };
 
-    let contents = rbw::edit::edit(&contents, help)?;
-
-    let (dec_password, dec_notes) = parse_editor(&contents);
+    let (dec_password, dec_notes) = parse_editor(&rbw::edit::edit(&contents, help)?);
 
     let new_enc_password = entry.encrypt_optstring(&dec_password, &mut enc)?;
 
