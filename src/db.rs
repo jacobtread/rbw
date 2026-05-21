@@ -285,28 +285,24 @@ impl Entry<Decrypted> {
         let ftype: FieldType = field_key.into();
 
         if let FieldType::Custom(field_key) = ftype {
-            for (k, v) in self.custom_fields() {
-                if k == field_key {
-                    v.into_iter().for_each(|i| ret.push(i));
-                }
+            if let Some(value) = self.custom_fields().remove(&field_key) {
+                value.into_iter().for_each(|i| ret.push(i));
             }
         } else {
-            for (ft, value) in self.static_fields() {
-                if ft == ftype {
-                    let value = if ft == FieldType::Totp {
-                        match generate_totp(&value) {
-                            Ok(totp) => totp,
-                            Err(e) => {
-                                eprintln!("{e}");
-                                String::new()
-                            }
+            if let Some(value) = self.static_fields().remove(&ftype) {
+                let value = if ftype == FieldType::Totp {
+                    match generate_totp(&value) {
+                        Ok(totp) => totp,
+                        Err(e) => {
+                            eprintln!("{e}");
+                            String::new()
                         }
-                    } else {
-                        value
-                    };
+                    }
+                } else {
+                    value
+                };
 
-                    ret.push(value);
-                }
+                ret.push(value);
             }
         }
 
