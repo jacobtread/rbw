@@ -870,33 +870,29 @@ pub fn edit(
     let (mut entry, _decrypted) = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
-    let (dec_password, dec_notes, help) = match &entry.data {
-        EntryData::Login { password, .. } => (
-            entry.decrypt_optstring(&password, &mut dec)?,
-            entry.decrypt_optstring(&entry.notes, &mut dec)?,
-            HELP_PW,
-        ),
-        EntryData::SecureNote => (
-            None,
-            entry.decrypt_optstring(&entry.notes, &mut dec)?,
-            HELP_NOTES,
-        ),
+    let (contents, help) = match &entry.data {
+        EntryData::Login { password, .. } => {
+            let dec_password = entry
+                .decrypt_optstring(password, &mut dec)?
+                .unwrap_or("".to_string());
+
+            let dec_notes = entry
+                .decrypt_optstring(&entry.notes, &mut dec)?
+                .map_or_else(String::new, |n| format!("\n{n}\n"));
+
+            (format!("{dec_password}\n{dec_notes}"), HELP_PW)
+        }
+        EntryData::SecureNote => {
+            let dec_notes = entry
+                .decrypt_optstring(&entry.notes, &mut dec)?
+                .map_or_else(String::new, |n| format!("\n{n}\n"));
+
+            (format!("{dec_notes}"), HELP_NOTES)
+        }
         _ => {
             anyhow::bail!("modifications are only supported for login and note entries")
         }
     };
-
-    // TODO: This is VERY ugly
-    let contents = format!(
-        "{}{}{}",
-        dec_password.as_deref().unwrap_or(""),
-        if matches!(entry.data, EntryData::Login { .. }) {
-            "\n"
-        } else {
-            ""
-        },
-        dec_notes.map_or_else(String::new, |n| format!("\n{n}\n"))
-    );
 
     let contents = rbw::edit::edit(&contents, help)?;
 
