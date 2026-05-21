@@ -270,7 +270,6 @@ impl Entry<Decrypted> {
         ret
     }
 
-    /// This function is sh*t but I need it for now
     /// Given a textual representation of a field, like "username", "password" or "card number",
     /// check which type of entry EntryData is and extract the "username" or "cardnumber" field if
     /// available from the "static" fields, else go check for the dynamic ones.
@@ -279,21 +278,21 @@ impl Entry<Decrypted> {
     /// The dynamic fields are the user's added ones and labeled as "Custom field" in GUI apps.
     pub fn get_field(
         &self,
-        field: &str,
+        field_key: &str,
         generate_totp: fn(&str) -> anyhow::Result<String>,
     ) -> Vec<String> {
         let mut ret = vec![];
-        let field: FieldType = field.into();
+        let ftype: FieldType = field_key.into();
 
-        if let FieldType::Custom(field) = field {
+        if let FieldType::Custom(field_key) = ftype {
             for (k, v) in self.custom_fields() {
-                if k == field {
+                if k == field_key {
                     v.into_iter().for_each(|i| ret.push(i));
                 }
             }
         } else {
             for (ft, value) in self.static_fields() {
-                if ft == field {
+                if ft == ftype {
                     let value = if ft == FieldType::Totp {
                         match generate_totp(&value) {
                             Ok(totp) => totp,
