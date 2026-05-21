@@ -37,6 +37,7 @@ impl Display for Needle {
     }
 }
 
+// TODO: Could this be FromStr?
 #[allow(clippy::unnecessary_wraps)]
 pub fn parse_needle(arg: &str) -> Result<Needle, std::convert::Infallible> {
     if let Ok(uuid) = uuid::Uuid::parse_str(arg) {
@@ -681,20 +682,15 @@ pub fn code(
     Ok(())
 }
 
-fn find_or_create_folder(
-    access_token: &mut String,
-    refresh_token: &str,
-    db: &mut rbw::db::Db,
-    folder: &str,
-) -> anyhow::Result<String> {
+fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<String> {
     let mut dec = RemoteDecrypter {};
-    let (new_access_token, folders) = rbw::actions::list_folders(&access_token, refresh_token)?;
 
-    if let Some(new_access_token) = new_access_token {
-        access_token.clone_from(&new_access_token);
-        db.access_token = Some(new_access_token);
-        save_db(&db)?;
-    }
+    let (new_access_token, folders) = rbw::actions::list_folders(
+        db.access_token.as_ref().unwrap(),
+        db.refresh_token.as_ref().unwrap(),
+    )?;
+
+    update_token(db, new_access_token)?;
 
     let folders: Vec<(String, String)> = folders
         .into_iter()
@@ -709,16 +705,12 @@ fn find_or_create_folder(
         folder_id
     } else {
         let (new_access_token, id) = rbw::actions::create_folder(
-            &access_token,
-            refresh_token,
+            db.access_token.as_ref().unwrap(),
+            db.refresh_token.as_ref().unwrap(),
             &crate::actions::encrypt(folder, None)?,
         )?;
 
-        if let Some(new_access_token) = new_access_token {
-            access_token.clone_from(&new_access_token);
-            db.access_token = Some(new_access_token);
-            save_db(&db)?;
-        }
+        update_token(db, new_access_token)?;
 
         id
     };
@@ -762,8 +754,6 @@ pub fn add(
     let mut db = load_db()?;
     // unwrap is safe here because the call to unlock above is guaranteed to
     // populate these or error
-    let mut access_token = db.access_token.as_ref().unwrap().clone();
-    let refresh_token = db.refresh_token.as_ref().unwrap().clone();
 
     let name = crate::actions::encrypt(name, None)?;
 
@@ -796,18 +786,13 @@ pub fn add(
         .collect::<anyhow::Result<_>>()?;
 
     let folder_id = match folder {
-        Some(folder) => Some(find_or_create_folder(
-            &mut access_token,
-            &refresh_token,
-            &mut db,
-            folder,
-        )?),
+        Some(folder) => Some(find_or_create_folder(&mut db, folder)?),
         None => None,
     };
 
     let (new_token, ()) = rbw::actions::add(
-        &access_token,
-        &refresh_token,
+        &db.access_token.as_ref().unwrap(),
+        &db.refresh_token.as_ref().unwrap(),
         &name,
         &rbw::db::EntryData::Login {
             username,
@@ -850,8 +835,6 @@ pub fn edit(
     unlock()?;
 
     let mut db = load_db()?;
-    let access_token = db.access_token.as_ref().unwrap();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
 
     let desc = format!(
         "{}{}",
@@ -931,8 +914,8 @@ pub fn edit(
     };
 
     let (new_token, ()) = rbw::actions::edit(
-        access_token,
-        refresh_token,
+        db.access_token.as_ref().unwrap(),
+        db.refresh_token.as_ref().unwrap(),
         &entry.id,
         entry.org_id.as_deref(),
         &entry.name,
@@ -957,8 +940,6 @@ pub fn remove(
     unlock()?;
 
     let mut db = load_db()?;
-    let access_token = db.access_token.as_ref().unwrap();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
 
     let desc = format!(
         "{}{}",
@@ -969,11 +950,13 @@ pub fn remove(
     let (entry, _) = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
-    if let (Some(access_token), ()) = rbw::actions::remove(access_token, refresh_token, &entry.id)?
-    {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
-    }
+    let (new_access_token, ()) = rbw::actions::remove(
+        db.access_token.as_ref().unwrap(),
+        db.refresh_token.as_ref().unwrap(),
+        &entry.id,
+    )?;
+
+    update_token(&mut db, new_access_token)?;
 
     crate::actions::sync()
 }
