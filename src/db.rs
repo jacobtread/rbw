@@ -605,6 +605,14 @@ impl<T> Entry<T> {
         encrypter.encrypt_field(Some(&self), &s)
     }
 
+    pub fn encrypt_optstring(
+        &self,
+        optstring: &Option<String>,
+        encrypter: &mut impl Encrypter<T>,
+    ) -> Result<Option<String>> {
+        encrypter.encrypt_optfield(Some(&self), &optstring.as_deref())
+    }
+
     pub fn decrypt_string(&self, s: &str, decrypter: &mut impl Decrypter<T>) -> Result<String> {
         decrypter.decrypt_field(Some(&self), &s)
     }
@@ -997,6 +1005,7 @@ pub struct Db {
     pub protected_private_key: Option<String>,
     pub protected_org_keys: std::collections::HashMap<String, String>,
 
+    // TODO: This could be a HashMap?
     pub entries: Vec<Entry<Encrypted>>,
 }
 

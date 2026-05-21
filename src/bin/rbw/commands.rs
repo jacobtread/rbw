@@ -865,7 +865,7 @@ pub fn edit(
         name
     );
 
-    let (entry, decrypted) = find_entry(&db, name, username, folder, ignore_case)
+    let (mut entry, decrypted) = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     let (data, fields, notes, history) = match &decrypted.data {
@@ -879,12 +879,9 @@ pub fn edit(
             let contents = rbw::edit::edit(&contents, HELP_PW)?;
 
             let (password, notes) = parse_editor(&contents);
-            let password = password
-                .map(|password| entry.encrypt_string(&password, &mut enc))
-                .transpose()?;
-            let notes = notes
-                .map(|notes| entry.encrypt_string(&notes, &mut enc))
-                .transpose()?;
+            let password = entry.encrypt_optstring(&password, &mut enc)?;
+            let notes = entry.encrypt_optstring(&notes, &mut enc)?;
+
             let mut history = entry.history.clone();
             let rbw::db::EntryData::Login {
                 username: entry_username,
@@ -936,17 +933,15 @@ pub fn edit(
         }
     };
 
+    entry.data = data;
+    entry.fields = fields;
+    entry.notes = notes;
+    entry.history = history;
+
     let (new_token, ()) = rbw::actions::edit(
         db.access_token.as_ref().unwrap(),
         db.refresh_token.as_ref().unwrap(),
-        &entry.id,
-        entry.org_id.as_deref(),
-        &entry.name,
-        &data,
-        &fields,
-        notes.as_deref(),
-        entry.folder_id.as_deref(),
-        &history,
+        &entry,
     )?;
 
     update_token(&mut db, new_token)?;

@@ -1,4 +1,7 @@
-use crate::{db::Encrypted, prelude::*};
+use crate::{
+    db::{Encrypted, Entry},
+    prelude::*,
+};
 
 pub async fn register(email: &str, apikey: crate::locked::ApiKey) -> Result<()> {
     let (client, config) = api_client_async().await?;
@@ -168,26 +171,19 @@ fn add_once(
 pub fn edit(
     access_token: &str,
     refresh_token: &str,
-    id: &str,
-    org_id: Option<&str>,
-    name: &str,
-    data: &crate::db::EntryData,
-    fields: &[crate::db::DynamicField],
-    notes: Option<&str>,
-    folder_uuid: Option<&str>,
-    history: &[crate::db::HistoryEntry],
+    entry: &Entry<Encrypted>,
 ) -> Result<(Option<String>, ())> {
     with_exchange_refresh_token(access_token, refresh_token, |access_token| {
         api_client()?.0.edit(
             access_token,
-            id,
-            org_id,
-            name,
-            data,
-            fields,
-            notes,
-            folder_uuid,
-            history,
+            &entry.id,
+            entry.org_id.as_deref(),
+            &entry.name,
+            &entry.data,
+            &entry.fields,
+            entry.notes.as_deref(),
+            entry.folder_id.as_deref(),
+            &entry.history,
         )
     })
 }
