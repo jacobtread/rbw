@@ -414,15 +414,13 @@ pub async fn sync(
 ) -> anyhow::Result<()> {
     let mut db = load_db().await?;
 
-    let access_token = &db
-        .access_token
-        .as_deref()
-        .ok_or(anyhow::anyhow!("failed to find access token in db"))?;
+    let Some(access_token) = &db.access_token else {
+        anyhow::bail!("failed to find access token in db");
+    };
 
-    let refresh_token = &db
-        .access_token
-        .as_deref()
-        .ok_or(anyhow::anyhow!("failed to find refresh token in db"))?;
+    let Some(refresh_token) = &db.refresh_token else {
+        anyhow::bail!("failed to find refresh token in db");
+    };
 
     let (access_token, (protected_key, protected_private_key, protected_org_keys, entries)) =
         rbw::actions::sync(&access_token, &refresh_token)
