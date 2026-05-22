@@ -162,7 +162,7 @@ pub async fn login(
         let email = config_email().await?;
 
         let mut err_msg = None;
-        'attempts: for i in 1_u8..=3 {
+        for i in 1_u8..=3 {
             let err = err_msg
                 .as_deref()
                 .map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -193,7 +193,8 @@ pub async fn login(
                         &email,
                     )
                     .await?;
-                    break 'attempts;
+
+                    break;
                 }
                 Err(rbw::error::Error::TwoFactorRequired {
                     providers,
@@ -209,7 +210,8 @@ pub async fn login(
                         &mut db,
                     )
                     .await?;
-                    break 'attempts;
+
+                    break;
                 }
                 Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
                     err_msg = Some(message);
