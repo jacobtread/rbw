@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use signature::{RandomizedSigner as _, SignatureEncoding as _, Signer as _};
+use tokio::sync::Mutex;
 
 const SSH_AGENT_RSA_SHA2_256: u32 = 2;
 const SSH_AGENT_RSA_SHA2_512: u32 = 4;
@@ -15,11 +18,11 @@ async fn config_confirm_ssh() -> anyhow::Result<bool> {
 
 #[derive(Clone)]
 pub struct SshAgent {
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
 }
 
 impl SshAgent {
-    pub fn new(state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>) -> Self {
+    pub fn new(state: Arc<Mutex<crate::state::State>>) -> Self {
         Self { state }
     }
 
