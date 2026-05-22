@@ -414,21 +414,22 @@ pub async fn sync(
 ) -> anyhow::Result<()> {
     let mut db = load_db().await?;
 
-    let access_token = if let Some(access_token) = &db.access_token {
-        access_token.clone()
-    } else {
-        return Err(anyhow::anyhow!("failed to find access token in db"));
-    };
-    let refresh_token = if let Some(refresh_token) = &db.refresh_token {
-        refresh_token.clone()
-    } else {
-        return Err(anyhow::anyhow!("failed to find refresh token in db"));
-    };
+    let access_token = &db
+        .access_token
+        .as_deref()
+        .ok_or(anyhow::anyhow!("failed to find access token in db"))?;
+
+    let refresh_token = &db
+        .access_token
+        .as_deref()
+        .ok_or(anyhow::anyhow!("failed to find refresh token in db"))?;
+
     let (access_token, (protected_key, protected_private_key, protected_org_keys, entries)) =
         rbw::actions::sync(&access_token, &refresh_token)
             .await
             .context("failed to sync database from server")?;
     state.lock().await.set_master_password_reprompt(&entries);
+    // TODO: This is update_token() behavior. think about integrating it into db
     if let Some(access_token) = access_token {
         db.access_token = Some(access_token);
     }

@@ -114,6 +114,7 @@ pub fn unlock<S: std::hash::BuildHasher>(
     Ok((key, org_keys))
 }
 
+// TODO: This return type could be a struct, like SyncCredentials?
 pub async fn sync(
     access_token: &str,
     refresh_token: &str,
