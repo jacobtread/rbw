@@ -13,20 +13,22 @@ pub async fn register(email: &str, apikey: crate::locked::ApiKey) -> Result<()> 
     Ok(())
 }
 
+pub struct LoginCredentials {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub kdf: crate::api::KdfType,
+    pub iterations: u32,
+    pub memory: Option<u32>,
+    pub parallelism: Option<u32>,
+    pub protected_key: String,
+}
+
 pub async fn login(
     email: &str,
     password: crate::locked::Password,
     two_factor_token: Option<&str>,
     two_factor_provider: Option<crate::api::TwoFactorProviderType>,
-) -> Result<(
-    String,
-    String,
-    crate::api::KdfType,
-    u32,
-    Option<u32>,
-    Option<u32>,
-    String,
-)> {
+) -> Result<LoginCredentials> {
     let (client, config) = api_client_async().await?;
     let (kdf, iterations, memory, parallelism) = client.prelogin(email).await?;
 
@@ -43,7 +45,7 @@ pub async fn login(
         )
         .await?;
 
-    Ok((
+    Ok(LoginCredentials {
         access_token,
         refresh_token,
         kdf,
@@ -51,7 +53,7 @@ pub async fn login(
         memory,
         parallelism,
         protected_key,
-    ))
+    })
 }
 
 pub async fn send_two_factor_email(email: &str, sso_email_2fa_session_token: &str) -> Result<()> {

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use rbw::actions::LoginCredentials;
 use sha2::Digest as _;
 use tokio::sync::Mutex;
 
@@ -124,23 +125,9 @@ async fn two_factor_required(
         }
     }
 
-    let (access_token, refresh_token, kdf, iterations, memory, parallelism, protected_key) =
-        two_factor(environment, &email, password.clone(), provider).await?;
+    let creds = two_factor(environment, &email, password.clone(), provider).await?;
 
-    login_success(
-        state.clone(),
-        access_token,
-        refresh_token,
-        kdf,
-        iterations,
-        memory,
-        parallelism,
-        protected_key,
-        password,
-        db,
-        email,
-    )
-    .await
+    login_success(state.clone(), creds, password, db, email).await
 }
 
 pub async fn login(
@@ -170,29 +157,8 @@ pub async fn login(
             let password = get_password(&format!("Log in to {host}"), &err, environment).await?;
 
             match rbw::actions::login(&email, password.clone(), None, None).await {
-                Ok((
-                    access_token,
-                    refresh_token,
-                    kdf,
-                    iterations,
-                    memory,
-                    parallelism,
-                    protected_key,
-                )) => {
-                    login_success(
-                        state.clone(),
-                        access_token,
-                        refresh_token,
-                        kdf,
-                        iterations,
-                        memory,
-                        parallelism,
-                        protected_key,
-                        password,
-                        &mut db,
-                        &email,
-                    )
-                    .await?;
+                Ok(creds) => {
+                    login_success(state.clone(), creds, password, &mut db, &email).await?;
 
                     break;
                 }
@@ -248,15 +214,7 @@ async fn two_factor(
     email: &str,
     password: rbw::locked::Password,
     provider: rbw::api::TwoFactorProviderType,
-) -> anyhow::Result<(
-    String,
-    String,
-    rbw::api::KdfType,
-    u32,
-    Option<u32>,
-    Option<u32>,
-    String,
-)> {
+) -> anyhow::Result<LoginCredentials> {
     let mut err_msg = None;
     for i in 1_u8..=3 {
         let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -265,25 +223,7 @@ async fn two_factor(
         let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
 
         match rbw::actions::login(email, password.clone(), Some(code), Some(provider)).await {
-            Ok((
-                access_token,
-                refresh_token,
-                kdf,
-                iterations,
-                memory,
-                parallelism,
-                protected_key,
-            )) => {
-                return Ok((
-                    access_token,
-                    refresh_token,
-                    kdf,
-                    iterations,
-                    memory,
-                    parallelism,
-                    protected_key,
-                ))
-            }
+            Ok(creds) => return Ok(creds),
             Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
                 err_msg = Some(message);
             }
@@ -300,13 +240,15 @@ async fn two_factor(
 
 async fn login_success(
     state: Arc<Mutex<crate::state::State>>,
-    access_token: String,
-    refresh_token: String,
-    kdf: rbw::api::KdfType,
-    iterations: u32,
-    memory: Option<u32>,
-    parallelism: Option<u32>,
-    protected_key: String,
+    LoginCredentials {
+        access_token,
+        refresh_token,
+        kdf,
+        iterations,
+        memory,
+        parallelism,
+        protected_key,
+    }: LoginCredentials,
     password: rbw::locked::Password,
     db: &mut rbw::db::Db,
     email: &str,
