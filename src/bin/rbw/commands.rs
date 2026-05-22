@@ -350,17 +350,6 @@ impl TryFrom<&String> for ListField {
     }
 }
 
-const HELP_PW: &str = r"
-# The first line of this file will be the password, and the remainder of the
-# file (after any blank lines after the password) will be stored as a note.
-# Lines with leading # will be ignored.
-";
-
-const HELP_NOTES: &str = r"
-# The content of this file will be stored as a note.
-# Lines with leading # will be ignored.
-";
-
 pub fn config_show() -> anyhow::Result<()> {
     let config = rbw::config::Config::load()?;
     serde_json::to_writer_pretty(std::io::stdout(), &config)
@@ -860,6 +849,17 @@ fn update_token(db: &mut rbw::db::Db, new_token: Option<String>) -> anyhow::Resu
     }
     Ok(())
 }
+
+const HELP_PW: &str = r"
+# The first line of this file will be the password, and the remainder of the
+# file (after any blank lines after the password) will be stored as a note.
+# Lines with leading # will be ignored.
+";
+
+const HELP_NOTES: &str = r"
+# The content of this file will be stored as a note.
+# Lines with leading # will be ignored.
+";
 
 pub fn add(
     name: &str,
