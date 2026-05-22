@@ -337,6 +337,21 @@ fn gen_completions(shell: CompletionShell) {
     }
 }
 
+fn calc_pwgen_type(
+    no_symbols: bool,
+    only_numbers: bool,
+    nonconfusables: bool,
+    diceware: bool,
+) -> rbw::pwgen::Type {
+    match (no_symbols, only_numbers, nonconfusables, diceware) {
+        (true, ..) => rbw::pwgen::Type::NoSymbols,
+        (_, true, ..) => rbw::pwgen::Type::Numbers,
+        (_, _, true, _) => rbw::pwgen::Type::NonConfusables,
+        (.., true) => rbw::pwgen::Type::Diceware,
+        _ => rbw::pwgen::Type::AllChars,
+    }
+}
+
 fn main() {
     let opt = Opt::parse();
 
@@ -427,17 +442,6 @@ fn main() {
             nonconfusables,
             diceware,
         } => {
-            let ty = if no_symbols {
-                rbw::pwgen::Type::NoSymbols
-            } else if only_numbers {
-                rbw::pwgen::Type::Numbers
-            } else if nonconfusables {
-                rbw::pwgen::Type::NonConfusables
-            } else if diceware {
-                rbw::pwgen::Type::Diceware
-            } else {
-                rbw::pwgen::Type::AllChars
-            };
             commands::generate(
                 name.as_deref(),
                 user.as_deref(),
@@ -448,7 +452,7 @@ fn main() {
                     .collect::<Vec<_>>(),
                 folder.as_deref(),
                 len,
-                ty,
+                calc_pwgen_type(no_symbols, only_numbers, nonconfusables, diceware),
             )
         }
         Opt::Edit { find_args } => commands::edit(find_args),
