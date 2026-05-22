@@ -233,6 +233,23 @@ pub async fn login(
     Ok(())
 }
 
+async fn get_code(
+    provider: rbw::api::TwoFactorProviderType,
+    err: &Option<String>,
+    environment: &rbw::protocol::Environment,
+) -> anyhow::Result<rbw::locked::Password> {
+    rbw::pinentry::getpin(
+        &config_pinentry().await?,
+        provider.header(),
+        provider.message(),
+        err.as_deref(),
+        environment,
+        provider.grab(),
+    )
+    .await
+    .context("failed to read code from pinentry")
+}
+
 async fn two_factor(
     environment: &rbw::protocol::Environment,
     email: &str,
@@ -256,17 +273,10 @@ async fn two_factor(
         } else {
             None
         };
-        let code = rbw::pinentry::getpin(
-            &config_pinentry().await?,
-            provider.header(),
-            provider.message(),
-            err.as_deref(),
-            environment,
-            provider.grab(),
-        )
-        .await
-        .context("failed to read code from pinentry")?;
+
+        let code = get_code(provider, &err, environment).await?;
         let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
+
         match rbw::actions::login(email, password.clone(), Some(code), Some(provider)).await {
             Ok((
                 access_token,
