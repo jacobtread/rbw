@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use anyhow::Context as _;
 use sha2::Digest as _;
+use tokio::sync::Mutex;
 
 pub async fn register(
     sock: &mut crate::sock::Sock,
@@ -71,7 +74,7 @@ pub async fn register(
 
 pub async fn login(
     sock: &mut crate::sock::Sock,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
     let db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
@@ -280,7 +283,7 @@ async fn two_factor(
 }
 
 async fn login_success(
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     access_token: String,
     refresh_token: String,
     kdf: rbw::api::KdfType,
@@ -335,7 +338,7 @@ async fn login_success(
 }
 
 async fn unlock_state(
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
     if state.lock().await.needs_unlock() {
@@ -414,7 +417,7 @@ async fn unlock_state(
 
 pub async fn unlock(
     sock: &mut crate::sock::Sock,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
     unlock_state(state, environment).await?;
@@ -425,7 +428,7 @@ pub async fn unlock(
 }
 
 async fn unlock_success(
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     keys: rbw::locked::Keys,
     org_keys: std::collections::HashMap<String, rbw::locked::Keys>,
 ) -> anyhow::Result<()> {
@@ -437,7 +440,7 @@ async fn unlock_success(
 
 pub async fn lock(
     sock: &mut crate::sock::Sock,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
     state.lock().await.clear();
 
@@ -448,7 +451,7 @@ pub async fn lock(
 
 pub async fn check_lock(
     sock: &mut crate::sock::Sock,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
     if state.lock().await.needs_unlock() {
         return Err(anyhow::anyhow!("agent is locked"));
@@ -461,7 +464,7 @@ pub async fn check_lock(
 
 pub async fn sync(
     sock: Option<&mut crate::sock::Sock>,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
     let mut db = load_db().await?;
 
@@ -501,7 +504,7 @@ pub async fn sync(
 }
 
 async fn decrypt_cipher(
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
     cipherstring: &str,
     entry_key: Option<&str>,
@@ -620,7 +623,7 @@ async fn decrypt_cipher(
 
 pub async fn decrypt(
     sock: &mut crate::sock::Sock,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
     cipherstring: &str,
     entry_key: Option<&str>,
@@ -634,7 +637,7 @@ pub async fn decrypt(
 
 pub async fn encrypt(
     sock: &mut crate::sock::Sock,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     plaintext: &str,
     org_id: Option<&str>,
 ) -> anyhow::Result<()> {
@@ -656,7 +659,7 @@ pub async fn encrypt(
 #[cfg(feature = "clipboard")]
 pub async fn clipboard_store(
     sock: &mut crate::sock::Sock,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     text: &str,
 ) -> anyhow::Result<()> {
     let mut state = state.lock().await;
@@ -674,7 +677,7 @@ pub async fn clipboard_store(
 #[cfg(not(feature = "clipboard"))]
 pub async fn clipboard_store(
     sock: &mut crate::sock::Sock,
-    _state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    _state: Arc<Mutex<crate::state::State>>,
     _text: &str,
 ) -> anyhow::Result<()> {
     sock.send(&rbw::protocol::Response::Error {
@@ -755,7 +758,7 @@ async fn config_pinentry() -> anyhow::Result<String> {
 }
 
 pub async fn subscribe_to_notifications(
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
     if state.lock().await.notifications_handler.is_connected() {
         return Ok(());
@@ -785,7 +788,7 @@ pub async fn subscribe_to_notifications(
 }
 
 pub async fn get_ssh_public_keys(
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<Vec<String>> {
     let environment = {
         let state = state.lock().await;
@@ -820,7 +823,7 @@ pub async fn get_ssh_public_keys(
 }
 
 pub async fn find_ssh_private_key(
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
     request_public_key: ssh_agent_lib::ssh_key::PublicKey,
 ) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
     let environment = {
