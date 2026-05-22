@@ -308,6 +308,35 @@ fn generate_completion<G: clap_complete::Generator>(generator: G) {
     );
 }
 
+fn gen_completions(shell: CompletionShell) {
+    match shell {
+        CompletionShell::Bash => {
+            generate_completion(clap_complete::Shell::Bash);
+            println!("{}", include_str!("completion/rbw.bash"));
+        }
+        CompletionShell::Fish => {
+            generate_completion(clap_complete::Shell::Fish);
+            println!("{}", include_str!("completion/rbw.fish"));
+        }
+        CompletionShell::Zsh => {
+            generate_completion(clap_complete::Shell::Zsh);
+            println!("{}", include_str!("completion/rbw.zsh"));
+        }
+        CompletionShell::Powershell => {
+            generate_completion(clap_complete::Shell::PowerShell);
+        }
+        CompletionShell::Elvish => {
+            generate_completion(clap_complete::Shell::Elvish);
+        }
+        CompletionShell::Nushell => {
+            generate_completion(clap_complete_nushell::Nushell);
+        }
+        CompletionShell::Fig => {
+            generate_completion(clap_complete_fig::Fig);
+        }
+    }
+}
+
 fn main() {
     let opt = Opt::parse();
 
@@ -429,32 +458,7 @@ fn main() {
         Opt::Purge => commands::purge(),
         Opt::StopAgent => commands::stop_agent(),
         Opt::GenCompletions { shell } => {
-            match shell {
-                CompletionShell::Bash => {
-                    generate_completion(clap_complete::Shell::Bash);
-                    println!("{}", include_str!("completion/rbw.bash"));
-                }
-                CompletionShell::Fish => {
-                    generate_completion(clap_complete::Shell::Fish);
-                    println!("{}", include_str!("completion/rbw.fish"));
-                }
-                CompletionShell::Zsh => {
-                    generate_completion(clap_complete::Shell::Zsh);
-                    println!("{}", include_str!("completion/rbw.zsh"));
-                }
-                CompletionShell::Powershell => {
-                    generate_completion(clap_complete::Shell::PowerShell);
-                }
-                CompletionShell::Elvish => {
-                    generate_completion(clap_complete::Shell::Elvish);
-                }
-                CompletionShell::Nushell => {
-                    generate_completion(clap_complete_nushell::Nushell);
-                }
-                CompletionShell::Fig => {
-                    generate_completion(clap_complete_fig::Fig);
-                }
-            }
+            gen_completions(shell);
             Ok(())
         }
     }
