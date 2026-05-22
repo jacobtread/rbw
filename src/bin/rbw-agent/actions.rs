@@ -112,41 +112,35 @@ async fn two_factor_required(
         rbw::api::TwoFactorProviderType::Email,
     ];
 
-    for provider in supported_types {
-        if providers.contains(&provider) {
-            if provider == rbw::api::TwoFactorProviderType::Email {
-                if let Some(sso_email_2fa_session_token) = sso_email_2fa_session_token {
-                    rbw::actions::send_two_factor_email(&email, &sso_email_2fa_session_token)
-                        .await?;
-                }
-            }
+    let Some(provider) = supported_types.into_iter().find(|p| providers.contains(p)) else {
+        return Err(anyhow::anyhow!(
+            "unsupported two factor methods: {providers:?}"
+        ));
+    };
 
-            let (access_token, refresh_token, kdf, iterations, memory, parallelism, protected_key) =
-                two_factor(environment, &email, password.clone(), provider).await?;
-
-            login_success(
-                state.clone(),
-                access_token,
-                refresh_token,
-                kdf,
-                iterations,
-                memory,
-                parallelism,
-                protected_key,
-                password,
-                db,
-                email,
-            )
-            .await?;
-
-            return Ok(());
-            // break 'attempts;
+    if provider == rbw::api::TwoFactorProviderType::Email {
+        if let Some(token) = sso_email_2fa_session_token {
+            rbw::actions::send_two_factor_email(email, &token).await?;
         }
     }
 
-    return Err(anyhow::anyhow!(
-        "unsupported two factor methods: {providers:?}"
-    ));
+    let (access_token, refresh_token, kdf, iterations, memory, parallelism, protected_key) =
+        two_factor(environment, &email, password.clone(), provider).await?;
+
+    login_success(
+        state.clone(),
+        access_token,
+        refresh_token,
+        kdf,
+        iterations,
+        memory,
+        parallelism,
+        protected_key,
+        password,
+        db,
+        email,
+    )
+    .await
 }
 
 pub async fn login(
