@@ -6,6 +6,8 @@ use std::{
 use anyhow::Context as _;
 use rbw::db::{Decrypted, Decrypter, Encrypted, Encrypter, EntryData};
 
+use crate::FindArgs;
+
 // The default number of seconds the generated TOTP
 // code lasts for before a new one must be generated
 const TOTP_DEFAULT_STEP: u64 = 30;
@@ -583,16 +585,17 @@ pub fn display_entry_short(entry: &rbw::db::Entry<Decrypted>, desc: &str) -> boo
     true
 }
 
-#[allow(clippy::fn_params_excessive_bools)]
 pub fn get(
-    needle: Needle,
-    user: Option<&str>,
-    folder: Option<&str>,
+    FindArgs {
+        needle,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
     field: Option<&str>,
     full: bool,
     raw: bool,
     clipboard: bool,
-    ignore_case: bool,
     list_fields: bool,
 ) -> anyhow::Result<()> {
     unlock()?;
@@ -602,11 +605,11 @@ pub fn get(
 
     let desc = format!(
         "{}{}",
-        user.map_or_else(String::new, |s| format!("{s}@")),
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
         needle
     );
 
-    let entry = find_entry(&db, needle, user, folder, ignore_case)
+    let entry = find_entry(&db, needle, user.as_deref(), folder.as_deref(), ignorecase)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     let decrypted = entry.decrypt(&mut dec)?;
@@ -743,11 +746,13 @@ pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
 }
 
 pub fn code(
-    needle: Needle,
-    user: Option<&str>,
-    folder: Option<&str>,
+    FindArgs {
+        needle,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
     clipboard: bool,
-    ignore_case: bool,
 ) -> anyhow::Result<()> {
     unlock()?;
 
@@ -756,11 +761,11 @@ pub fn code(
 
     let desc = format!(
         "{}{}",
-        user.map_or_else(String::new, |s| format!("{s}@")),
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
         needle
     );
 
-    let entry = find_entry(&db, needle, user, folder, ignore_case)
+    let entry = find_entry(&db, needle, user.as_deref(), folder.as_deref(), ignorecase)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     if let EntryData::Login { totp, .. } = &entry.data {
@@ -948,10 +953,12 @@ pub fn generate(
 }
 
 pub fn edit(
-    name: Needle,
-    username: Option<&str>,
-    folder: Option<&str>,
-    ignore_case: bool,
+    FindArgs {
+        needle,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
 ) -> anyhow::Result<()> {
     unlock()?;
 
@@ -962,11 +969,11 @@ pub fn edit(
 
     let desc = format!(
         "{}{}",
-        username.map_or_else(String::new, |s| format!("{s}@")),
-        name
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
+        needle
     );
 
-    let mut entry = find_entry(&db, name, username, folder, ignore_case)
+    let mut entry = find_entry(&db, needle, user.as_deref(), folder.as_deref(), ignorecase)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     let dec_notes = entry
@@ -1017,10 +1024,12 @@ pub fn edit(
 }
 
 pub fn remove(
-    name: Needle,
-    username: Option<&str>,
-    folder: Option<&str>,
-    ignore_case: bool,
+    FindArgs {
+        needle,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
 ) -> anyhow::Result<()> {
     unlock()?;
 
@@ -1028,11 +1037,11 @@ pub fn remove(
 
     let desc = format!(
         "{}{}",
-        username.map_or_else(String::new, |s| format!("{s}@")),
-        name
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
+        needle
     );
 
-    let entry = find_entry(&db, name, username, folder, ignore_case)
+    let entry = find_entry(&db, needle, user.as_deref(), folder.as_deref(), ignorecase)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     let (new_access_token, ()) = rbw::actions::remove(
@@ -1047,10 +1056,12 @@ pub fn remove(
 }
 
 pub fn history(
-    name: Needle,
-    username: Option<&str>,
-    folder: Option<&str>,
-    ignore_case: bool,
+    FindArgs {
+        needle: name,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
 ) -> anyhow::Result<()> {
     unlock()?;
 
@@ -1059,11 +1070,11 @@ pub fn history(
 
     let desc = format!(
         "{}{}",
-        username.map_or_else(String::new, |s| format!("{s}@")),
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
         name
     );
 
-    let entry = find_entry(&db, name, username, folder, ignore_case)
+    let entry = find_entry(&db, name, user.as_deref(), folder.as_deref(), ignorecase)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
     for history in entry.decrypt_history(&mut dec)? {

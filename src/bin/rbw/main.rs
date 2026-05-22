@@ -8,7 +8,7 @@ mod commands;
 mod sock;
 
 #[derive(Debug, clap::Args)]
-struct FindArgs {
+pub struct FindArgs {
     #[arg(help = "Name, URI or UUID of the entry to display")]
     needle: commands::Needle,
     #[arg(help = "Username of the entry to display")]
@@ -299,6 +299,15 @@ impl Config {
     }
 }
 
+fn generate_completion<G: clap_complete::Generator>(generator: G) {
+    clap_complete::generate(
+        generator,
+        &mut Opt::command(),
+        "rbw",
+        &mut std::io::stdout(),
+    );
+}
+
 fn main() {
     let opt = Opt::parse();
 
@@ -335,9 +344,7 @@ fn main() {
             clipboard,
             list_fields,
         } => commands::get(
-            find_args.needle.clone(),
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
+            find_args,
             field.as_deref(),
             full,
             raw,
@@ -345,7 +352,6 @@ fn main() {
             clipboard,
             #[cfg(not(feature = "clipboard"))]
             false,
-            find_args.ignorecase,
             list_fields,
         ),
         Opt::Search {
@@ -359,14 +365,11 @@ fn main() {
             #[cfg(feature = "clipboard")]
             clipboard,
         } => commands::code(
-            find_args.needle,
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
+            find_args,
             #[cfg(feature = "clipboard")]
             clipboard,
             #[cfg(not(feature = "clipboard"))]
             false,
-            find_args.ignorecase,
         ),
         Opt::Add {
             name,
@@ -419,87 +422,37 @@ fn main() {
                 ty,
             )
         }
-        Opt::Edit { find_args } => commands::edit(
-            find_args.needle,
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
-            find_args.ignorecase,
-        ),
-        Opt::Remove { find_args } => commands::remove(
-            find_args.needle,
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
-            find_args.ignorecase,
-        ),
-        Opt::History { find_args } => commands::history(
-            find_args.needle,
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
-            find_args.ignorecase,
-        ),
+        Opt::Edit { find_args } => commands::edit(find_args),
+        Opt::Remove { find_args } => commands::remove(find_args),
+        Opt::History { find_args } => commands::history(find_args),
         Opt::Lock => commands::lock(),
         Opt::Purge => commands::purge(),
         Opt::StopAgent => commands::stop_agent(),
         Opt::GenCompletions { shell } => {
             match shell {
                 CompletionShell::Bash => {
-                    clap_complete::generate(
-                        clap_complete::Shell::Bash,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
+                    generate_completion(clap_complete::Shell::Bash);
                     println!("{}", include_str!("completion/rbw.bash"));
                 }
                 CompletionShell::Fish => {
-                    clap_complete::generate(
-                        clap_complete::Shell::Fish,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
+                    generate_completion(clap_complete::Shell::Fish);
                     println!("{}", include_str!("completion/rbw.fish"));
                 }
                 CompletionShell::Zsh => {
-                    clap_complete::generate(
-                        clap_complete::Shell::Zsh,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
+                    generate_completion(clap_complete::Shell::Zsh);
                     println!("{}", include_str!("completion/rbw.zsh"));
                 }
                 CompletionShell::Powershell => {
-                    clap_complete::generate(
-                        clap_complete::Shell::PowerShell,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
+                    generate_completion(clap_complete::Shell::PowerShell);
                 }
                 CompletionShell::Elvish => {
-                    clap_complete::generate(
-                        clap_complete::Shell::Elvish,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
+                    generate_completion(clap_complete::Shell::Elvish);
                 }
                 CompletionShell::Nushell => {
-                    clap_complete::generate(
-                        clap_complete_nushell::Nushell,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
+                    generate_completion(clap_complete_nushell::Nushell);
                 }
                 CompletionShell::Fig => {
-                    clap_complete::generate(
-                        clap_complete_fig::Fig,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
+                    generate_completion(clap_complete_fig::Fig);
                 }
             }
             Ok(())
