@@ -57,27 +57,19 @@ pub async fn register(
 
         let mut err_msg = None;
         for i in 1_u8..=3 {
-            let err = if i > 1 {
-                // this unwrap is safe because we only ever continue the loop
-                // if we have set err_msg
-                Some(format!("{} (attempt {}/3)", err_msg.unwrap(), i))
-            } else {
-                None
-            };
-
+            let err = err_msg
+                .as_deref()
+                .map(|msg| format!("{msg} (attempt {i}/3)"));
             let client_id = get_client_id(host, &err, environment).await?;
             let client_secret = get_client_secret(host, &err, environment).await?;
 
             let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
-            match rbw::actions::register(&email, apikey.clone()).await {
+
+            match rbw::actions::register(&email, apikey).await {
                 Ok(()) => {
                     break;
                 }
-                Err(rbw::error::Error::IncorrectPassword { message }) => {
-                    if i == 3 {
-                        return Err(rbw::error::Error::IncorrectPassword { message })
-                            .context("failed to log in to bitwarden instance");
-                    }
+                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
                     err_msg = Some(message);
                 }
                 Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
