@@ -97,12 +97,64 @@ async fn get_password(
     .context("failed to read password from pinentry")
 }
 
+async fn two_factor_required(
+    state: &Arc<Mutex<crate::state::State>>,
+    email: &str,
+    password: rbw::locked::Password,
+    providers: Vec<rbw::api::TwoFactorProviderType>,
+    sso_email_2fa_session_token: Option<String>,
+    environment: &rbw::protocol::Environment,
+    db: &mut rbw::db::Db,
+) -> anyhow::Result<()> {
+    let supported_types = [
+        rbw::api::TwoFactorProviderType::Authenticator,
+        rbw::api::TwoFactorProviderType::Yubikey,
+        rbw::api::TwoFactorProviderType::Email,
+    ];
+
+    for provider in supported_types {
+        if providers.contains(&provider) {
+            if provider == rbw::api::TwoFactorProviderType::Email {
+                if let Some(sso_email_2fa_session_token) = sso_email_2fa_session_token {
+                    rbw::actions::send_two_factor_email(&email, &sso_email_2fa_session_token)
+                        .await?;
+                }
+            }
+
+            let (access_token, refresh_token, kdf, iterations, memory, parallelism, protected_key) =
+                two_factor(environment, &email, password.clone(), provider).await?;
+
+            login_success(
+                state.clone(),
+                access_token,
+                refresh_token,
+                kdf,
+                iterations,
+                memory,
+                parallelism,
+                protected_key,
+                password,
+                db,
+                email,
+            )
+            .await?;
+
+            return Ok(());
+            // break 'attempts;
+        }
+    }
+
+    return Err(anyhow::anyhow!(
+        "unsupported two factor methods: {providers:?}"
+    ));
+}
+
 pub async fn login(
     sock: &mut crate::sock::Sock,
     state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
-    let db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
+    let mut db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
 
     if db.needs_login() {
         let url_str = config_base_url().await?;
@@ -117,7 +169,9 @@ pub async fn login(
 
         let mut err_msg = None;
         'attempts: for i in 1_u8..=3 {
-            let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+            let err = err_msg
+                .as_deref()
+                .map(|msg| format!("{msg} (attempt {i}/3)"));
 
             let password = get_password(&format!("Log in to {host}"), &err, environment).await?;
 
@@ -141,8 +195,8 @@ pub async fn login(
                         parallelism,
                         protected_key,
                         password,
-                        db,
-                        email,
+                        &mut db,
+                        &email,
                     )
                     .await?;
                     break 'attempts;
@@ -151,54 +205,17 @@ pub async fn login(
                     providers,
                     sso_email_2fa_session_token,
                 }) => {
-                    let supported_types = vec![
-                        rbw::api::TwoFactorProviderType::Authenticator,
-                        rbw::api::TwoFactorProviderType::Yubikey,
-                        rbw::api::TwoFactorProviderType::Email,
-                    ];
-
-                    for provider in supported_types {
-                        if providers.contains(&provider) {
-                            if provider == rbw::api::TwoFactorProviderType::Email {
-                                if let Some(sso_email_2fa_session_token) =
-                                    sso_email_2fa_session_token
-                                {
-                                    rbw::actions::send_two_factor_email(
-                                        &email,
-                                        &sso_email_2fa_session_token,
-                                    )
-                                    .await?;
-                                }
-                            }
-                            let (
-                                access_token,
-                                refresh_token,
-                                kdf,
-                                iterations,
-                                memory,
-                                parallelism,
-                                protected_key,
-                            ) = two_factor(environment, &email, password.clone(), provider).await?;
-                            login_success(
-                                state.clone(),
-                                access_token,
-                                refresh_token,
-                                kdf,
-                                iterations,
-                                memory,
-                                parallelism,
-                                protected_key,
-                                password,
-                                db,
-                                email,
-                            )
-                            .await?;
-                            break 'attempts;
-                        }
-                    }
-                    return Err(anyhow::anyhow!(
-                        "unsupported two factor methods: {providers:?}"
-                    ));
+                    two_factor_required(
+                        &state,
+                        &email,
+                        password,
+                        providers,
+                        sso_email_2fa_session_token,
+                        environment,
+                        &mut db,
+                    )
+                    .await?;
+                    break 'attempts;
                 }
                 Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
                     err_msg = Some(message);
@@ -295,8 +312,8 @@ async fn login_success(
     parallelism: Option<u32>,
     protected_key: String,
     password: rbw::locked::Password,
-    mut db: rbw::db::Db,
-    email: String,
+    db: &mut rbw::db::Db,
+    email: &str,
 ) -> anyhow::Result<()> {
     db.access_token = Some(access_token.clone());
     db.refresh_token = Some(refresh_token.clone());
