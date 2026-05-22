@@ -4,6 +4,40 @@ use anyhow::Context as _;
 use sha2::Digest as _;
 use tokio::sync::Mutex;
 
+async fn get_client_id(
+    host: &str,
+    err: &Option<String>,
+    environment: &rbw::protocol::Environment,
+) -> anyhow::Result<rbw::locked::Password> {
+    rbw::pinentry::getpin(
+        &config_pinentry().await?,
+        "API key client__id",
+        &format!("Log in to {host}"),
+        err.as_deref(),
+        environment,
+        false,
+    )
+    .await
+    .context("failed to read client_id from pinentry")
+}
+
+async fn get_client_secret(
+    host: &str,
+    err: &Option<String>,
+    environment: &rbw::protocol::Environment,
+) -> anyhow::Result<rbw::locked::Password> {
+    rbw::pinentry::getpin(
+        &config_pinentry().await?,
+        "API key client__secret",
+        &format!("Log in to {host}"),
+        err.as_deref(),
+        environment,
+        false,
+    )
+    .await
+    .context("failed to read client_secret from pinentry")
+}
+
 pub async fn register(
     sock: &mut crate::sock::Sock,
     environment: &rbw::protocol::Environment,
@@ -30,26 +64,10 @@ pub async fn register(
             } else {
                 None
             };
-            let client_id = rbw::pinentry::getpin(
-                &config_pinentry().await?,
-                "API key client__id",
-                &format!("Log in to {host}"),
-                err.as_deref(),
-                environment,
-                false,
-            )
-            .await
-            .context("failed to read client_id from pinentry")?;
-            let client_secret = rbw::pinentry::getpin(
-                &config_pinentry().await?,
-                "API key client__secret",
-                &format!("Log in to {host}"),
-                err.as_deref(),
-                environment,
-                false,
-            )
-            .await
-            .context("failed to read client_secret from pinentry")?;
+
+            let client_id = get_client_id(host, &err, environment).await?;
+            let client_secret = get_client_secret(host, &err, environment).await?;
+
             let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
             match rbw::actions::register(&email, apikey.clone()).await {
                 Ok(()) => {
@@ -70,6 +88,23 @@ pub async fn register(
     respond_ack(sock).await?;
 
     Ok(())
+}
+
+async fn get_password(
+    host: &str,
+    err: &Option<String>,
+    environment: &rbw::protocol::Environment,
+) -> anyhow::Result<rbw::locked::Password> {
+    rbw::pinentry::getpin(
+        &config_pinentry().await?,
+        "Master Password",
+        &format!("Log in to {host}"),
+        err.as_deref(),
+        environment,
+        true,
+    )
+    .await
+    .context("failed to read password from pinentry")
 }
 
 pub async fn login(
@@ -99,16 +134,9 @@ pub async fn login(
             } else {
                 None
             };
-            let password = rbw::pinentry::getpin(
-                &config_pinentry().await?,
-                "Master Password",
-                &format!("Log in to {host}"),
-                err.as_deref(),
-                environment,
-                true,
-            )
-            .await
-            .context("failed to read password from pinentry")?;
+
+            let password = get_password(host, &err, environment).await?;
+
             match rbw::actions::login(&email, password.clone(), None, None).await {
                 Ok((
                     access_token,
