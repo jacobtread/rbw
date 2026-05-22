@@ -91,14 +91,14 @@ pub async fn register(
 }
 
 async fn get_password(
-    host: &str,
+    desc: &str,
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
     rbw::pinentry::getpin(
         &config_pinentry().await?,
         "Master Password",
-        &format!("Log in to {host}"),
+        desc,
         err.as_deref(),
         environment,
         true,
@@ -135,7 +135,7 @@ pub async fn login(
                 None
             };
 
-            let password = get_password(host, &err, environment).await?;
+            let password = get_password(&format!("Log in to {host}"), &err, environment).await?;
 
             match rbw::actions::login(&email, password.clone(), None, None).await {
                 Ok((
@@ -413,16 +413,14 @@ async fn unlock_state(
             } else {
                 None
             };
-            let password = rbw::pinentry::getpin(
-                &config_pinentry().await?,
-                "Master Password",
+
+            let password = get_password(
                 &format!("Unlock the local database for '{}'", rbw::dirs::profile()),
-                err.as_deref(),
+                &err,
                 environment,
-                true,
             )
-            .await
-            .context("failed to read password from pinentry")?;
+            .await?;
+
             match rbw::actions::unlock(
                 &email,
                 &password,
@@ -610,17 +608,15 @@ async fn decrypt_cipher(
             } else {
                 None
             };
+
             // TODO: Remember somewhere that only GUI pinentry work, since this is a daemon.
-            let password = rbw::pinentry::getpin(
-                &config_pinentry().await?,
-                "Master Password",
+            let password = get_password(
                 "Accessing this entry requires the master password",
-                err.as_deref(),
+                &err,
                 environment,
-                true,
             )
-            .await
-            .context("failed to read password from pinentry")?;
+            .await?;
+
             match rbw::actions::unlock(
                 &email,
                 &password,
