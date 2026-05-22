@@ -1,5 +1,6 @@
 use std::{
-    fmt::Display, io::Write as _, os::unix::ffi::OsStrExt as _, path::PathBuf, time::SystemTime,
+    fmt::Display, io::Write as _, os::unix::ffi::OsStrExt as _, path::PathBuf, str::FromStr,
+    time::SystemTime,
 };
 
 use anyhow::Context as _;
@@ -37,19 +38,21 @@ impl Display for Needle {
     }
 }
 
-// TODO: Could this be FromStr?
-#[allow(clippy::unnecessary_wraps)]
-pub fn parse_needle(arg: &str) -> Result<Needle, std::convert::Infallible> {
-    if let Ok(uuid) = uuid::Uuid::parse_str(arg) {
-        return Ok(Needle::Uuid(uuid, arg.to_string()));
-    }
-    if let Ok(url) = url::Url::parse(arg) {
-        if url.is_special() {
-            return Ok(Needle::Uri(url));
-        }
-    }
+impl FromStr for Needle {
+    type Err = std::convert::Infallible;
 
-    Ok(Needle::Name(arg.to_string()))
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(uuid) = uuid::Uuid::parse_str(s) {
+            return Ok(Needle::Uuid(uuid, s.to_string()));
+        }
+        if let Ok(url) = url::Url::parse(s) {
+            if url.is_special() {
+                return Ok(Needle::Uri(url));
+            }
+        }
+
+        Ok(Needle::Name(s.to_string()))
+    }
 }
 
 /// This Encrypter implementation will send the decrypted string to the agent and wait for it to
@@ -2224,7 +2227,7 @@ mod test {
         entries_eq(
             &find_entry_raw(
                 entries,
-                &parse_needle(needle).unwrap(),
+                &needle.parse().unwrap(),
                 username,
                 folder,
                 ignore_case,
@@ -2244,7 +2247,7 @@ mod test {
     ) -> bool {
         let res = find_entry_raw(
             entries,
-            &parse_needle(needle).unwrap(),
+            &needle.parse().unwrap(),
             username,
             folder,
             ignore_case,
@@ -2266,7 +2269,7 @@ mod test {
     ) -> bool {
         let res = find_entry_raw(
             entries,
-            &parse_needle(needle).unwrap(),
+            &needle.parse().unwrap(),
             username,
             folder,
             ignore_case,

@@ -9,7 +9,7 @@ mod sock;
 
 #[derive(Debug, clap::Args)]
 struct FindArgs {
-    #[arg(help = "Name, URI or UUID of the entry to display", value_parser = commands::parse_needle)]
+    #[arg(help = "Name, URI or UUID of the entry to display")]
     needle: commands::Needle,
     #[arg(help = "Username of the entry to display")]
     user: Option<String>,
