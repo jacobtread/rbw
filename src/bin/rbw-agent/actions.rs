@@ -652,10 +652,9 @@ async fn respond_encrypt(sock: &mut crate::sock::Sock, cipherstring: String) -> 
 
 async fn config_email() -> anyhow::Result<String> {
     let config = rbw::config::Config::load_async().await?;
-    config.email.map_or_else(
-        || Err(anyhow::anyhow!("failed to find email address in config")),
-        Ok,
-    )
+    config
+        .email
+        .ok_or(anyhow::anyhow!("failed to find email address in config"))
 }
 
 async fn load_db() -> anyhow::Result<rbw::db::Db> {
