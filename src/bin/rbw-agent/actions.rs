@@ -448,6 +448,22 @@ pub async fn sync(
     Ok(())
 }
 
+fn decrypt_entry_key(
+    entry_key: Option<&str>,
+    keys: &rbw::locked::Keys,
+) -> anyhow::Result<Option<rbw::locked::Keys>> {
+    entry_key
+        .map(|ek| {
+            let cs = rbw::cipherstring::CipherString::new(ek)
+                .context("failed to parse individual item encryption key")?;
+            Ok(rbw::locked::Keys::new(
+                cs.decrypt_locked_symmetric(keys)
+                    .context("failed to decrypt individual item encryption key")?,
+            ))
+        })
+        .transpose()
+}
+
 async fn decrypt_cipher(
     state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
@@ -465,17 +481,8 @@ async fn decrypt_cipher(
             "failed to find decryption keys in in-memory state"
         ));
     };
-    let entry_key = if let Some(entry_key) = entry_key {
-        let key_cipherstring = rbw::cipherstring::CipherString::new(entry_key)
-            .context("failed to parse individual item encryption key")?;
-        Some(rbw::locked::Keys::new(
-            key_cipherstring
-                .decrypt_locked_symmetric(keys)
-                .context("failed to decrypt individual item encryption key")?,
-        ))
-    } else {
-        None
-    };
+
+    let entry_key = decrypt_entry_key(entry_key, &keys)?;
 
     let mut sha256 = sha2::Sha256::new();
     sha256.update(cipherstring);
