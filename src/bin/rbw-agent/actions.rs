@@ -464,29 +464,15 @@ fn decrypt_entry_key(
         .transpose()
 }
 
-async fn decrypt_cipher(
-    state: Arc<Mutex<crate::state::State>>,
+async fn maybe_reprompt_password(
+    state: &crate::state::State,
     environment: &rbw::protocol::Environment,
     cipherstring: &str,
-    entry_key: Option<&str>,
-    org_id: Option<&str>,
-) -> anyhow::Result<String> {
-    let mut state = state.lock().await;
-    if !state.master_password_reprompt_initialized() {
-        let db = load_db().await?;
-        state.set_master_password_reprompt(&db.entries);
-    }
-    let Some(keys) = state.key(org_id) else {
-        return Err(anyhow::anyhow!(
-            "failed to find decryption keys in in-memory state"
-        ));
-    };
-
-    let entry_key = decrypt_entry_key(entry_key, &keys)?;
-
+) -> anyhow::Result<()> {
     let mut sha256 = sha2::Sha256::new();
     sha256.update(cipherstring);
     let master_password_reprompt: [u8; 32] = sha256.finalize().into();
+
     if state
         .master_password_reprompt
         .contains(&master_password_reprompt)
@@ -549,8 +535,36 @@ async fn decrypt_cipher(
         }
     }
 
+    Ok(())
+}
+
+async fn decrypt_cipher(
+    state: Arc<Mutex<crate::state::State>>,
+    environment: &rbw::protocol::Environment,
+    cipherstring: &str,
+    entry_key: Option<&str>,
+    org_id: Option<&str>,
+) -> anyhow::Result<String> {
+    let mut state = state.lock().await;
+
+    if !state.master_password_reprompt_initialized() {
+        let db = load_db().await?;
+        state.set_master_password_reprompt(&db.entries);
+    }
+
+    let Some(keys) = state.key(org_id) else {
+        return Err(anyhow::anyhow!(
+            "failed to find decryption keys in in-memory state"
+        ));
+    };
+
+    let entry_key = decrypt_entry_key(entry_key, &keys)?;
+
+    maybe_reprompt_password(&state, environment, cipherstring).await?;
+
     let cipherstring = rbw::cipherstring::CipherString::new(cipherstring)
         .context("failed to parse encrypted secret")?;
+
     let plaintext = String::from_utf8(
         cipherstring
             .decrypt_symmetric(keys, entry_key.as_ref())
