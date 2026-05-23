@@ -748,6 +748,7 @@ pub async fn get_ssh_public_keys(
         state.set_timeout();
         state.last_environment().clone()
     };
+
     unlock_state(state.clone(), &environment).await?;
 
     let db = load_db().await?;
@@ -784,6 +785,7 @@ pub async fn find_ssh_private_key(
         state.set_timeout();
         state.last_environment().clone()
     };
+
     unlock_state(state.clone(), &environment).await?;
 
     let request_bytes = request_public_key.to_bytes();
@@ -814,9 +816,7 @@ pub async fn find_ssh_private_key(
         .await?;
 
         let public_key_bytes =
-            ssh_agent_lib::ssh_key::PublicKey::from_openssh(&public_key_plaintext)
-                .map_err(anyhow::Error::new)?
-                .to_bytes();
+            ssh_agent_lib::ssh_key::PublicKey::from_openssh(&public_key_plaintext)?.to_bytes();
 
         if public_key_bytes != request_bytes {
             continue;
