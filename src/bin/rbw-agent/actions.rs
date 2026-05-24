@@ -55,40 +55,48 @@ async fn get_client_secret(
     .context("failed to read client_secret from pinentry")
 }
 
+async fn get_host() -> anyhow::Result<String> {
+    let url_str = config_base_url().await?;
+    let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
+    let Some(host) = url.host_str() else {
+        return Err(anyhow::anyhow!(
+            "couldn't find host in rbw base url {url_str}"
+        ));
+    };
+
+    Ok(host.to_string())
+}
+
 pub async fn register(
     sock: &mut crate::sock::Sock,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
     let db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
 
-    if db.needs_login() {
-        let url_str = config_base_url().await?;
-        let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
-        let Some(host) = url.host_str() else {
-            return Err(anyhow::anyhow!(
-                "couldn't find host in rbw base url {url_str}"
-            ));
-        };
+    if !db.needs_login() {
+        return respond_ack(sock).await;
+    }
 
-        let email = config_email().await?;
+    let host = get_host().await?;
 
-        let mut err_msg = None;
-        for i in 1_u8..=3 {
-            let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-            let client_id = get_client_id(host, &err, environment).await?;
-            let client_secret = get_client_secret(host, &err, environment).await?;
+    let email = config_email().await?;
 
-            let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
+    let mut err_msg = None;
+    for i in 1_u8..=3 {
+        let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+        let client_id = get_client_id(&host, &err, environment).await?;
+        let client_secret = get_client_secret(&host, &err, environment).await?;
 
-            match rbw::actions::register(&email, apikey).await {
-                Ok(()) => {
-                    break;
-                }
-                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                    err_msg = Some(message);
-                }
-                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
+        let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
+
+        match rbw::actions::register(&email, apikey).await {
+            Ok(()) => {
+                break;
             }
+            Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                err_msg = Some(message);
+            }
+            Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
         }
     }
 
@@ -146,53 +154,49 @@ pub async fn login(
 ) -> anyhow::Result<()> {
     let mut db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
 
-    if db.needs_login() {
-        let url_str = config_base_url().await?;
-        let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
-        let Some(host) = url.host_str() else {
-            return Err(anyhow::anyhow!(
-                "couldn't find host in rbw base url {url_str}"
-            ));
-        };
+    if !db.needs_login() {
+        return respond_ack(sock).await;
+    }
 
-        let email = config_email().await?;
+    let host = get_host().await?;
 
-        let mut err_msg = None;
-        for i in 1_u8..=3 {
-            let err = err_msg
-                .as_deref()
-                .map(|msg| format!("{msg} (attempt {i}/3)"));
+    let email = config_email().await?;
 
-            let password = get_password(&format!("Log in to {host}"), &err, environment).await?;
+    let mut err_msg = None;
+    for i in 1_u8..=3 {
+        let err = err_msg
+            .as_deref()
+            .map(|msg| format!("{msg} (attempt {i}/3)"));
 
-            match rbw::actions::login(&email, password.clone(), None, None).await {
-                Ok(creds) => {
-                    login_success(state.clone(), creds, password, &mut db, &email).await?;
+        let password = get_password(&format!("Log in to {host}"), &err, environment).await?;
 
-                    break;
-                }
-                Err(rbw::error::Error::TwoFactorRequired {
+        match rbw::actions::login(&email, password.clone(), None, None).await {
+            Ok(creds) => {
+                login_success(state.clone(), creds, password, &mut db, &email).await?;
+
+                break;
+            }
+            Err(rbw::error::Error::TwoFactorRequired {
+                providers,
+                sso_email_2fa_session_token,
+            }) => {
+                two_factor_required(
+                    &state,
+                    &email,
+                    password,
                     providers,
                     sso_email_2fa_session_token,
-                }) => {
-                    two_factor_required(
-                        &state,
-                        &email,
-                        password,
-                        providers,
-                        sso_email_2fa_session_token,
-                        environment,
-                        &mut db,
-                    )
-                    .await?;
+                    environment,
+                    &mut db,
+                )
+                .await?;
 
-                    break;
-                }
-                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                    err_msg = Some(message);
-                }
-                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
+                break;
             }
+            Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                err_msg = Some(message);
+            }
+            Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
         }
     }
 
@@ -300,6 +304,7 @@ async fn unlock_state(
         let Some(protected_key) = db.protected_key else {
             return Err(anyhow::anyhow!("failed to find protected key in db"));
         };
+
         let Some(protected_private_key) = db.protected_private_key else {
             return Err(anyhow::anyhow!(
                 "failed to find protected private key in db"
@@ -599,6 +604,7 @@ pub async fn clipboard_store(
 }
 
 #[cfg(not(feature = "clipboard"))]
+
 pub async fn clipboard_store(
     sock: &mut crate::sock::Sock,
     _state: Arc<Mutex<crate::state::State>>,
