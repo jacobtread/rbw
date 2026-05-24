@@ -248,29 +248,17 @@ async fn two_factor(
 
 async fn login_success(
     state: Arc<Mutex<crate::state::State>>,
-    LoginCredentials {
-        access_token,
-        refresh_token,
-        kdf,
-        iterations,
-        memory,
-        parallelism,
-        protected_key,
-    }: LoginCredentials,
+    creds: LoginCredentials,
     password: rbw::locked::Password,
     db: &mut rbw::db::Db,
     email: &str,
 ) -> anyhow::Result<()> {
-    db.access_token = Some(access_token.clone());
-    db.refresh_token = Some(refresh_token.clone());
-    db.kdf = Some(kdf);
-    db.iterations = Some(iterations);
-    db.memory = memory;
-    db.parallelism = parallelism;
-    db.protected_key = Some(protected_key.clone());
+    db.apply_login_credentials(&creds);
+
     save_db(&db).await?;
 
     sync(None, state.clone()).await?;
+
     let db = load_db().await?;
 
     let Some(protected_private_key) = db.protected_private_key else {
@@ -279,14 +267,15 @@ async fn login_success(
         ));
     };
 
+    // TODO: Maybe use logincredentials for unlock too?
     let res = rbw::actions::unlock(
         &email,
         &password,
-        kdf,
-        iterations,
-        memory,
-        parallelism,
-        &protected_key,
+        creds.kdf,
+        creds.iterations,
+        creds.memory,
+        creds.parallelism,
+        &creds.protected_key,
         &protected_private_key,
         &db.protected_org_keys,
     );

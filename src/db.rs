@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{actions::LoginCredentials, prelude::*};
 
 use std::{
     collections::HashMap,
@@ -919,6 +919,16 @@ impl Db {
         let slf: Self =
             serde_json::from_str(&json).map_err(|source| Error::LoadDbJson { source, file })?;
         Ok(slf)
+    }
+
+    pub fn apply_login_credentials(&mut self, creds: &LoginCredentials) {
+        self.access_token = Some(creds.access_token.clone());
+        self.refresh_token = Some(creds.refresh_token.clone());
+        self.kdf = Some(creds.kdf);
+        self.iterations = Some(creds.iterations);
+        self.memory = creds.memory;
+        self.parallelism = creds.parallelism;
+        self.protected_key = Some(creds.protected_key.clone());
     }
 
     // XXX need to make this atomic
