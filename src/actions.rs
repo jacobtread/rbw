@@ -13,7 +13,7 @@ pub async fn register(email: &str, apikey: crate::locked::ApiKey) -> Result<()> 
     Ok(())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CryptoParameters {
     pub kdf: crate::api::KdfType,
     pub iterations: u32,

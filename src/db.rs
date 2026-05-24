@@ -871,10 +871,9 @@ pub struct Db {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
 
-    pub kdf: Option<crate::api::KdfType>,
-    pub iterations: Option<u32>,
-    pub memory: Option<u32>,
-    pub parallelism: Option<u32>,
+    #[serde(flatten)]
+    pub crypto_params: Option<CryptoParameters>,
+
     pub protected_key: Option<String>,
     pub protected_private_key: Option<String>,
     pub protected_org_keys: std::collections::HashMap<String, String>,
@@ -928,29 +927,15 @@ impl Db {
     pub fn apply_session_parameters(&mut self, params: &SessionParameters) {
         self.access_token = Some(params.access_token.clone());
         self.refresh_token = Some(params.refresh_token.clone());
-        self.kdf = Some(params.crypto_params.kdf);
-        self.iterations = Some(params.crypto_params.iterations);
-        self.memory = params.crypto_params.memory;
-        self.parallelism = params.crypto_params.parallelism;
+        self.crypto_params = Some(params.crypto_params.clone());
         self.protected_key = Some(params.protected_key.clone());
     }
 
     // TODO: Return references if possible
     pub fn get_crypto_parameters(&self) -> anyhow::Result<CryptoParameters> {
-        let Some(kdf) = self.kdf else {
-            return Err(anyhow::anyhow!("failed to find kdf type in db"));
-        };
-
-        let Some(iterations) = self.iterations else {
-            return Err(anyhow::anyhow!("failed to find number of iterations in db"));
-        };
-
-        Ok(CryptoParameters {
-            kdf,
-            iterations,
-            memory: self.memory,
-            parallelism: self.parallelism,
-        })
+        self.crypto_params
+            .clone()
+            .ok_or(anyhow::anyhow!("failed to find crypto parameters in db"))
     }
 
     // TODO: Return references if possible
@@ -1045,8 +1030,7 @@ impl Db {
     pub fn needs_login(&self) -> bool {
         self.access_token.is_none()
             || self.refresh_token.is_none()
-            || self.iterations.is_none()
-            || self.kdf.is_none()
+            || self.crypto_params.is_none()
             || self.protected_key.is_none()
     }
 }
