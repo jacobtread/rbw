@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{db::Encrypted, prelude::*};
+use crate::{actions::CryptoParameters, db::Encrypted, prelude::*};
 
 use rand::distr::SampleString as _;
 use serde::{Deserialize, Serialize};
@@ -1053,19 +1053,19 @@ impl Client {
         }
     }
 
-    pub async fn prelogin(&self, email: &str) -> Result<(KdfType, u32, Option<u32>, Option<u32>)> {
+    pub async fn prelogin(&self, email: &str) -> Result<CryptoParameters> {
         let res: PreloginRes = ClientRequest::Prelogin(email)
             .req(self)
             .await?
             .json_with_path()
             .await?;
 
-        Ok((
-            res.kdf,
-            res.kdf_iterations,
-            res.kdf_memory,
-            res.kdf_parallelism,
-        ))
+        Ok(CryptoParameters {
+            kdf: res.kdf,
+            iterations: res.kdf_iterations,
+            memory: res.kdf_memory,
+            parallelism: res.kdf_parallelism,
+        })
     }
 
     pub async fn register(

@@ -267,14 +267,10 @@ async fn login_success(
         ));
     };
 
-    // TODO: Maybe use logincredentials for unlock too?
     let res = rbw::actions::unlock(
         &email,
         &password,
-        creds.kdf,
-        creds.iterations,
-        creds.memory,
-        creds.parallelism,
+        &creds.crypto_params,
         &creds.protected_key,
         &protected_private_key,
         &db.protected_org_keys,
@@ -299,16 +295,7 @@ async fn unlock_state(
     if state.lock().await.needs_unlock() {
         let db = load_db().await?;
 
-        let Some(kdf) = db.kdf else {
-            return Err(anyhow::anyhow!("failed to find kdf type in db"));
-        };
-
-        let Some(iterations) = db.iterations else {
-            return Err(anyhow::anyhow!("failed to find number of iterations in db"));
-        };
-
-        let memory = db.memory;
-        let parallelism = db.parallelism;
+        let crypto_params = db.get_crypto_parameters()?;
 
         let Some(protected_key) = db.protected_key else {
             return Err(anyhow::anyhow!("failed to find protected key in db"));
@@ -335,10 +322,7 @@ async fn unlock_state(
             match rbw::actions::unlock(
                 &email,
                 &password,
-                kdf,
-                iterations,
-                memory,
-                parallelism,
+                &crypto_params,
                 &protected_key,
                 &protected_private_key,
                 &db.protected_org_keys,
@@ -476,20 +460,12 @@ async fn maybe_reprompt_password(
     {
         let db = load_db().await?;
 
-        let Some(kdf) = db.kdf else {
-            return Err(anyhow::anyhow!("failed to find kdf type in db"));
-        };
-
-        let Some(iterations) = db.iterations else {
-            return Err(anyhow::anyhow!("failed to find number of iterations in db"));
-        };
-
-        let memory = db.memory;
-        let parallelism = db.parallelism;
+        let crypto_params = db.get_crypto_parameters()?;
 
         let Some(protected_key) = db.protected_key else {
             return Err(anyhow::anyhow!("failed to find protected key in db"));
         };
+
         let Some(protected_private_key) = db.protected_private_key else {
             return Err(anyhow::anyhow!(
                 "failed to find protected private key in db"
@@ -513,10 +489,7 @@ async fn maybe_reprompt_password(
             match rbw::actions::unlock(
                 &email,
                 &password,
-                kdf,
-                iterations,
-                memory,
-                parallelism,
+                &crypto_params,
                 &protected_key,
                 &protected_private_key,
                 &db.protected_org_keys,

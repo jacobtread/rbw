@@ -1,4 +1,7 @@
-use crate::{actions::SessionParameters, prelude::*};
+use crate::{
+    actions::{CryptoParameters, SessionParameters},
+    prelude::*,
+};
 
 use std::{
     collections::HashMap,
@@ -864,6 +867,7 @@ impl<'de> serde::Deserialize<'de> for Uri {
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Debug)]
 pub struct Db {
+    // TODO: Flatten SessionParameters into these fields
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
 
@@ -924,11 +928,51 @@ impl Db {
     pub fn apply_session_parameters(&mut self, params: &SessionParameters) {
         self.access_token = Some(params.access_token.clone());
         self.refresh_token = Some(params.refresh_token.clone());
-        self.kdf = Some(params.kdf);
-        self.iterations = Some(params.iterations);
-        self.memory = params.memory;
-        self.parallelism = params.parallelism;
+        self.kdf = Some(params.crypto_params.kdf);
+        self.iterations = Some(params.crypto_params.iterations);
+        self.memory = params.crypto_params.memory;
+        self.parallelism = params.crypto_params.parallelism;
         self.protected_key = Some(params.protected_key.clone());
+    }
+
+    // TODO: Return references if possible
+    pub fn get_crypto_parameters(&self) -> anyhow::Result<CryptoParameters> {
+        let Some(kdf) = self.kdf else {
+            return Err(anyhow::anyhow!("failed to find kdf type in db"));
+        };
+
+        let Some(iterations) = self.iterations else {
+            return Err(anyhow::anyhow!("failed to find number of iterations in db"));
+        };
+
+        Ok(CryptoParameters {
+            kdf,
+            iterations,
+            memory: self.memory,
+            parallelism: self.parallelism,
+        })
+    }
+
+    // TODO: Return references if possible
+    pub fn get_session_parameters(&self) -> anyhow::Result<SessionParameters> {
+        let Some(access_token) = self.access_token.clone() else {
+            return Err(anyhow::anyhow!("failed to find access_token in db"));
+        };
+
+        let Some(refresh_token) = self.refresh_token.clone() else {
+            return Err(anyhow::anyhow!("failed to find refresh_token in db"));
+        };
+
+        let Some(protected_key) = self.protected_key.clone() else {
+            return Err(anyhow::anyhow!("failed to find protected key in db"));
+        };
+
+        Ok(SessionParameters {
+            access_token,
+            refresh_token,
+            crypto_params: self.get_crypto_parameters()?,
+            protected_key,
+        })
     }
 
     // XXX need to make this atomic

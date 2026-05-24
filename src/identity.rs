@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{actions::CryptoParameters, prelude::*};
 
 use sha1::Digest as _;
 
@@ -12,22 +12,19 @@ impl Identity {
     pub fn new(
         email: &str,
         password: &crate::locked::Password,
-        kdf: crate::api::KdfType,
-        iterations: u32,
-        memory: Option<u32>,
-        parallelism: Option<u32>,
+        crypto_params: &CryptoParameters,
     ) -> Result<Self> {
         let email = email.trim().to_lowercase();
 
-        let iterations =
-            std::num::NonZeroU32::new(iterations).ok_or(Error::Pbkdf2ZeroIterations)?;
+        let iterations = std::num::NonZeroU32::new(crypto_params.iterations)
+            .ok_or(Error::Pbkdf2ZeroIterations)?;
 
         let mut keys = crate::locked::Vec::new();
         keys.extend(std::iter::repeat_n(0, 64));
 
         let enc_key = &mut keys.data_mut()[0..32];
 
-        match kdf {
+        match crypto_params.kdf {
             crate::api::KdfType::Pbkdf2 => {
                 pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(
                     password.password(),
@@ -47,9 +44,9 @@ impl Identity {
                     argon2::Algorithm::Argon2id,
                     argon2::Version::V0x13,
                     argon2::Params::new(
-                        memory.unwrap() * 1024,
+                        crypto_params.memory.unwrap() * 1024,
                         iterations.get(),
-                        parallelism.unwrap(),
+                        crypto_params.parallelism.unwrap(),
                         Some(32),
                     )
                     .unwrap(),
