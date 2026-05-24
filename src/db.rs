@@ -932,6 +932,7 @@ impl Db {
     }
 
     // TODO: Return references if possible
+    // NOTE: Previous error string were different. Not 100% compatible output.
     pub fn get_crypto_parameters(&self) -> anyhow::Result<CryptoParameters> {
         self.crypto_params
             .clone()
