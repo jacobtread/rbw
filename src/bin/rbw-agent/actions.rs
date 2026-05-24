@@ -5,16 +5,33 @@ use rbw::actions::LoginCredentials;
 use sha2::Digest as _;
 use tokio::sync::Mutex;
 
+async fn getpin(
+    desc: &str,
+    prompt: &str,
+    err: &Option<String>,
+    environment: &rbw::protocol::Environment,
+    grab: bool,
+) -> anyhow::Result<rbw::locked::Password> {
+    Ok(rbw::pinentry::getpin(
+        &config_pinentry().await?,
+        prompt,
+        desc,
+        err.as_deref(),
+        environment,
+        grab,
+    )
+    .await?)
+}
+
 async fn get_client_id(
     host: &str,
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
-    rbw::pinentry::getpin(
-        &config_pinentry().await?,
+    getpin(
         "API key client__id",
         &format!("Log in to {host}"),
-        err.as_deref(),
+        err,
         environment,
         false,
     )
@@ -27,11 +44,10 @@ async fn get_client_secret(
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
-    rbw::pinentry::getpin(
-        &config_pinentry().await?,
+    getpin(
         "API key client__secret",
         &format!("Log in to {host}"),
-        err.as_deref(),
+        err,
         environment,
         false,
     )
@@ -86,16 +102,9 @@ async fn get_password(
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
-    rbw::pinentry::getpin(
-        &config_pinentry().await?,
-        "Master Password",
-        desc,
-        err.as_deref(),
-        environment,
-        true,
-    )
-    .await
-    .context("failed to read password from pinentry")
+    getpin("Master Password", desc, err, environment, true)
+        .await
+        .context("failed to read password from pinentry")
 }
 
 async fn two_factor_required(
@@ -197,11 +206,10 @@ async fn get_code(
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
-    rbw::pinentry::getpin(
-        &config_pinentry().await?,
+    getpin(
         provider.header(),
         provider.message(),
-        err.as_deref(),
+        err,
         environment,
         provider.grab(),
     )
