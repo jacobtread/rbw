@@ -1,4 +1,4 @@
-use crate::{actions::LoginCredentials, prelude::*};
+use crate::{actions::SessionParameters, prelude::*};
 
 use std::{
     collections::HashMap,
@@ -921,14 +921,14 @@ impl Db {
         Ok(slf)
     }
 
-    pub fn apply_login_credentials(&mut self, creds: &LoginCredentials) {
-        self.access_token = Some(creds.access_token.clone());
-        self.refresh_token = Some(creds.refresh_token.clone());
-        self.kdf = Some(creds.kdf);
-        self.iterations = Some(creds.iterations);
-        self.memory = creds.memory;
-        self.parallelism = creds.parallelism;
-        self.protected_key = Some(creds.protected_key.clone());
+    pub fn apply_session_parameters(&mut self, params: &SessionParameters) {
+        self.access_token = Some(params.access_token.clone());
+        self.refresh_token = Some(params.refresh_token.clone());
+        self.kdf = Some(params.kdf);
+        self.iterations = Some(params.iterations);
+        self.memory = params.memory;
+        self.parallelism = params.parallelism;
+        self.protected_key = Some(params.protected_key.clone());
     }
 
     // XXX need to make this atomic

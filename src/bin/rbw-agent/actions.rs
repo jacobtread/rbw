@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use rbw::actions::LoginCredentials;
+use rbw::actions::SessionParameters;
 use sha2::Digest as _;
 use tokio::sync::Mutex;
 
@@ -222,7 +222,7 @@ async fn two_factor(
     email: &str,
     password: rbw::locked::Password,
     provider: rbw::api::TwoFactorProviderType,
-) -> anyhow::Result<LoginCredentials> {
+) -> anyhow::Result<SessionParameters> {
     let mut err_msg = None;
     for i in 1_u8..=3 {
         let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -248,12 +248,12 @@ async fn two_factor(
 
 async fn login_success(
     state: Arc<Mutex<crate::state::State>>,
-    creds: LoginCredentials,
+    creds: SessionParameters,
     password: rbw::locked::Password,
     db: &mut rbw::db::Db,
     email: &str,
 ) -> anyhow::Result<()> {
-    db.apply_login_credentials(&creds);
+    db.apply_session_parameters(&creds);
 
     save_db(&db).await?;
 
