@@ -16,22 +16,22 @@ fn get_editor_metachars(editor: &OsStr, file: &Path) -> (PathBuf, Vec<OsString>)
         PathBuf::from("/bin/sh"),
         vec![
             "-c".into(),
-            [editor.as_ref(), OsStr::new(" "), file.as_os_str()]
+            [editor, OsStr::new(" "), file.as_os_str()]
                 .into_iter()
                 .collect::<OsString>(),
         ],
     )
 }
 
-fn get_editor_cmd_args(editor: &OsStr, file: &Path) -> Option<(PathBuf, Vec<OsString>)> {
-    let editor = PathBuf::from(&editor);
-
-    #[allow(clippy::single_match_else)] // more to come
+fn get_editor_cmd_args(editor: &Path, file: &Path) -> Option<(PathBuf, Vec<OsString>)> {
     match editor.file_name()?.to_str() {
         // disable swap files and viminfo for password entry
-        Some("vim" | "nvim") => Some((editor, vec!["-ni".into(), "NONE".into(), file.into()])),
+        Some("vim" | "nvim") => Some((
+            editor.to_owned(),
+            vec!["-ni".into(), "NONE".into(), file.into()],
+        )),
         // other editor support welcomed
-        _ => Some((editor, vec![file.into()])),
+        _ => Some((editor.to_owned(), vec![file.into()])),
     }
 }
 
@@ -47,7 +47,7 @@ fn get_editor(file: &Path) -> Result<(PathBuf, Vec<OsString>)> {
         Ok(get_editor_metachars(&editor, file))
     } else {
         Ok(
-            get_editor_cmd_args(&editor, file).ok_or(Error::InvalidEditor {
+            get_editor_cmd_args(Path::new(&editor), file).ok_or(Error::InvalidEditor {
                 var: var.to_string(),
                 editor,
             })?,
