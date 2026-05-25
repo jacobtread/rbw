@@ -6,6 +6,7 @@ use tokio::{
     net::{UnixListener, UnixStream},
     sync::{mpsc::UnboundedReceiver, Mutex},
 };
+use tokio_stream::wrappers::{UnboundedReceiverStream, UnixListenerStream};
 
 pub struct Agent {
     timer_r: UnboundedReceiver<()>,
@@ -40,7 +41,7 @@ impl Agent {
             .notifications_handler
             .get_channel()
             .await;
-        let notifications = tokio_stream::wrappers::UnboundedReceiverStream::new(notifications)
+        let notifications = UnboundedReceiverStream::new(notifications)
             .map(|message| match message {
                 crate::notifications::Message::Logout => Event::Timeout(()),
                 crate::notifications::Message::Sync => Event::Sync(()),
@@ -48,13 +49,13 @@ impl Agent {
             .boxed();
 
         let mut stream = futures_util::stream::select_all([
-            tokio_stream::wrappers::UnixListenerStream::new(listener)
+            UnixListenerStream::new(listener)
                 .map(Event::Request)
                 .boxed(),
-            tokio_stream::wrappers::UnboundedReceiverStream::new(self.timer_r)
+            UnboundedReceiverStream::new(self.timer_r)
                 .map(Event::Timeout)
                 .boxed(),
-            tokio_stream::wrappers::UnboundedReceiverStream::new(self.sync_timer_r)
+            UnboundedReceiverStream::new(self.sync_timer_r)
                 .map(Event::Sync)
                 .boxed(),
             notifications,

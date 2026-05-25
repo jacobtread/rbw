@@ -1,4 +1,5 @@
 use futures_util::StreamExt as _;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
 enum Streams {
@@ -28,7 +29,7 @@ impl Timeout {
             let mut stream = tokio_stream::StreamMap::new();
             stream.insert(
                 Streams::Requests,
-                tokio_stream::wrappers::UnboundedReceiverStream::new(req_r)
+                UnboundedReceiverStream::new(req_r)
                     .map(Event::Request)
                     .boxed(),
             );
