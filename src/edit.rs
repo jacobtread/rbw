@@ -24,14 +24,11 @@ fn get_editor_cmd_args(editor: &OsStr, file: &Path) -> Option<(PathBuf, Vec<OsSt
     let editor = PathBuf::from(&editor);
 
     #[allow(clippy::single_match_else)] // more to come
-    match editor.file_name() {
-        Some(editor_file_name) => match editor_file_name.to_str() {
-            // disable swap files and viminfo for password entry
-            Some("vim" | "nvim") => Some((editor, vec!["-ni".into(), "NONE".into(), file.into()])),
-            // other editor support welcomed
-            _ => Some((editor, vec![file.into()])),
-        },
-        None => None,
+    match editor.file_name()?.to_str() {
+        // disable swap files and viminfo for password entry
+        Some("vim" | "nvim") => Some((editor, vec!["-ni".into(), "NONE".into(), file.into()])),
+        // other editor support welcomed
+        _ => Some((editor, vec![file.into()])),
     }
 }
 
