@@ -773,9 +773,9 @@ impl Display for Entry<Decrypted> {
         if !matches!(self.data, EntryData::SecureNote) {
             if let Some(notes) = &self.notes {
                 if d {
-                    println!();
+                    writeln!(f, "")?;
                 }
-                println!("{notes}");
+                writeln!(f, "{notes}")?;
             }
         }
 
