@@ -1,39 +1,35 @@
 use crate::prelude::*;
 
-use std::io::{IsTerminal as _, Read as _, Write as _};
+use std::{
+    ffi::{OsStr, OsString},
+    io::{IsTerminal as _, Read as _, Write as _},
+    path::PathBuf,
+};
 
-pub fn edit(contents: &str, help: &str) -> Result<String> {
-    if !std::io::stdin().is_terminal() {
-        // directly read from piped content
-        return match std::io::read_to_string(std::io::stdin()) {
-            Err(e) => Err(Error::FailedToReadFromStdin { err: e }),
-            Ok(res) => Ok(res),
-        };
-    }
-
+fn get_editor() -> (&'static str, OsString) {
     let mut var = "VISUAL";
     let editor = std::env::var_os(var).unwrap_or_else(|| {
         var = "EDITOR";
         std::env::var_os(var).unwrap_or_else(|| "/usr/bin/vim".into())
     });
 
-    let dir = tempfile::tempdir()?;
-    let file = dir.path().join("rbw");
-    let mut fh = std::fs::File::create(&file)?;
+    (var, editor)
+}
 
-    fh.write_all(contents.as_bytes())?;
-    fh.write_all(help.as_bytes())?;
+fn get_editor_cmd_args(
+    editor: &OsString,
+    file: &PathBuf,
+    var: &str,
+) -> Result<(PathBuf, Vec<OsString>)> {
+    if contains_shell_metacharacters(&editor) {
+        let mut cmdline = OsString::new();
+        cmdline.extend([editor.as_ref(), OsStr::new(" "), file.as_os_str()]);
 
-    drop(fh);
+        let editor_args = vec![OsString::from("-c"), cmdline];
 
-    let (cmd, args) = if contains_shell_metacharacters(&editor) {
-        let mut cmdline = std::ffi::OsString::new();
-        cmdline.extend([editor.as_ref(), std::ffi::OsStr::new(" "), file.as_os_str()]);
-
-        let editor_args = vec![std::ffi::OsString::from("-c"), cmdline];
-        (std::path::Path::new("/bin/sh"), editor_args)
+        Ok((PathBuf::from("/bin/sh"), editor_args))
     } else {
-        let editor = std::path::Path::new(&editor);
+        let editor = PathBuf::from(editor);
         let mut editor_args = vec![];
 
         #[allow(clippy::single_match_else)] // more to come
@@ -41,8 +37,8 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
             Some(editor) => match editor.to_str() {
                 Some("vim" | "nvim") => {
                     // disable swap files and viminfo for password entry
-                    editor_args.push(std::ffi::OsString::from("-ni"));
-                    editor_args.push(std::ffi::OsString::from("NONE"));
+                    editor_args.push(OsString::from("-ni"));
+                    editor_args.push(OsString::from("NONE"));
                 }
                 _ => {
                     // other editor support welcomed
@@ -55,11 +51,36 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
                 })
             }
         }
-        editor_args.push(file.clone().into_os_string());
-        (editor, editor_args)
-    };
 
-    let res = std::process::Command::new(cmd).args(&args).status();
+        editor_args.push(file.clone().into_os_string());
+
+        Ok((editor, editor_args))
+    }
+}
+
+pub fn edit(contents: &str, help: &str) -> Result<String> {
+    if !std::io::stdin().is_terminal() {
+        // directly read from piped content
+        return match std::io::read_to_string(std::io::stdin()) {
+            Err(e) => Err(Error::FailedToReadFromStdin { err: e }),
+            Ok(res) => Ok(res),
+        };
+    }
+
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("rbw");
+    let mut fh = std::fs::File::create(&file)?;
+
+    fh.write_all(contents.as_bytes())?;
+    fh.write_all(help.as_bytes())?;
+
+    drop(fh);
+
+    let (var, editor) = get_editor();
+
+    let (cmd, args) = get_editor_cmd_args(&editor, &file, var)?;
+
+    let res = std::process::Command::new(&cmd).args(&args).status();
     match res {
         Ok(res) => {
             if !res.success() {
@@ -88,7 +109,7 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
     Ok(contents)
 }
 
-fn contains_shell_metacharacters(cmd: &std::ffi::OsStr) -> bool {
+fn contains_shell_metacharacters(cmd: &OsStr) -> bool {
     cmd.to_str()
         .is_some_and(|s| s.contains(&[' ', '$', '\'', '"'][..]))
 }
