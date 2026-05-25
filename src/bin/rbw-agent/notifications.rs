@@ -1,4 +1,11 @@
+use std::sync::Arc;
+
 use futures_util::{SinkExt as _, StreamExt as _};
+use tokio::{
+    net::TcpStream, sync::{
+        RwLock, mpsc::{UnboundedReceiver, UnboundedSender}
+    }, task::JoinHandle
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Message {
@@ -10,14 +17,13 @@ pub struct Handler {
     write: Option<
         futures::stream::SplitSink<
             tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                tokio_tungstenite::MaybeTlsStream<TcpStream>,
             >,
             tokio_tungstenite::tungstenite::Message,
         >,
     >,
-    read_handle: Option<tokio::task::JoinHandle<()>>,
-    sending_channels:
-        std::sync::Arc<tokio::sync::RwLock<Vec<tokio::sync::mpsc::UnboundedSender<Message>>>>,
+    read_handle: Option<JoinHandle<()>>,
+    sending_channels: Arc<RwLock<Vec<UnboundedSender<Message>>>>,
 }
 
 impl Handler {
@@ -25,7 +31,7 @@ impl Handler {
         Self {
             write: None,
             read_handle: None,
-            sending_channels: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            sending_channels: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -62,7 +68,7 @@ impl Handler {
         Ok(())
     }
 
-    pub async fn get_channel(&self) -> tokio::sync::mpsc::UnboundedReceiver<Message> {
+    pub async fn get_channel(&self) -> UnboundedReceiver<Message> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.sending_channels.write().await.push(tx);
         rx
@@ -71,18 +77,16 @@ impl Handler {
 
 async fn subscribe_to_notifications(
     url: String,
-    sending_channels: std::sync::Arc<
-        tokio::sync::RwLock<Vec<tokio::sync::mpsc::UnboundedSender<Message>>>,
-    >,
+    sending_channels: Arc<RwLock<Vec<UnboundedSender<Message>>>>,
 ) -> Result<
     (
         futures_util::stream::SplitSink<
             tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                tokio_tungstenite::MaybeTlsStream<TcpStream>,
             >,
             tokio_tungstenite::tungstenite::Message,
         >,
-        tokio::task::JoinHandle<()>,
+        JoinHandle<()>,
     ),
     Box<dyn std::error::Error>,
 > {

@@ -1,17 +1,23 @@
+use std::sync::Arc;
+
 use anyhow::Context as _;
 use futures_util::StreamExt as _;
+use tokio::{
+    net::{UnixListener, UnixStream},
+    sync::{mpsc::UnboundedReceiver, Mutex},
+};
 
 pub struct Agent {
-    timer_r: tokio::sync::mpsc::UnboundedReceiver<()>,
-    sync_timer_r: tokio::sync::mpsc::UnboundedReceiver<()>,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    timer_r: UnboundedReceiver<()>,
+    sync_timer_r: UnboundedReceiver<()>,
+    state: Arc<Mutex<crate::state::State>>,
 }
 
 impl Agent {
     pub fn new(
-        timer_r: tokio::sync::mpsc::UnboundedReceiver<()>,
-        sync_timer_r: tokio::sync::mpsc::UnboundedReceiver<()>,
-        state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+        timer_r: UnboundedReceiver<()>,
+        sync_timer_r: UnboundedReceiver<()>,
+        state: Arc<Mutex<crate::state::State>>,
     ) -> Self {
         Self {
             timer_r,
@@ -20,9 +26,9 @@ impl Agent {
         }
     }
 
-    pub async fn run(self, listener: tokio::net::UnixListener) -> anyhow::Result<()> {
+    pub async fn run(self, listener: UnixListener) -> anyhow::Result<()> {
         enum Event {
-            Request(std::io::Result<tokio::net::UnixStream>),
+            Request(std::io::Result<UnixStream>),
             Timeout(()),
             Sync(()),
         }
@@ -63,12 +69,11 @@ impl Agent {
                     tokio::spawn(async move {
                         let res = handle_request(&mut sock, state.clone()).await;
                         if let Err(e) = res {
-                            // unwrap is the only option here
                             sock.send(&rbw::protocol::Response::Error {
                                 error: format!("{e:#}"),
                             })
                             .await
-                            .unwrap();
+                            .expect("failed to send error response to client");
                         }
                     });
                 }
@@ -94,7 +99,7 @@ impl Agent {
 
 async fn handle_request(
     sock: &mut crate::sock::Sock,
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
     let req = sock.recv().await?;
     let req = match req {
