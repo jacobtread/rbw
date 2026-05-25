@@ -924,6 +924,15 @@ impl Db {
         Ok(slf)
     }
 
+    pub fn update_access_token(&mut self, access_token: Option<String>) -> bool {
+        if let Some(access_token) = access_token {
+            self.access_token = Some(access_token);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn apply_session_parameters(&mut self, params: &SessionParameters) {
         self.access_token = Some(params.access_token.clone());
         self.refresh_token = Some(params.refresh_token.clone());

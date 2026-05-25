@@ -413,14 +413,14 @@ pub async fn sync(
             .await
             .context("failed to sync database from server")?;
     state.lock().await.set_master_password_reprompt(&entries);
-    // TODO: This is update_token() behavior. think about integrating it into db
-    if let Some(access_token) = access_token {
-        db.access_token = Some(access_token);
-    }
+
+    db.update_access_token(access_token);
+
     db.protected_key = Some(protected_key);
     db.protected_private_key = Some(protected_private_key);
     db.protected_org_keys = protected_org_keys;
     db.entries = entries;
+
     save_db(&db).await?;
 
     if let Err(e) = subscribe_to_notifications(state.clone()).await {

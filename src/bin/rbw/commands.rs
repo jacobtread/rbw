@@ -848,10 +848,10 @@ fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
 }
 
 fn update_token(db: &mut rbw::db::Db, new_token: Option<String>) -> anyhow::Result<()> {
-    if let Some(token) = new_token {
-        db.access_token = Some(token);
+    if db.update_access_token(new_token) {
         save_db(db)?;
     }
+
     Ok(())
 }
 
