@@ -17,11 +17,13 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
         std::env::var_os(var).unwrap_or_else(|| "/usr/bin/vim".into())
     });
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir()?;
     let file = dir.path().join("rbw");
-    let mut fh = std::fs::File::create(&file).unwrap();
-    fh.write_all(contents.as_bytes()).unwrap();
-    fh.write_all(help.as_bytes()).unwrap();
+    let mut fh = std::fs::File::create(&file)?;
+
+    fh.write_all(contents.as_bytes())?;
+    fh.write_all(help.as_bytes())?;
+
     drop(fh);
 
     let (cmd, args) = if contains_shell_metacharacters(&editor) {
@@ -76,9 +78,11 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
         }
     }
 
-    let mut fh = std::fs::File::open(&file).unwrap();
+    let mut fh = std::fs::File::open(&file)?;
     let mut contents = String::new();
-    fh.read_to_string(&mut contents).unwrap();
+
+    fh.read_to_string(&mut contents)?;
+
     drop(fh);
 
     Ok(contents)

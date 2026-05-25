@@ -247,11 +247,20 @@ pub enum Error {
     #[error("unimplemented cipherstring type: {ty}")]
     UnimplementedCipherStringType { ty: String },
 
+    #[error("I/O Error: {source}")]
+    GenericIo { source: std::io::Error },
+
     #[error("error writing to pinentry stdin")]
     WriteStdin { source: tokio::io::Error },
 
     #[error("invalid kdf type: {ty}")]
     InvalidKdfType { ty: String },
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Self::GenericIo { source: value }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
