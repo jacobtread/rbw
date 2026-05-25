@@ -21,7 +21,7 @@ impl Agent {
     }
 
     pub async fn run(self, listener: tokio::net::UnixListener) -> anyhow::Result<()> {
-        pub enum Event {
+        enum Event {
             Request(std::io::Result<tokio::net::UnixStream>),
             Timeout(()),
             Sync(()),
@@ -135,9 +135,6 @@ async fn handle_request(
             entry_key,
             org_id,
         } => {
-            let cipherstring = cipherstring.clone();
-            let entry_key = entry_key.clone();
-            let org_id = org_id.clone();
             crate::actions::decrypt(
                 sock,
                 state.clone(),
