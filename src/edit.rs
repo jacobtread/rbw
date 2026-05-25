@@ -3,58 +3,66 @@ use crate::prelude::*;
 use std::{
     ffi::{OsStr, OsString},
     io::{IsTerminal as _, Read as _, Write as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
-fn get_editor() -> (&'static str, OsString) {
+fn contains_shell_metacharacters(cmd: &OsStr) -> bool {
+    cmd.to_str()
+        .is_some_and(|s| s.contains(&[' ', '$', '\'', '"']))
+}
+
+fn get_editor_metachars(editor: &OsStr, file: &Path) -> (PathBuf, Vec<OsString>) {
+    let mut cmdline = OsString::new();
+    cmdline.extend([editor.as_ref(), OsStr::new(" "), file.as_os_str()]);
+
+    let args = vec![OsString::from("-c"), cmdline];
+
+    (PathBuf::from("/bin/sh"), args)
+}
+
+fn get_editor_cmd_args(editor: &OsStr, file: &Path) -> Option<(PathBuf, Vec<OsString>)> {
+    let editor = PathBuf::from(&editor);
+    let mut args = vec![];
+
+    #[allow(clippy::single_match_else)] // more to come
+    match editor.file_name() {
+        Some(editor) => match editor.to_str() {
+            Some("vim" | "nvim") => {
+                // disable swap files and viminfo for password entry
+                args.push(OsString::from("-ni"));
+                args.push(OsString::from("NONE"));
+            }
+            _ => {
+                // other editor support welcomed
+            }
+        },
+        None => {
+            return None;
+        }
+    }
+
+    args.push(file.as_os_str().to_os_string());
+
+    Some((editor, args))
+}
+
+fn get_editor(file: &Path) -> Result<(PathBuf, Vec<OsString>)> {
     let mut var = "VISUAL";
+
     let editor = std::env::var_os(var).unwrap_or_else(|| {
         var = "EDITOR";
         std::env::var_os(var).unwrap_or_else(|| "/usr/bin/vim".into())
     });
 
-    (var, editor)
-}
-
-fn get_editor_cmd_args(
-    editor: &OsString,
-    file: &PathBuf,
-    var: &str,
-) -> Result<(PathBuf, Vec<OsString>)> {
     if contains_shell_metacharacters(&editor) {
-        let mut cmdline = OsString::new();
-        cmdline.extend([editor.as_ref(), OsStr::new(" "), file.as_os_str()]);
-
-        let editor_args = vec![OsString::from("-c"), cmdline];
-
-        Ok((PathBuf::from("/bin/sh"), editor_args))
+        Ok(get_editor_metachars(&editor, file))
     } else {
-        let editor = PathBuf::from(editor);
-        let mut editor_args = vec![];
-
-        #[allow(clippy::single_match_else)] // more to come
-        match editor.file_name() {
-            Some(editor) => match editor.to_str() {
-                Some("vim" | "nvim") => {
-                    // disable swap files and viminfo for password entry
-                    editor_args.push(OsString::from("-ni"));
-                    editor_args.push(OsString::from("NONE"));
-                }
-                _ => {
-                    // other editor support welcomed
-                }
-            },
-            None => {
-                return Err(Error::InvalidEditor {
-                    var: var.to_string(),
-                    editor: editor.as_os_str().to_os_string(),
-                })
-            }
-        }
-
-        editor_args.push(file.clone().into_os_string());
-
-        Ok((editor, editor_args))
+        Ok(
+            get_editor_cmd_args(&editor, file).ok_or(Error::InvalidEditor {
+                var: var.to_string(),
+                editor,
+            })?,
+        )
     }
 }
 
@@ -76,27 +84,20 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
 
     drop(fh);
 
-    let (var, editor) = get_editor();
-
-    let (cmd, args) = get_editor_cmd_args(&editor, &file, var)?;
+    let (cmd, args) = get_editor(&file)?;
 
     let res = std::process::Command::new(&cmd).args(&args).status();
     match res {
         Ok(res) => {
             if !res.success() {
                 return Err(Error::FailedToRunEditor {
-                    editor: cmd.to_owned(),
+                    editor: cmd,
                     args,
                     res,
                 });
             }
         }
-        Err(err) => {
-            return Err(Error::FailedToFindEditor {
-                editor: cmd.to_owned(),
-                err,
-            })
-        }
+        Err(err) => return Err(Error::FailedToFindEditor { editor: cmd, err }),
     }
 
     let mut fh = std::fs::File::open(&file)?;
@@ -107,9 +108,4 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
     drop(fh);
 
     Ok(contents)
-}
-
-fn contains_shell_metacharacters(cmd: &OsStr) -> bool {
-    cmd.to_str()
-        .is_some_and(|s| s.contains(&[' ', '$', '\'', '"'][..]))
 }
