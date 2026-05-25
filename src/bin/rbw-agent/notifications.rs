@@ -4,7 +4,7 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use tokio::{
     net::TcpStream,
     sync::{
-        mpsc::{UnboundedReceiver, UnboundedSender},
+        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
         RwLock,
     },
     task::JoinHandle,
@@ -70,7 +70,7 @@ impl NotificationsHandler {
     }
 
     pub async fn get_channel(&self) -> UnboundedReceiver<Message> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = unbounded_channel();
         self.sending_channels.write().await.push(tx);
         rx
     }

@@ -1,4 +1,5 @@
 use futures_util::StreamExt as _;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
@@ -14,13 +15,13 @@ enum Action {
 }
 
 pub struct Timeout {
-    req_w: tokio::sync::mpsc::UnboundedSender<Action>,
+    req_w: UnboundedSender<Action>,
 }
 
 impl Timeout {
-    pub fn new() -> (Self, tokio::sync::mpsc::UnboundedReceiver<()>) {
-        let (req_w, req_r) = tokio::sync::mpsc::unbounded_channel();
-        let (timer_w, timer_r) = tokio::sync::mpsc::unbounded_channel();
+    pub fn new() -> (Self, UnboundedReceiver<()>) {
+        let (req_w, req_r) = unbounded_channel();
+        let (timer_w, timer_r) = unbounded_channel();
         tokio::spawn(async move {
             enum Event {
                 Request(Action),
