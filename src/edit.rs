@@ -2,8 +2,9 @@ use crate::prelude::*;
 
 use std::{
     ffi::{OsStr, OsString},
-    io::{IsTerminal as _, Read as _, Write as _},
+    io::{IsTerminal as _, Write as _},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 fn contains_shell_metacharacters(cmd: &OsStr) -> bool {
@@ -35,7 +36,7 @@ fn get_editor_cmd_args(editor: &Path, file: &Path) -> Option<(PathBuf, Vec<OsStr
     }
 }
 
-fn get_editor(file: &Path) -> Result<(PathBuf, Vec<OsString>)> {
+fn get_editor_cmdline(file: &Path) -> Result<(PathBuf, Vec<OsString>)> {
     let mut var = "VISUAL";
 
     let editor = std::env::var_os(var).unwrap_or_else(|| {
@@ -67,7 +68,7 @@ fn write_strs(path: &Path, pieces: &[&str]) -> Result<()> {
 pub fn edit(contents: &str, help: &str) -> Result<String> {
     if !std::io::stdin().is_terminal() {
         // directly read from piped content
-        // TODO: This should be zeroized as it contains sensible stuff
+        // TODO: This should be zeroized / locked as it contains sensible stuff
         return std::io::read_to_string(std::io::stdin())
             .map_err(|err| Error::FailedToReadFromStdin { err });
     }
@@ -77,22 +78,24 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
 
     write_strs(&file, &[contents, help])?;
 
-    let (cmd, args) = get_editor(&file)?;
+    let (cmd, args) = get_editor_cmdline(&file)?;
 
-    let res = std::process::Command::new(&cmd).args(&args).status();
-    match res {
-        Ok(res) => {
-            if !res.success() {
-                return Err(Error::FailedToRunEditor {
-                    editor: cmd,
-                    args,
-                    res,
-                });
-            }
-        }
-        Err(err) => return Err(Error::FailedToFindEditor { editor: cmd, err }),
+    let res = Command::new(&cmd)
+        .args(&args)
+        .status()
+        .map_err(|err| Error::FailedToFindEditor {
+            editor: cmd.clone(),
+            err,
+        })?;
+
+    if !res.success() {
+        return Err(Error::FailedToRunEditor {
+            editor: cmd,
+            args,
+            res,
+        });
     }
 
-    // TODO: This should be zeroized as it contains sensible stuff
+    // TODO: This should be zeroized / locked as it contains sensible stuff
     Ok(std::fs::read_to_string(&file)?)
 }
