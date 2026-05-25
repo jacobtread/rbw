@@ -66,7 +66,7 @@ impl Config {
     }
 
     pub fn load() -> Result<Self> {
-        let file = crate::dirs::config_file();
+        let file = crate::dirs::config_file()?;
         let mut fh = std::fs::File::open(&file).map_err(|source| Error::LoadConfig {
             source,
             file: file.clone(),
@@ -87,7 +87,7 @@ impl Config {
     }
 
     pub async fn load_async() -> Result<Self> {
-        let file = crate::dirs::config_file();
+        let file = crate::dirs::config_file()?;
         let mut fh =
             tokio::fs::File::open(&file)
                 .await
@@ -112,7 +112,7 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<()> {
-        let file = crate::dirs::config_file();
+        let file = crate::dirs::config_file()?;
         // unwrap is safe here because Self::filename is explicitly
         // constructed as a filename in a directory
         std::fs::create_dir_all(file.parent().unwrap()).map_err(|source| Error::SaveConfig {
@@ -217,7 +217,7 @@ impl Config {
 }
 
 pub async fn device_id(config: &Config) -> Result<String> {
-    let file = crate::dirs::device_id_file();
+    let file = crate::dirs::device_id_file()?;
     if let Ok(mut fh) = tokio::fs::File::open(&file).await {
         let mut s = String::new();
         fh.read_to_string(&mut s)

@@ -27,7 +27,7 @@ impl SshAgent {
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
-        let socket = rbw::dirs::ssh_agent_socket_file();
+        let socket = rbw::dirs::ssh_agent_socket_file()?;
 
         let _ = std::fs::remove_file(&socket); // Ignore error if it doesn't exist
 

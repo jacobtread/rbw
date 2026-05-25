@@ -888,7 +888,7 @@ impl Db {
     }
 
     pub fn load(server: &str, email: &str) -> Result<Self> {
-        let file = crate::dirs::db_file(server, email);
+        let file = crate::dirs::db_file(server, email)?;
         let mut fh = std::fs::File::open(&file).map_err(|source| Error::LoadDb {
             source,
             file: file.clone(),
@@ -905,7 +905,7 @@ impl Db {
     }
 
     pub async fn load_async(server: &str, email: &str) -> Result<Self> {
-        let file = crate::dirs::db_file(server, email);
+        let file = crate::dirs::db_file(server, email)?;
         let mut fh = tokio::fs::File::open(&file)
             .await
             .map_err(|source| Error::LoadDbAsync {
@@ -972,7 +972,7 @@ impl Db {
 
     // XXX need to make this atomic
     pub fn save(&self, server: &str, email: &str) -> Result<()> {
-        let file = crate::dirs::db_file(server, email);
+        let file = crate::dirs::db_file(server, email)?;
         // unwrap is safe here because Self::filename is explicitly
         // constructed as a filename in a directory
         std::fs::create_dir_all(file.parent().unwrap()).map_err(|source| Error::SaveDb {
@@ -997,7 +997,7 @@ impl Db {
 
     // XXX need to make this atomic
     pub async fn save_async(&self, server: &str, email: &str) -> Result<()> {
-        let file = crate::dirs::db_file(server, email);
+        let file = crate::dirs::db_file(server, email)?;
         // unwrap is safe here because Self::filename is explicitly
         // constructed as a filename in a directory
         tokio::fs::create_dir_all(file.parent().unwrap())
@@ -1026,7 +1026,7 @@ impl Db {
     }
 
     pub fn remove(server: &str, email: &str) -> Result<()> {
-        let file = crate::dirs::db_file(server, email);
+        let file = crate::dirs::db_file(server, email)?;
         let res = std::fs::remove_file(&file);
         if let Err(e) = &res {
             if e.kind() == std::io::ErrorKind::NotFound {

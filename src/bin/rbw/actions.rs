@@ -52,7 +52,7 @@ pub fn lock() -> anyhow::Result<()> {
 pub fn quit() -> anyhow::Result<()> {
     match crate::sock::Sock::connect() {
         Ok(mut sock) => {
-            let pidfile = rbw::dirs::pid_file();
+            let pidfile = rbw::dirs::pid_file()?;
             let mut pid = String::new();
             std::fs::File::open(pidfile)?.read_to_string(&mut pid)?;
             let Some(pid) = rustix::process::Pid::from_raw(pid.trim_end().parse()?) else {
@@ -151,7 +151,9 @@ fn connect() -> anyhow::Result<crate::sock::Sock> {
             "failed to connect to rbw-agent \
             (this often means that the agent failed to start; \
             check {} for agent logs)",
-            log.display()
+            log.map_or("<Data directory unavailable>".to_string(), |p| p
+                .display()
+                .to_string())
         )
     })
 }

@@ -30,6 +30,9 @@ pub enum Error {
     #[error("failed to decrypt remotely")]
     DecryptRemote,
 
+    #[error("failed to find data directory")]
+    FailedToFindDataDirectory,
+
     #[error("failed to find free port in {range}")]
     FailedToFindFreePort { range: String },
 

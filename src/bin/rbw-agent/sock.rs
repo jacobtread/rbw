@@ -42,7 +42,7 @@ impl Sock {
 }
 
 pub fn listen() -> anyhow::Result<tokio::net::UnixListener> {
-    let path = rbw::dirs::socket_file();
+    let path = rbw::dirs::socket_file()?;
     // if the socket already doesn't exist, that's fine
     let _ = std::fs::remove_file(&path);
     let sock = tokio::net::UnixListener::bind(&path).context("failed to listen on socket")?;
