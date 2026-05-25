@@ -2,9 +2,12 @@ use std::sync::Arc;
 
 use futures_util::{SinkExt as _, StreamExt as _};
 use tokio::{
-    net::TcpStream, sync::{
-        RwLock, mpsc::{UnboundedReceiver, UnboundedSender}
-    }, task::JoinHandle
+    net::TcpStream,
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        RwLock,
+    },
+    task::JoinHandle,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -13,12 +16,10 @@ pub enum Message {
     Logout,
 }
 
-pub struct Handler {
+pub struct NotificationsHandler {
     write: Option<
         futures::stream::SplitSink<
-            tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<TcpStream>,
-            >,
+            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
             tokio_tungstenite::tungstenite::Message,
         >,
     >,
@@ -26,7 +27,7 @@ pub struct Handler {
     sending_channels: Arc<RwLock<Vec<UnboundedSender<Message>>>>,
 }
 
-impl Handler {
+impl NotificationsHandler {
     pub fn new() -> Self {
         Self {
             write: None,
@@ -81,9 +82,7 @@ async fn subscribe_to_notifications(
 ) -> Result<
     (
         futures_util::stream::SplitSink<
-            tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<TcpStream>,
-            >,
+            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
             tokio_tungstenite::tungstenite::Message,
         >,
         JoinHandle<()>,

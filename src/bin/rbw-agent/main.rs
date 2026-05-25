@@ -25,7 +25,7 @@ async fn tokio_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
     if sync_timeout_duration > std::time::Duration::ZERO {
         sync_timeout.set(sync_timeout_duration);
     }
-    let notifications_handler = crate::notifications::Handler::new();
+    let notifications_handler = crate::notifications::NotificationsHandler::new();
     let state = std::sync::Arc::new(tokio::sync::Mutex::new(crate::state::State {
         priv_key: None,
         org_keys: None,

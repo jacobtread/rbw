@@ -7,7 +7,7 @@ pub struct State {
     pub timeout_duration: std::time::Duration,
     pub sync_timeout: crate::timeout::Timeout,
     pub sync_timeout_duration: std::time::Duration,
-    pub notifications_handler: crate::notifications::Handler,
+    pub notifications_handler: crate::notifications::NotificationsHandler,
     pub master_password_reprompt: std::collections::HashSet<[u8; 32]>,
     pub master_password_reprompt_initialized: bool,
 
