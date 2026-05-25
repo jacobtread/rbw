@@ -22,28 +22,17 @@ fn get_editor_metachars(editor: &OsStr, file: &Path) -> (PathBuf, Vec<OsString>)
 
 fn get_editor_cmd_args(editor: &OsStr, file: &Path) -> Option<(PathBuf, Vec<OsString>)> {
     let editor = PathBuf::from(&editor);
-    let mut args = vec![];
 
     #[allow(clippy::single_match_else)] // more to come
     match editor.file_name() {
-        Some(editor) => match editor.to_str() {
-            Some("vim" | "nvim") => {
-                // disable swap files and viminfo for password entry
-                args.push(OsString::from("-ni"));
-                args.push(OsString::from("NONE"));
-            }
-            _ => {
-                // other editor support welcomed
-            }
+        Some(editor_file_name) => match editor_file_name.to_str() {
+            // disable swap files and viminfo for password entry
+            Some("vim" | "nvim") => Some((editor, vec!["-ni".into(), "NONE".into(), file.into()])),
+            // other editor support welcomed
+            _ => Some((editor, vec![file.into()])),
         },
-        None => {
-            return None;
-        }
+        None => None,
     }
-
-    args.push(file.as_os_str().to_os_string());
-
-    Some((editor, args))
 }
 
 fn get_editor(file: &Path) -> Result<(PathBuf, Vec<OsString>)> {
