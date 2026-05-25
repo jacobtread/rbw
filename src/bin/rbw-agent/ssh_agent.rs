@@ -13,7 +13,7 @@ async fn config_pinentry() -> anyhow::Result<String> {
 
 async fn config_confirm_ssh() -> anyhow::Result<bool> {
     let config = rbw::config::Config::load_async().await?;
-    Ok(config.confirm_ssh.is_some_and(|o| o == true))
+    Ok(config.confirm_ssh.is_some_and(|o| o))
 }
 
 #[derive(Clone)]

@@ -67,12 +67,8 @@ impl<T> rbw::db::Encrypter<T> for RemoteEncrypter {
         entry: Option<&rbw::db::Entry<T>>,
         field: &str,
     ) -> rbw::error::Result<String> {
-        Ok(crate::actions::encrypt(
-            field,
-            // entry.map_or(None, |e| e.key.as_deref()),
-            entry.map_or(None, |e| e.org_id.as_deref()),
-        )
-        .map_err(|_e| rbw::error::Error::EncryptRemote)?)
+        crate::actions::encrypt(field, entry.and_then(|e| e.org_id.as_deref()))
+            .map_err(|_e| rbw::error::Error::EncryptRemote)
     }
 }
 
@@ -86,12 +82,12 @@ impl<T> rbw::db::Decrypter<T> for RemoteDecrypter {
         entry: Option<&rbw::db::Entry<T>>,
         field: &str,
     ) -> rbw::error::Result<String> {
-        Ok(crate::actions::decrypt(
+        crate::actions::decrypt(
             field,
-            entry.map_or(None, |e| e.key.as_deref()),
-            entry.map_or(None, |e| e.org_id.as_deref()),
+            entry.and_then(|e| e.key.as_deref()),
+            entry.and_then(|e| e.org_id.as_deref()),
         )
-        .map_err(|_e| rbw::error::Error::DecryptRemote)?)
+        .map_err(|_e| rbw::error::Error::DecryptRemote)
     }
 }
 
@@ -307,7 +303,7 @@ fn matches_url(
             given_url.to_string().trim_end_matches('/') == url.trim_end_matches('/')
         }
         rbw::api::UriMatchType::RegularExpression => {
-            regex::Regex::new(url).map_or(false, |rx| rx.is_match(given_url.as_ref()))
+            regex::Regex::new(url).is_ok_and(|rx| rx.is_match(given_url.as_ref()))
         }
         rbw::api::UriMatchType::Never => false,
     }
@@ -734,8 +730,8 @@ pub fn search(
                 .map(|entry: &SearchEntry| entry.search_match(term, folder))
                 .unwrap_or(true)
         })
-        .map(|entry| entry.map(Into::into))
         .collect::<Result<_, anyhow::Error>>()?;
+
     entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
     print_entry_list(&entries, &fields, raw)
@@ -816,7 +812,7 @@ fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<S
         let (new_access_token, id) = rbw::actions::create_folder(
             db.access_token.as_ref().unwrap(),
             db.refresh_token.as_ref().unwrap(),
-            &enc.encrypt_field(None, &folder)?,
+            &enc.encrypt_field(None, folder)?,
         )?;
 
         update_token(db, new_access_token)?;
@@ -881,10 +877,10 @@ pub fn add(
     // unwrap is safe here because the call to unlock above is guaranteed to
     // populate these or error
 
-    let name = enc.encrypt_field(None, &name)?;
+    let name = enc.encrypt_field(None, name)?;
 
     let username = username
-        .map(|username| enc.encrypt_field(None, &username))
+        .map(|username| enc.encrypt_field(None, username))
         .transpose()?;
 
     let (password, notes) = match password {
@@ -917,8 +913,8 @@ pub fn add(
     };
 
     let (new_token, ()) = rbw::actions::add(
-        &db.access_token.as_ref().unwrap(),
-        &db.refresh_token.as_ref().unwrap(),
+        db.access_token.as_ref().unwrap(),
+        db.refresh_token.as_ref().unwrap(),
         &name,
         &rbw::db::EntryData::Login {
             username,
@@ -1007,7 +1003,7 @@ pub fn edit(
             );
         }
 
-        password.clone_from(&&new_enc_password);
+        password.clone_from(&new_enc_password);
     }
 
     entry.notes = entry.encrypt_optstring(&dec_notes, &mut enc)?;

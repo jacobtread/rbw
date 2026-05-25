@@ -9,7 +9,7 @@ use std::{
 
 fn contains_shell_metacharacters(cmd: &OsStr) -> bool {
     cmd.to_str()
-        .is_some_and(|s| s.contains(&[' ', '$', '\'', '"']))
+        .is_some_and(|s| s.contains([' ', '$', '\'', '"']))
 }
 
 fn get_editor_metachars(editor: &OsStr, file: &Path) -> (PathBuf, Vec<OsString>) {

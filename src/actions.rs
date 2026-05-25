@@ -174,17 +174,7 @@ pub fn edit(
     entry: &Entry<Encrypted>,
 ) -> Result<(Option<String>, ())> {
     with_exchange_refresh_token(access_token, refresh_token, |access_token| {
-        api_client()?.0.edit(
-            access_token,
-            &entry.id,
-            entry.org_id.as_deref(),
-            &entry.name,
-            &entry.data,
-            &entry.fields,
-            entry.notes.as_deref(),
-            entry.folder_id.as_deref(),
-            &entry.history,
-        )
+        api_client()?.0.edit(access_token, entry)
     })
 }
 

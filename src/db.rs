@@ -469,7 +469,7 @@ pub trait Encrypter<T> {
 
 impl<T> Entry<T> {
     pub fn encrypt_string(&self, s: &str, encrypter: &mut impl Encrypter<T>) -> Result<String> {
-        encrypter.encrypt_field(Some(&self), &s)
+        encrypter.encrypt_field(Some(self), s)
     }
 
     pub fn encrypt_optstring(
@@ -477,11 +477,11 @@ impl<T> Entry<T> {
         optstring: &Option<String>,
         encrypter: &mut impl Encrypter<T>,
     ) -> Result<Option<String>> {
-        encrypter.encrypt_optfield(Some(&self), &optstring.as_deref())
+        encrypter.encrypt_optfield(Some(self), &optstring.as_deref())
     }
 
     pub fn decrypt_string(&self, s: &str, decrypter: &mut impl Decrypter<T>) -> Result<String> {
-        decrypter.decrypt_field(Some(&self), &s)
+        decrypter.decrypt_field(Some(self), s)
     }
 
     pub fn decrypt_optstring(
@@ -489,7 +489,7 @@ impl<T> Entry<T> {
         optstring: &Option<String>,
         decrypter: &mut impl Decrypter<T>,
     ) -> Result<Option<String>> {
-        decrypter.decrypt_optfield(Some(&self), &optstring.as_deref())
+        decrypter.decrypt_optfield(Some(self), &optstring.as_deref())
     }
 }
 
@@ -517,7 +517,7 @@ impl Entry<Encrypted> {
                 .iter()
                 .map(|u| -> Result<Uri> {
                     Ok(Uri {
-                        uri: decrypter.decrypt_field(Some(&self), &u.uri)?,
+                        uri: decrypter.decrypt_field(Some(self), &u.uri)?,
                         match_type: u.match_type,
                     })
                 })
@@ -535,7 +535,7 @@ impl Entry<Encrypted> {
             .map(|he| {
                 Ok(HistoryEntry {
                     last_used_date: he.last_used_date.clone(),
-                    password: decrypter.decrypt_field(Some(&self), &he.password)?,
+                    password: decrypter.decrypt_field(Some(self), &he.password)?,
                 })
             })
             .collect::<Result<_>>()
@@ -552,7 +552,7 @@ impl Entry<Encrypted> {
 
         let history = self.decrypt_history(decrypter)?;
 
-        let mut df = |_ft, val: &Option<String>| self.decrypt_optstring(&val, decrypter);
+        let mut df = |_ft, val: &Option<String>| self.decrypt_optstring(val, decrypter);
 
         let data = match &self.data {
             EntryData::Login {
@@ -647,7 +647,7 @@ impl Entry<Encrypted> {
             folder_id: self.folder_id.clone(),
             org_id: self.org_id.clone(),
             key: None,
-            name: decrypter.decrypt_field(Some(&self), &self.name)?,
+            name: decrypter.decrypt_field(Some(self), &self.name)?,
             data,
             fields,
             notes,
@@ -773,7 +773,7 @@ impl Display for Entry<Decrypted> {
         if !matches!(self.data, EntryData::SecureNote) {
             if let Some(notes) = &self.notes {
                 if d {
-                    writeln!(f, "")?;
+                    writeln!(f)?;
                 }
                 writeln!(f, "{notes}")?;
             }

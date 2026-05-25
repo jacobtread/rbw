@@ -142,7 +142,7 @@ async fn two_factor_required(
         }
     }
 
-    let creds = two_factor(environment, &email, password.clone(), provider).await?;
+    let creds = two_factor(environment, email, password.clone(), provider).await?;
 
     login_success(state.clone(), creds, password, db, email).await
 }
@@ -259,7 +259,7 @@ async fn login_success(
 ) -> anyhow::Result<()> {
     db.apply_session_parameters(&creds);
 
-    save_db(&db).await?;
+    save_db(db).await?;
 
     sync(None, state.clone()).await?;
 
@@ -272,7 +272,7 @@ async fn login_success(
     };
 
     let res = rbw::actions::unlock(
-        &email,
+        email,
         &password,
         &creds.crypto_params,
         &creds.protected_key,
@@ -409,7 +409,7 @@ pub async fn sync(
     };
 
     let (access_token, (protected_key, protected_private_key, protected_org_keys, entries)) =
-        rbw::actions::sync(&access_token, &refresh_token)
+        rbw::actions::sync(access_token, refresh_token)
             .await
             .context("failed to sync database from server")?;
     state.lock().await.set_master_password_reprompt(&entries);
@@ -533,7 +533,7 @@ async fn decrypt_cipher(
         ));
     };
 
-    let entry_key = decrypt_entry_key(entry_key, &keys)?;
+    let entry_key = decrypt_entry_key(entry_key, keys)?;
 
     maybe_reprompt_password(&state, environment, cipherstring).await?;
 

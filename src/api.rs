@@ -936,10 +936,7 @@ impl<'a> ClientRequest<'a> {
                 ]),
         };
 
-        Ok(rb
-            .send()
-            .await
-            .map_err(|source| Error::Reqwest { source })?)
+        rb.send().await.map_err(|source| Error::Reqwest { source })
     }
 }
 
@@ -984,7 +981,7 @@ impl<'a> ClientBlockingRequest<'a> {
                 ]),
         };
 
-        Ok(rb.send().map_err(|source| Error::Reqwest { source })?)
+        rb.send().map_err(|source| Error::Reqwest { source })
     }
 }
 
@@ -1316,25 +1313,15 @@ impl Client {
         }
     }
 
-    pub fn edit(
-        &self,
-        access_token: &str,
-        id: &str,
-        org_id: Option<&str>,
-        name: &str,
-        data: &crate::db::EntryData,
-        fields: &[crate::db::DynamicField],
-        notes: Option<&str>,
-        folder_uuid: Option<&str>,
-        history: &[crate::db::HistoryEntry],
-    ) -> Result<()> {
+    pub fn edit(&self, access_token: &str, entry: &crate::db::Entry<Encrypted>) -> Result<()> {
         let req = CiphersPutReq {
-            folder_id: folder_uuid.map(ToString::to_string),
-            organization_id: org_id.map(ToString::to_string),
-            name: name.to_string(),
-            notes: notes.map(ToString::to_string),
-            data: EntryDataWire(data),
-            fields: fields
+            folder_id: entry.folder_id.clone(),
+            organization_id: entry.org_id.clone(),
+            name: entry.name.clone(),
+            notes: entry.notes.clone(),
+            data: EntryDataWire(&entry.data),
+            fields: entry
+                .fields
                 .iter()
                 .map(|field| CipherField {
                     ty: field.ty,
@@ -1343,7 +1330,8 @@ impl Client {
                     linked_id: field.linked_id,
                 })
                 .collect(),
-            password_history: history
+            password_history: entry
+                .history
                 .iter()
                 .map(|entry| CiphersPutReqHistory {
                     last_used_date: entry.last_used_date.clone(),
@@ -1352,7 +1340,7 @@ impl Client {
                 .collect(),
         };
 
-        let res = ClientBlockingRequest::Edit(access_token, id, req).req(self)?;
+        let res = ClientBlockingRequest::Edit(access_token, &entry.id, req).req(self)?;
 
         match res.status() {
             reqwest::StatusCode::OK => Ok(()),

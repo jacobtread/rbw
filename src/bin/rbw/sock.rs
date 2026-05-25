@@ -9,8 +9,7 @@ impl Sock {
     // specific kinds of std::io::Results differently
     pub fn connect() -> std::io::Result<Self> {
         Ok(Self(std::os::unix::net::UnixStream::connect(
-            rbw::dirs::socket_file()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
+            rbw::dirs::socket_file().map_err(std::io::Error::other)?,
         )?))
     }
 

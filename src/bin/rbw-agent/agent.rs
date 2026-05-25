@@ -145,7 +145,7 @@ async fn handle_request(
                 sock,
                 state.clone(),
                 &environment,
-                &cipherstring,
+                cipherstring,
                 entry_key.as_deref(),
                 org_id.as_deref(),
             )
