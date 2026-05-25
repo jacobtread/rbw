@@ -55,6 +55,15 @@ fn get_editor(file: &Path) -> Result<(PathBuf, Vec<OsString>)> {
     }
 }
 
+/// Small helper to avoid heap allocation of std::fs::write(.., [str1, str2].join(""))
+fn write_strs(path: &Path, pieces: &[&str]) -> Result<()> {
+    let mut f = std::fs::File::create(path)?;
+    for piece in pieces {
+        f.write_all(piece.as_bytes())?;
+    }
+    Ok(())
+}
+
 pub fn edit(contents: &str, help: &str) -> Result<String> {
     if !std::io::stdin().is_terminal() {
         // directly read from piped content
@@ -66,12 +75,8 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
 
     let dir = tempfile::tempdir()?;
     let file = dir.path().join("rbw");
-    let mut fh = std::fs::File::create(&file)?;
 
-    fh.write_all(contents.as_bytes())?;
-    fh.write_all(help.as_bytes())?;
-
-    drop(fh);
+    write_strs(&file, &[contents, help])?;
 
     let (cmd, args) = get_editor(&file)?;
 
@@ -89,12 +94,6 @@ pub fn edit(contents: &str, help: &str) -> Result<String> {
         Err(err) => return Err(Error::FailedToFindEditor { editor: cmd, err }),
     }
 
-    let mut fh = std::fs::File::open(&file)?;
-    let mut contents = String::new();
-
-    fh.read_to_string(&mut contents)?;
-
-    drop(fh);
-
-    Ok(contents)
+    // TODO: This should be zeroized as it contains sensible stuff
+    Ok(std::fs::read_to_string(&file)?)
 }
