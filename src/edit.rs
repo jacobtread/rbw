@@ -12,12 +12,15 @@ fn contains_shell_metacharacters(cmd: &OsStr) -> bool {
 }
 
 fn get_editor_metachars(editor: &OsStr, file: &Path) -> (PathBuf, Vec<OsString>) {
-    let mut cmdline = OsString::new();
-    cmdline.extend([editor.as_ref(), OsStr::new(" "), file.as_os_str()]);
-
-    let args = vec![OsString::from("-c"), cmdline];
-
-    (PathBuf::from("/bin/sh"), args)
+    (
+        PathBuf::from("/bin/sh"),
+        vec![
+            "-c".into(),
+            [editor.as_ref(), OsStr::new(" "), file.as_os_str()]
+                .into_iter()
+                .collect::<OsString>(),
+        ],
+    )
 }
 
 fn get_editor_cmd_args(editor: &OsStr, file: &Path) -> Option<(PathBuf, Vec<OsString>)> {
