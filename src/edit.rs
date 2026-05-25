@@ -67,10 +67,9 @@ fn write_strs(path: &Path, pieces: &[&str]) -> Result<()> {
 pub fn edit(contents: &str, help: &str) -> Result<String> {
     if !std::io::stdin().is_terminal() {
         // directly read from piped content
-        return match std::io::read_to_string(std::io::stdin()) {
-            Err(e) => Err(Error::FailedToReadFromStdin { err: e }),
-            Ok(res) => Ok(res),
-        };
+        // TODO: This should be zeroized as it contains sensible stuff
+        return std::io::read_to_string(std::io::stdin())
+            .map_err(|err| Error::FailedToReadFromStdin { err });
     }
 
     let dir = tempfile::tempdir()?;
