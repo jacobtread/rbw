@@ -893,9 +893,9 @@ struct SyncRes {
 #[derive(Serialize, Debug)]
 struct CiphersPostReq<'a> {
     #[serde(rename = "folderId")]
-    folder_id: Option<String>,
-    name: String,
-    notes: Option<String>,
+    folder_id: Option<&'a str>,
+    name: &'a str,
+    notes: Option<&'a str>,
     #[serde(flatten)]
     data: EntryDataWire<'a>, // use lifetime parameter on the struct instead
 }
@@ -903,11 +903,11 @@ struct CiphersPostReq<'a> {
 #[derive(Serialize, Debug)]
 struct CiphersPutReq<'a> {
     #[serde(rename = "folderId")]
-    folder_id: Option<String>,
+    folder_id: Option<&'a str>,
     #[serde(rename = "organizationId")]
-    organization_id: Option<String>,
-    name: String,
-    notes: Option<String>,
+    organization_id: Option<&'a str>,
+    name: &'a str,
+    notes: Option<&'a str>,
     #[serde(flatten)]
     data: EntryDataWire<'a>,
     fields: Vec<CipherDynamicField>,
@@ -1393,9 +1393,9 @@ impl Client {
         folder_id: Option<&str>,
     ) -> Result<()> {
         let req = CiphersPostReq {
-            folder_id: folder_id.map(ToString::to_string),
-            name: name.to_string(),
-            notes: notes.map(ToString::to_string),
+            folder_id: folder_id,
+            name: name,
+            notes: notes,
             data: EntryDataWire(data),
         };
 
@@ -1408,10 +1408,10 @@ impl Client {
 
     pub fn edit(&self, access_token: &str, entry: &crate::db::Entry<Encrypted>) -> Result<()> {
         let req = CiphersPutReq {
-            folder_id: entry.folder_id.clone(),
-            organization_id: entry.org_id.clone(),
-            name: entry.name.clone(),
-            notes: entry.notes.clone(),
+            folder_id: entry.folder_id.as_deref(),
+            organization_id: entry.org_id.as_deref(),
+            name: &entry.name,
+            notes: entry.notes.as_deref(),
             data: EntryDataWire(&entry.data),
             fields: entry
                 .fields
