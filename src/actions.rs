@@ -270,9 +270,9 @@ async fn exchange_refresh_token_async(refresh_token: &str) -> Result<String> {
     client.exchange_refresh_token_async(refresh_token).await
 }
 
-fn api_client() -> Result<(crate::api::Client, crate::config::Config)> {
+fn api_client() -> Result<(crate::api::client::Client, crate::config::Config)> {
     let config = crate::config::Config::load()?;
-    let client = crate::api::Client::new(
+    let client = crate::api::client::Client::new(
         &config.base_url(),
         &config.identity_url(),
         &config.ui_url(),
@@ -281,9 +281,9 @@ fn api_client() -> Result<(crate::api::Client, crate::config::Config)> {
     Ok((client, config))
 }
 
-async fn api_client_async() -> Result<(crate::api::Client, crate::config::Config)> {
+async fn api_client_async() -> Result<(crate::api::client::Client, crate::config::Config)> {
     let config = crate::config::Config::load_async().await?;
-    let client = crate::api::Client::new(
+    let client = crate::api::client::Client::new(
         &config.base_url(),
         &config.identity_url(),
         &config.ui_url(),
