@@ -436,45 +436,17 @@ impl SyncResCipher {
         let data = if let Some(login) = self.login {
             login.into()
         } else if let Some(card) = self.card {
-            crate::db::EntryData::Card {
-                cardholder_name: card.cardholder_name,
-                number: card.number,
-                brand: card.brand,
-                exp_month: card.exp_month,
-                exp_year: card.exp_year,
-                code: card.code,
-            }
+            card.into()
         } else if let Some(identity) = self.identity {
-            crate::db::EntryData::Identity {
-                title: identity.title,
-                first_name: identity.first_name,
-                middle_name: identity.middle_name,
-                last_name: identity.last_name,
-                address1: identity.address1,
-                address2: identity.address2,
-                address3: identity.address3,
-                city: identity.city,
-                state: identity.state,
-                postal_code: identity.postal_code,
-                country: identity.country,
-                phone: identity.phone,
-                email: identity.email,
-                ssn: identity.ssn,
-                license_number: identity.license_number,
-                passport_number: identity.passport_number,
-                username: identity.username,
-            }
-        } else if let Some(_secure_note) = self.secure_note {
-            crate::db::EntryData::SecureNote
+            identity.into()
+        } else if let Some(secure_note) = self.secure_note {
+            secure_note.into()
         } else if let Some(ssh_key) = self.ssh_key {
-            crate::db::EntryData::SshKey {
-                private_key: ssh_key.private_key,
-                public_key: ssh_key.public_key,
-                fingerprint: ssh_key.fingerprint,
-            }
+            ssh_key.into()
         } else {
             return None;
         };
+
         let fields = self.fields.map_or_else(Vec::new, |fields| {
             fields
                 .into_iter()
@@ -619,6 +591,46 @@ struct CipherCard {
     code: Option<String>,
 }
 
+impl From<CipherCard> for crate::db::EntryData {
+    fn from(value: CipherCard) -> Self {
+        Self::Card {
+            cardholder_name: value.cardholder_name,
+            number: value.number,
+            brand: value.brand,
+            exp_month: value.exp_month,
+            exp_year: value.exp_year,
+            code: value.code,
+        }
+    }
+}
+
+impl TryFrom<crate::db::EntryData> for CipherCard {
+    type Error = ();
+
+    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
+        let crate::db::EntryData::Card {
+            cardholder_name,
+            number,
+            brand,
+            exp_month,
+            exp_year,
+            code,
+        } = value
+        else {
+            return Err(());
+        };
+
+        Ok(Self {
+            cardholder_name,
+            number,
+            brand,
+            exp_month,
+            exp_year,
+            code,
+        })
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherIdentity {
     #[serde(rename = "Title", alias = "title")]
@@ -657,6 +669,79 @@ struct CipherIdentity {
     username: Option<String>,
 }
 
+impl From<CipherIdentity> for crate::db::EntryData {
+    fn from(value: CipherIdentity) -> Self {
+        Self::Identity {
+            title: value.title,
+            first_name: value.first_name,
+            middle_name: value.middle_name,
+            last_name: value.last_name,
+            address1: value.address1,
+            address2: value.address2,
+            address3: value.address3,
+            city: value.city,
+            state: value.state,
+            postal_code: value.postal_code,
+            country: value.country,
+            phone: value.phone,
+            email: value.email,
+            ssn: value.ssn,
+            license_number: value.license_number,
+            passport_number: value.passport_number,
+            username: value.username,
+        }
+    }
+}
+
+impl TryFrom<crate::db::EntryData> for CipherIdentity {
+    type Error = ();
+
+    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
+        let crate::db::EntryData::Identity {
+            title,
+            first_name,
+            middle_name,
+            last_name,
+            address1,
+            address2,
+            address3,
+            city,
+            state,
+            postal_code,
+            country,
+            phone,
+            email,
+            ssn,
+            license_number,
+            passport_number,
+            username,
+        } = value
+        else {
+            return Err(());
+        };
+
+        Ok(Self {
+            title,
+            first_name,
+            middle_name,
+            last_name,
+            address1,
+            address2,
+            address3,
+            city,
+            state,
+            postal_code,
+            country,
+            phone,
+            email,
+            ssn,
+            license_number,
+            passport_number,
+            username,
+        })
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherSshKey {
     #[serde(rename = "PrivateKey", alias = "privateKey")]
@@ -667,10 +752,59 @@ struct CipherSshKey {
     fingerprint: Option<String>,
 }
 
+impl From<CipherSshKey> for crate::db::EntryData {
+    fn from(value: CipherSshKey) -> Self {
+        Self::SshKey {
+            private_key: value.private_key,
+            public_key: value.public_key,
+            fingerprint: value.fingerprint,
+        }
+    }
+}
+
+impl TryFrom<crate::db::EntryData> for CipherSshKey {
+    type Error = ();
+
+    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
+        let crate::db::EntryData::SshKey {
+            private_key,
+            public_key,
+            fingerprint,
+        } = value
+        else {
+            return Err(());
+        };
+
+        Ok(Self {
+            private_key,
+            public_key,
+            fingerprint,
+        })
+    }
+}
+
 // this is just a name and some notes, both of which are already on the cipher
 // object
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherSecureNote {}
+
+impl From<CipherSecureNote> for crate::db::EntryData {
+    fn from(_value: CipherSecureNote) -> Self {
+        Self::SecureNote
+    }
+}
+
+impl TryFrom<crate::db::EntryData> for CipherSecureNote {
+    type Error = ();
+
+    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
+        let crate::db::EntryData::SecureNote = value else {
+            return Err(());
+        };
+
+        Ok(Self {})
+    }
+}
 
 #[derive(
     serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Debug, Clone, Copy, PartialEq, Eq,
@@ -788,75 +922,29 @@ impl Serialize for EntryDataWire<'_> {
                     &TryInto::<CipherLogin>::try_into(self.0.clone()).unwrap(),
                 )?;
             }
-            crate::db::EntryData::Card {
-                cardholder_name,
-                number,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-            } => {
+            crate::db::EntryData::Card { .. } => {
                 map.serialize_entry("type", &3u32)?;
                 map.serialize_entry(
                     "card",
-                    &CipherCard {
-                        cardholder_name,
-                        number,
-                        brand,
-                        exp_month,
-                        exp_year,
-                        code,
-                    },
+                    &TryInto::<CipherCard>::try_into(self.0.clone()).unwrap(),
                 )?;
             }
-            crate::db::EntryData::Identity {
-                title,
-                first_name,
-                middle_name,
-                last_name,
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-            } => {
+            crate::db::EntryData::Identity { .. } => {
                 map.serialize_entry("type", &4u32)?;
                 map.serialize_entry(
                     "identity",
-                    &CipherIdentity {
-                        title,
-                        first_name,
-                        middle_name,
-                        last_name,
-                        address1,
-                        address2,
-                        address3,
-                        city,
-                        state,
-                        postal_code,
-                        country,
-                        phone,
-                        email,
-                        ssn,
-                        license_number,
-                        passport_number,
-                        username,
-                    },
+                    &TryInto::<CipherIdentity>::try_into(self.0.clone()).unwrap(),
                 )?;
             }
             crate::db::EntryData::SecureNote => {
                 map.serialize_entry("type", &2u32)?;
-                map.serialize_entry("secureNote", &CipherSecureNote {})?;
+                map.serialize_entry(
+                    "secureNote",
+                    &TryInto::<CipherSecureNote>::try_into(self.0.clone()).unwrap(),
+                )?;
             }
             crate::db::EntryData::SshKey { .. } => {
+                // TODO: Not entirely true now
                 return Err(serde::ser::Error::custom("SshKey not supported"));
             }
         }
