@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{actions::CryptoParameters, db::Encrypted, prelude::*};
+use crate::{actions::CryptoParameters, db::{Encrypted, EntryData}, prelude::*};
 
 use rand::distr::SampleString as _;
 use serde::{Deserialize, Serialize};
@@ -521,7 +521,7 @@ struct CipherLogin {
     uris: Option<Vec<CipherLoginUri>>,
 }
 
-impl From<CipherLogin> for crate::db::EntryData {
+impl From<CipherLogin> for EntryData {
     fn from(value: CipherLogin) -> Self {
         Self::Login {
             username: value.username,
@@ -541,11 +541,11 @@ impl From<CipherLogin> for crate::db::EntryData {
     }
 }
 
-impl TryFrom<crate::db::EntryData> for CipherLogin {
+impl TryFrom<EntryData> for CipherLogin {
     type Error = ();
 
-    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
-        let crate::db::EntryData::Login {
+    fn try_from(value: EntryData) -> std::result::Result<Self, Self::Error> {
+        let EntryData::Login {
             username,
             password,
             totp,
@@ -591,7 +591,7 @@ struct CipherCard {
     code: Option<String>,
 }
 
-impl From<CipherCard> for crate::db::EntryData {
+impl From<CipherCard> for EntryData {
     fn from(value: CipherCard) -> Self {
         Self::Card {
             cardholder_name: value.cardholder_name,
@@ -604,11 +604,11 @@ impl From<CipherCard> for crate::db::EntryData {
     }
 }
 
-impl TryFrom<crate::db::EntryData> for CipherCard {
+impl TryFrom<EntryData> for CipherCard {
     type Error = ();
 
-    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
-        let crate::db::EntryData::Card {
+    fn try_from(value: EntryData) -> std::result::Result<Self, Self::Error> {
+        let EntryData::Card {
             cardholder_name,
             number,
             brand,
@@ -669,7 +669,7 @@ struct CipherIdentity {
     username: Option<String>,
 }
 
-impl From<CipherIdentity> for crate::db::EntryData {
+impl From<CipherIdentity> for EntryData {
     fn from(value: CipherIdentity) -> Self {
         Self::Identity {
             title: value.title,
@@ -693,11 +693,11 @@ impl From<CipherIdentity> for crate::db::EntryData {
     }
 }
 
-impl TryFrom<crate::db::EntryData> for CipherIdentity {
+impl TryFrom<EntryData> for CipherIdentity {
     type Error = ();
 
-    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
-        let crate::db::EntryData::Identity {
+    fn try_from(value: EntryData) -> std::result::Result<Self, Self::Error> {
+        let EntryData::Identity {
             title,
             first_name,
             middle_name,
@@ -752,7 +752,7 @@ struct CipherSshKey {
     fingerprint: Option<String>,
 }
 
-impl From<CipherSshKey> for crate::db::EntryData {
+impl From<CipherSshKey> for EntryData {
     fn from(value: CipherSshKey) -> Self {
         Self::SshKey {
             private_key: value.private_key,
@@ -762,11 +762,11 @@ impl From<CipherSshKey> for crate::db::EntryData {
     }
 }
 
-impl TryFrom<crate::db::EntryData> for CipherSshKey {
+impl TryFrom<EntryData> for CipherSshKey {
     type Error = ();
 
-    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
-        let crate::db::EntryData::SshKey {
+    fn try_from(value: EntryData) -> std::result::Result<Self, Self::Error> {
+        let EntryData::SshKey {
             private_key,
             public_key,
             fingerprint,
@@ -788,17 +788,17 @@ impl TryFrom<crate::db::EntryData> for CipherSshKey {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherSecureNote {}
 
-impl From<CipherSecureNote> for crate::db::EntryData {
+impl From<CipherSecureNote> for EntryData {
     fn from(_value: CipherSecureNote) -> Self {
         Self::SecureNote
     }
 }
 
-impl TryFrom<crate::db::EntryData> for CipherSecureNote {
+impl TryFrom<EntryData> for CipherSecureNote {
     type Error = ();
 
-    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
-        let crate::db::EntryData::SecureNote = value else {
+    fn try_from(value: EntryData) -> std::result::Result<Self, Self::Error> {
+        let EntryData::SecureNote = value else {
             return Err(());
         };
 
@@ -905,7 +905,7 @@ struct CiphersPutReqHistory {
 }
 
 #[derive(Debug)]
-struct EntryDataWire<'a>(&'a crate::db::EntryData);
+struct EntryDataWire<'a>(&'a EntryData);
 
 impl Serialize for EntryDataWire<'_> {
     fn serialize<S: serde::Serializer>(
@@ -915,35 +915,35 @@ impl Serialize for EntryDataWire<'_> {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(None)?;
         match self.0.clone() {
-            crate::db::EntryData::Login { .. } => {
+            EntryData::Login { .. } => {
                 map.serialize_entry("type", &1u32)?;
                 map.serialize_entry(
                     "login",
                     &TryInto::<CipherLogin>::try_into(self.0.clone()).unwrap(),
                 )?;
             }
-            crate::db::EntryData::Card { .. } => {
+            EntryData::Card { .. } => {
                 map.serialize_entry("type", &3u32)?;
                 map.serialize_entry(
                     "card",
                     &TryInto::<CipherCard>::try_into(self.0.clone()).unwrap(),
                 )?;
             }
-            crate::db::EntryData::Identity { .. } => {
+            EntryData::Identity { .. } => {
                 map.serialize_entry("type", &4u32)?;
                 map.serialize_entry(
                     "identity",
                     &TryInto::<CipherIdentity>::try_into(self.0.clone()).unwrap(),
                 )?;
             }
-            crate::db::EntryData::SecureNote => {
+            EntryData::SecureNote => {
                 map.serialize_entry("type", &2u32)?;
                 map.serialize_entry(
                     "secureNote",
                     &TryInto::<CipherSecureNote>::try_into(self.0.clone()).unwrap(),
                 )?;
             }
-            crate::db::EntryData::SshKey { .. } => {
+            EntryData::SshKey { .. } => {
                 // TODO: Not entirely true now
                 return Err(serde::ser::Error::custom("SshKey not supported"));
             }
@@ -1373,7 +1373,7 @@ impl Client {
         &self,
         access_token: &str,
         name: &str,
-        data: &crate::db::EntryData,
+        data: &EntryData,
         notes: Option<&str>,
         folder_id: Option<&str>,
     ) -> Result<()> {
