@@ -1066,6 +1066,37 @@ impl Client {
         })
     }
 
+    async fn check_connect_token_res(res: reqwest::Response) -> Result<reqwest::Response> {
+        match res.status() {
+            reqwest::StatusCode::OK => Ok(res),
+            status => match res.text().await {
+                Ok(body) => match body.clone().json_with_path::<ConnectErrorRes>() {
+                    Ok(err) => match err.try_into() {
+                        Ok(e) => Err(e),
+                        Err(err) => {
+                            log::warn!("unexpected error received during login: {err:?}");
+                            Err(Error::RequestFailed {
+                                status: status.as_u16(),
+                            })
+                        }
+                    },
+                    Err(e) => {
+                        log::warn!("{e}: {body}");
+                        Err(Error::RequestFailed {
+                            status: status.as_u16(),
+                        })
+                    }
+                },
+                Err(e) => {
+                    log::warn!("failed to read response body: {e}");
+                    Err(Error::RequestFailed {
+                        status: status.as_u16(),
+                    })
+                }
+            },
+        }
+    }
+
     pub async fn register(
         &self,
         email: &str,
@@ -1088,28 +1119,12 @@ impl Client {
             two_factor_token: None,
             two_factor_provider: None,
         };
+
         let res = ClientRequest::ConnectToken(connect_req).req(self).await?;
-        if res.status() == reqwest::StatusCode::OK {
-            Ok(())
-        } else {
-            let code = res.status().as_u16();
-            match res.text().await {
-                Ok(body) => match body.clone().json_with_path::<ConnectErrorRes>() {
-                    Ok(err) => Err(err.try_into().unwrap_or_else(|err| {
-                        log::warn!("unexpected error received during login: {err:?}");
-                        Error::RequestFailed { status: code }
-                    })),
-                    Err(e) => {
-                        log::warn!("{e}: {body}");
-                        Err(Error::RequestFailed { status: code })
-                    }
-                },
-                Err(e) => {
-                    log::warn!("failed to read response body: {e}");
-                    Err(Error::RequestFailed { status: code })
-                }
-            }
-        }
+
+        Self::check_connect_token_res(res).await?;
+
+        Ok(())
     }
 
     pub async fn login(
@@ -1159,32 +1174,16 @@ impl Client {
         };
 
         let res = ClientRequest::Login(connect_req, email).req(self).await?;
-        if res.status() == reqwest::StatusCode::OK {
-            let connect_res: ConnectTokenRes = res.json_with_path().await?;
-            Ok((
-                connect_res.access_token,
-                connect_res.refresh_token,
-                connect_res.key,
-            ))
-        } else {
-            let code = res.status().as_u16();
-            match res.text().await {
-                Ok(body) => match body.clone().json_with_path::<ConnectErrorRes>() {
-                    Ok(err) => Err(err.try_into().unwrap_or_else(|err| {
-                        log::warn!("unexpected error received during login: {err:?}");
-                        Error::RequestFailed { status: code }
-                    })),
-                    Err(e) => {
-                        log::warn!("{e}: {body}");
-                        Err(Error::RequestFailed { status: code })
-                    }
-                },
-                Err(e) => {
-                    log::warn!("failed to read response body: {e}");
-                    Err(Error::RequestFailed { status: code })
-                }
-            }
-        }
+
+        let res = Self::check_connect_token_res(res).await?;
+
+        let connect_res: ConnectTokenRes = res.json_with_path().await?;
+
+        Ok((
+            connect_res.access_token,
+            connect_res.refresh_token,
+            connect_res.key,
+        ))
     }
 
     pub async fn send_email_login(
