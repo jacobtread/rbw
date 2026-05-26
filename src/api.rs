@@ -1249,7 +1249,7 @@ impl Client {
         Ok((sso_code, sso_code_verifier, callback_url))
     }
 
-    fn match_status(status: reqwest::StatusCode) -> Result<()> {
+    fn ok_status(status: reqwest::StatusCode) -> Result<()> {
         match status {
             reqwest::StatusCode::OK => Ok(()),
             reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
@@ -1257,16 +1257,6 @@ impl Client {
                 status: status.as_u16(),
             }),
         }
-    }
-
-    fn async_check_status(res: reqwest::Response) -> Result<reqwest::Response> {
-        Self::match_status(res.status())?;
-        Ok(res)
-    }
-
-    fn check_status(res: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
-        Self::match_status(res.status())?;
-        Ok(res)
     }
 
     pub async fn sync(
@@ -1279,7 +1269,8 @@ impl Client {
         Vec<crate::db::Entry<Encrypted>>,
     )> {
         let res = ClientRequest::Sync(access_token).req(self).await?;
-        let res = Self::async_check_status(res)?;
+
+        Self::ok_status(res.status())?;
 
         let sync_res: SyncRes = res.json_with_path().await?;
 
@@ -1321,7 +1312,7 @@ impl Client {
 
         let res = ClientBlockingRequest::Add(access_token, req).req(self)?;
 
-        Self::check_status(res)?;
+        Self::ok_status(res.status())?;
 
         Ok(())
     }
@@ -1355,7 +1346,7 @@ impl Client {
 
         let res = ClientBlockingRequest::Edit(access_token, &entry.id, req).req(self)?;
 
-        Self::check_status(res)?;
+        Self::ok_status(res.status())?;
 
         Ok(())
     }
@@ -1363,14 +1354,15 @@ impl Client {
     pub fn remove(&self, access_token: &str, id: &str) -> Result<()> {
         let res = ClientBlockingRequest::Remove(access_token, id).req(self)?;
 
-        Self::check_status(res)?;
+        Self::ok_status(res.status())?;
 
         Ok(())
     }
 
     pub fn folders(&self, access_token: &str) -> Result<Vec<(String, String)>> {
         let res = ClientBlockingRequest::Folders(access_token).req(self)?;
-        let res = Self::check_status(res)?;
+
+        Self::ok_status(res.status())?;
 
         let folders_res: FoldersRes = res.json_with_path()?;
 
@@ -1383,7 +1375,8 @@ impl Client {
 
     pub fn create_folder(&self, access_token: &str, name: &str) -> Result<String> {
         let res = ClientBlockingRequest::CreateFolder(access_token, name).req(self)?;
-        let res = Self::check_status(res)?;
+
+        Self::ok_status(res.status())?;
 
         let folders_res: FoldersResData = res.json_with_path()?;
 
