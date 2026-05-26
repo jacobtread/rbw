@@ -1249,24 +1249,22 @@ impl Client {
         Ok((sso_code, sso_code_verifier, callback_url))
     }
 
-    fn async_check_status(res: reqwest::Response) -> Result<reqwest::Response> {
-        match res.status() {
+    fn match_status<T>(status: reqwest::StatusCode, res: T) -> Result<T> {
+        match status {
             reqwest::StatusCode::OK => Ok(res),
             reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
             _ => Err(Error::RequestFailed {
-                status: res.status().as_u16(),
+                status: status.as_u16(),
             }),
         }
     }
 
+    fn async_check_status(res: reqwest::Response) -> Result<reqwest::Response> {
+        Self::match_status(res.status(), res)
+    }
+
     fn check_status(res: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
-        match res.status() {
-            reqwest::StatusCode::OK => Ok(res),
-            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
-            _ => Err(Error::RequestFailed {
-                status: res.status().as_u16(),
-            }),
-        }
+        Self::match_status(res.status(), res)
     }
 
     pub async fn sync(
