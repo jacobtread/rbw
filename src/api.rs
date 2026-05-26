@@ -746,14 +746,14 @@ impl From<crate::db::DynamicField> for CipherDynamicField {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct SyncResHistoryEntry {
+struct CipherHistoryEntry {
     #[serde(rename = "LastUsedDate", alias = "lastUsedDate")]
     last_used_date: String,
     #[serde(rename = "Password", alias = "password")]
     password: Option<String>,
 }
 
-impl From<crate::db::HistoryEntry> for SyncResHistoryEntry {
+impl From<crate::db::HistoryEntry> for CipherHistoryEntry {
     fn from(value: crate::db::HistoryEntry) -> Self {
         Self {
             last_used_date: value.last_used_date,
@@ -762,8 +762,8 @@ impl From<crate::db::HistoryEntry> for SyncResHistoryEntry {
     }
 }
 
-impl From<SyncResHistoryEntry> for Option<crate::db::HistoryEntry> {
-    fn from(value: SyncResHistoryEntry) -> Self {
+impl From<CipherHistoryEntry> for Option<crate::db::HistoryEntry> {
+    fn from(value: CipherHistoryEntry) -> Self {
         let Some(password) = value.password else {
             return None;
         };
@@ -798,7 +798,7 @@ struct SyncResCipher {
     #[serde(rename = "Notes", alias = "notes")]
     notes: Option<String>,
     #[serde(rename = "PasswordHistory", alias = "passwordHistory")]
-    password_history: Option<Vec<SyncResHistoryEntry>>,
+    password_history: Option<Vec<CipherHistoryEntry>>,
     #[serde(rename = "Fields", alias = "fields")]
     fields: Option<Vec<CipherDynamicField>>,
     #[serde(rename = "DeletedDate", alias = "deletedDate")]
@@ -928,15 +928,7 @@ struct CiphersPutReq<'a> {
     data: EntryDataWire<'a>,
     fields: &'a [CipherDynamicField],
     #[serde(rename = "passwordHistory")]
-    password_history: &'a [CiphersPutReqHistory],
-}
-
-#[derive(Serialize, Debug)]
-struct CiphersPutReqHistory {
-    #[serde(rename = "LastUsedDate")]
-    last_used_date: String,
-    #[serde(rename = "Password")]
-    password: String,
+    password_history: &'a [CipherHistoryEntry],
 }
 
 #[derive(Debug)]
@@ -1437,10 +1429,7 @@ impl Client {
             password_history: &entry
                 .history
                 .iter()
-                .map(|entry| CiphersPutReqHistory {
-                    last_used_date: entry.last_used_date.clone(),
-                    password: entry.password.clone(),
-                })
+                .map(|entry| entry.clone().into())
                 .collect::<Vec<_>>(),
         };
 
