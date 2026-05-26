@@ -425,45 +425,46 @@ struct SyncResCipher {
 }
 
 impl SyncResCipher {
-    fn to_entry(&self, folders: &[SyncResFolder]) -> Option<crate::db::Entry<Encrypted>> {
+    fn to_entry(self, folders: &[SyncResFolder]) -> Option<crate::db::Entry<Encrypted>> {
         if self.deleted_date.is_some() {
             return None;
         }
         let history = self
             .password_history
-            .as_ref()
+            //.as_ref()
             .map_or_else(Vec::new, |history| {
                 history
-                    .iter()
+                    .into_iter()
                     .filter_map(|entry| {
                         // Gets rid of entries with a non-existent
                         // password
-                        entry.password.clone().map(|p| crate::db::HistoryEntry {
-                            last_used_date: entry.last_used_date.clone(),
+                        entry.password.map(|p| crate::db::HistoryEntry {
+                            last_used_date: entry.last_used_date,
                             password: p,
                         })
                     })
                     .collect()
             });
 
-        let (folder, folder_id) = self.folder_id.as_ref().map_or((None, None), |folder_id| {
+        let (folder, folder_id) = self.folder_id.map_or((None, None), |folder_id| {
             let mut folder_name = None;
             for folder in folders {
-                if &folder.id == folder_id {
+                if folder.id == folder_id {
                     folder_name = Some(folder.name.clone());
                 }
             }
             (folder_name, Some(folder_id))
         });
-        let data = if let Some(login) = &self.login {
+
+        let data = if let Some(login) = self.login {
             crate::db::EntryData::Login {
-                username: login.username.clone(),
-                password: login.password.clone(),
-                totp: login.totp.clone(),
-                uris: login.uris.as_ref().map_or_else(Vec::new, |uris| {
-                    uris.iter()
+                username: login.username,
+                password: login.password,
+                totp: login.totp,
+                uris: login.uris.map_or_else(Vec::new, |uris| {
+                    uris.into_iter()
                         .filter_map(|uri| {
-                            uri.uri.clone().map(|s| crate::db::Uri {
+                            uri.uri.map(|s| crate::db::Uri {
                                 uri: s,
                                 match_type: uri.match_type,
                             })
@@ -471,68 +472,68 @@ impl SyncResCipher {
                         .collect()
                 }),
             }
-        } else if let Some(card) = &self.card {
+        } else if let Some(card) = self.card {
             crate::db::EntryData::Card {
-                cardholder_name: card.cardholder_name.clone(),
-                number: card.number.clone(),
-                brand: card.brand.clone(),
-                exp_month: card.exp_month.clone(),
-                exp_year: card.exp_year.clone(),
-                code: card.code.clone(),
+                cardholder_name: card.cardholder_name,
+                number: card.number,
+                brand: card.brand,
+                exp_month: card.exp_month,
+                exp_year: card.exp_year,
+                code: card.code,
             }
-        } else if let Some(identity) = &self.identity {
+        } else if let Some(identity) = self.identity {
             crate::db::EntryData::Identity {
-                title: identity.title.clone(),
-                first_name: identity.first_name.clone(),
-                middle_name: identity.middle_name.clone(),
-                last_name: identity.last_name.clone(),
-                address1: identity.address1.clone(),
-                address2: identity.address2.clone(),
-                address3: identity.address3.clone(),
-                city: identity.city.clone(),
-                state: identity.state.clone(),
-                postal_code: identity.postal_code.clone(),
-                country: identity.country.clone(),
-                phone: identity.phone.clone(),
-                email: identity.email.clone(),
-                ssn: identity.ssn.clone(),
-                license_number: identity.license_number.clone(),
-                passport_number: identity.passport_number.clone(),
-                username: identity.username.clone(),
+                title: identity.title,
+                first_name: identity.first_name,
+                middle_name: identity.middle_name,
+                last_name: identity.last_name,
+                address1: identity.address1,
+                address2: identity.address2,
+                address3: identity.address3,
+                city: identity.city,
+                state: identity.state,
+                postal_code: identity.postal_code,
+                country: identity.country,
+                phone: identity.phone,
+                email: identity.email,
+                ssn: identity.ssn,
+                license_number: identity.license_number,
+                passport_number: identity.passport_number,
+                username: identity.username,
             }
-        } else if let Some(_secure_note) = &self.secure_note {
+        } else if let Some(_secure_note) = self.secure_note {
             crate::db::EntryData::SecureNote
-        } else if let Some(ssh_key) = &self.ssh_key {
+        } else if let Some(ssh_key) = self.ssh_key {
             crate::db::EntryData::SshKey {
-                private_key: ssh_key.private_key.clone(),
-                public_key: ssh_key.public_key.clone(),
-                fingerprint: ssh_key.fingerprint.clone(),
+                private_key: ssh_key.private_key,
+                public_key: ssh_key.public_key,
+                fingerprint: ssh_key.fingerprint,
             }
         } else {
             return None;
         };
-        let fields = self.fields.as_ref().map_or_else(Vec::new, |fields| {
+        let fields = self.fields.map_or_else(Vec::new, |fields| {
             fields
-                .iter()
+                .into_iter()
                 .map(|field| crate::db::DynamicField {
                     ty: field.ty,
-                    name: field.name.clone(),
-                    value: field.value.clone(),
+                    name: field.name,
+                    value: field.value,
                     linked_id: field.linked_id,
                 })
                 .collect()
         });
         Some(crate::db::Entry::<Encrypted> {
-            id: self.id.clone(),
-            org_id: self.organization_id.clone(),
+            id: self.id,
+            org_id: self.organization_id,
             folder,
-            folder_id: folder_id.map(ToString::to_string),
-            name: self.name.clone(),
+            folder_id: folder_id,
+            name: self.name,
             data,
             fields,
-            notes: self.notes.clone(),
+            notes: self.notes,
             history,
-            key: self.key.clone(),
+            key: self.key,
             master_password_reprompt: self.reprompt,
             _state: std::marker::PhantomData,
         })
@@ -1261,11 +1262,10 @@ impl Client {
         match res.status() {
             reqwest::StatusCode::OK => {
                 let sync_res: SyncRes = res.json_with_path().await?;
-                let folders = sync_res.folders.clone();
                 let ciphers = sync_res
                     .ciphers
-                    .iter()
-                    .filter_map(|cipher| cipher.to_entry(&folders))
+                    .into_iter()
+                    .filter_map(|cipher| cipher.to_entry(&sync_res.folders))
                     .collect();
                 let org_keys = sync_res
                     .profile
