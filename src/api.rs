@@ -850,7 +850,7 @@ impl SyncResCipher {
         };
 
         let fields: Vec<crate::db::DynamicField> = self.fields.map_or_else(Vec::new, |fields| {
-            fields.into_iter().map(|field| field.into()).collect()
+            fields.into_iter().map(Into::into).collect()
         });
 
         Some(crate::db::Entry::<Encrypted> {
