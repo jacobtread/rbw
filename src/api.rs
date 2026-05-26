@@ -48,6 +48,29 @@ impl Display for UriMatchType {
     }
 }
 
+struct IntegerStringVisitor<T>(std::marker::PhantomData<T>);
+
+impl<T> serde::de::Visitor<'_> for IntegerStringVisitor<T>
+where
+    T: TryFrom<u64> + FromStr,
+    <T as TryFrom<u64>>::Error: Display,
+    <T as FromStr>::Err: Display,
+{
+    type Value = T;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("integer or string")
+    }
+
+    fn visit_u64<E: serde::de::Error>(self, v: u64) -> std::result::Result<T, E> {
+        T::try_from(v).map_err(serde::de::Error::custom)
+    }
+
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> std::result::Result<T, E> {
+        v.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TwoFactorProviderType {
     Authenticator = 0,
@@ -91,30 +114,7 @@ impl<'de> Deserialize<'de> for TwoFactorProviderType {
     where
         D: serde::Deserializer<'de>,
     {
-        struct TwoFactorProviderTypeVisitor;
-        impl serde::de::Visitor<'_> for TwoFactorProviderTypeVisitor {
-            type Value = TwoFactorProviderType;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("two factor provider id")
-            }
-
-            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                value.parse().map_err(serde::de::Error::custom)
-            }
-
-            fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                std::convert::TryFrom::try_from(value).map_err(serde::de::Error::custom)
-            }
-        }
-
-        deserializer.deserialize_any(TwoFactorProviderTypeVisitor)
+        deserializer.deserialize_any(IntegerStringVisitor(std::marker::PhantomData))
     }
 }
 
@@ -167,30 +167,7 @@ impl<'de> Deserialize<'de> for KdfType {
     where
         D: serde::Deserializer<'de>,
     {
-        struct KdfTypeVisitor;
-        impl serde::de::Visitor<'_> for KdfTypeVisitor {
-            type Value = KdfType;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("kdf id")
-            }
-
-            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                value.parse().map_err(serde::de::Error::custom)
-            }
-
-            fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                std::convert::TryFrom::try_from(value).map_err(serde::de::Error::custom)
-            }
-        }
-
-        deserializer.deserialize_any(KdfTypeVisitor)
+        deserializer.deserialize_any(IntegerStringVisitor(std::marker::PhantomData))
     }
 }
 
