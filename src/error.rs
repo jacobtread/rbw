@@ -263,4 +263,18 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Self {
+        match err.status() {
+            Some(status) => match status {
+                reqwest::StatusCode::UNAUTHORIZED => Self::RequestUnauthorized,
+                _ => Self::RequestFailed {
+                    status: status.as_u16(),
+                },
+            },
+            None => Self::Reqwest { source: err },
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
