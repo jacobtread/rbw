@@ -451,17 +451,10 @@ impl SyncResCipher {
             return None;
         };
 
-        let fields = self.fields.map_or_else(Vec::new, |fields| {
-            fields
-                .into_iter()
-                .map(|field| crate::db::DynamicField {
-                    ty: field.ty,
-                    name: field.name,
-                    value: field.value,
-                    linked_id: field.linked_id,
-                })
-                .collect()
+        let fields: Vec<crate::db::DynamicField> = self.fields.map_or_else(Vec::new, |fields| {
+            fields.into_iter().map(|field| field.into()).collect()
         });
+
         Some(crate::db::Entry::<Encrypted> {
             id: self.id,
             org_id: self.organization_id,
@@ -865,6 +858,28 @@ struct CipherDynamicField {
     value: Option<String>,
     #[serde(rename = "LinkedId", alias = "linkedId")]
     linked_id: Option<LinkedIdType>,
+}
+
+impl From<CipherDynamicField> for crate::db::DynamicField {
+    fn from(value: CipherDynamicField) -> Self {
+        Self {
+            ty: value.ty,
+            name: value.name,
+            value: value.value,
+            linked_id: value.linked_id,
+        }
+    }
+}
+
+impl From<crate::db::DynamicField> for CipherDynamicField {
+    fn from(value: crate::db::DynamicField) -> Self {
+        Self {
+            ty: value.ty,
+            name: value.name,
+            value: value.value,
+            linked_id: value.linked_id,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
