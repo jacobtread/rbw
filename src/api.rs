@@ -746,14 +746,14 @@ impl From<crate::db::DynamicField> for CipherDynamicField {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct SyncResPasswordHistory {
+struct SyncResHistoryEntry {
     #[serde(rename = "LastUsedDate", alias = "lastUsedDate")]
     last_used_date: String,
     #[serde(rename = "Password", alias = "password")]
     password: Option<String>,
 }
 
-impl From<crate::db::HistoryEntry> for SyncResPasswordHistory {
+impl From<crate::db::HistoryEntry> for SyncResHistoryEntry {
     fn from(value: crate::db::HistoryEntry) -> Self {
         Self {
             last_used_date: value.last_used_date,
@@ -762,8 +762,8 @@ impl From<crate::db::HistoryEntry> for SyncResPasswordHistory {
     }
 }
 
-impl From<SyncResPasswordHistory> for Option<crate::db::HistoryEntry> {
-    fn from(value: SyncResPasswordHistory) -> Self {
+impl From<SyncResHistoryEntry> for Option<crate::db::HistoryEntry> {
+    fn from(value: SyncResHistoryEntry) -> Self {
         let Some(password) = value.password else {
             return None;
         };
@@ -798,7 +798,7 @@ struct SyncResCipher {
     #[serde(rename = "Notes", alias = "notes")]
     notes: Option<String>,
     #[serde(rename = "PasswordHistory", alias = "passwordHistory")]
-    password_history: Option<Vec<SyncResPasswordHistory>>,
+    password_history: Option<Vec<SyncResHistoryEntry>>,
     #[serde(rename = "Fields", alias = "fields")]
     fields: Option<Vec<CipherDynamicField>>,
     #[serde(rename = "DeletedDate", alias = "deletedDate")]
