@@ -1249,6 +1249,26 @@ impl Client {
         Ok((sso_code, sso_code_verifier, callback_url))
     }
 
+    fn async_check_status(res: reqwest::Response) -> Result<reqwest::Response> {
+        match res.status() {
+            reqwest::StatusCode::OK => Ok(res),
+            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
+            _ => Err(Error::RequestFailed {
+                status: res.status().as_u16(),
+            }),
+        }
+    }
+
+    fn check_status(res: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
+        match res.status() {
+            reqwest::StatusCode::OK => Ok(res),
+            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
+            _ => Err(Error::RequestFailed {
+                status: res.status().as_u16(),
+            }),
+        }
+    }
+
     pub async fn sync(
         &self,
         access_token: &str,
@@ -1259,32 +1279,29 @@ impl Client {
         Vec<crate::db::Entry<Encrypted>>,
     )> {
         let res = ClientRequest::Sync(access_token).req(self).await?;
-        match res.status() {
-            reqwest::StatusCode::OK => {
-                let sync_res: SyncRes = res.json_with_path().await?;
-                let ciphers = sync_res
-                    .ciphers
-                    .into_iter()
-                    .filter_map(|cipher| cipher.to_entry(&sync_res.folders))
-                    .collect();
-                let org_keys = sync_res
-                    .profile
-                    .organizations
-                    .iter()
-                    .map(|org| (org.id.clone(), org.key.clone()))
-                    .collect();
-                Ok((
-                    sync_res.profile.key,
-                    sync_res.profile.private_key,
-                    org_keys,
-                    ciphers,
-                ))
-            }
-            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
-            _ => Err(Error::RequestFailed {
-                status: res.status().as_u16(),
-            }),
-        }
+        let res = Self::async_check_status(res)?;
+
+        let sync_res: SyncRes = res.json_with_path().await?;
+
+        let ciphers = sync_res
+            .ciphers
+            .into_iter()
+            .filter_map(|cipher| cipher.to_entry(&sync_res.folders))
+            .collect();
+
+        let org_keys = sync_res
+            .profile
+            .organizations
+            .iter()
+            .map(|org| (org.id.clone(), org.key.clone()))
+            .collect();
+
+        Ok((
+            sync_res.profile.key,
+            sync_res.profile.private_key,
+            org_keys,
+            ciphers,
+        ))
     }
 
     pub fn add(
@@ -1304,13 +1321,9 @@ impl Client {
 
         let res = ClientBlockingRequest::Add(access_token, req).req(self)?;
 
-        match res.status() {
-            reqwest::StatusCode::OK => Ok(()),
-            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
-            _ => Err(Error::RequestFailed {
-                status: res.status().as_u16(),
-            }),
-        }
+        Self::check_status(res)?;
+
+        Ok(())
     }
 
     pub fn edit(&self, access_token: &str, entry: &crate::db::Entry<Encrypted>) -> Result<()> {
@@ -1342,56 +1355,39 @@ impl Client {
 
         let res = ClientBlockingRequest::Edit(access_token, &entry.id, req).req(self)?;
 
-        match res.status() {
-            reqwest::StatusCode::OK => Ok(()),
-            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
-            _ => Err(Error::RequestFailed {
-                status: res.status().as_u16(),
-            }),
-        }
+        Self::check_status(res)?;
+
+        Ok(())
     }
 
     pub fn remove(&self, access_token: &str, id: &str) -> Result<()> {
         let res = ClientBlockingRequest::Remove(access_token, id).req(self)?;
-        match res.status() {
-            reqwest::StatusCode::OK => Ok(()),
-            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
-            _ => Err(Error::RequestFailed {
-                status: res.status().as_u16(),
-            }),
-        }
+
+        Self::check_status(res)?;
+
+        Ok(())
     }
 
     pub fn folders(&self, access_token: &str) -> Result<Vec<(String, String)>> {
         let res = ClientBlockingRequest::Folders(access_token).req(self)?;
-        match res.status() {
-            reqwest::StatusCode::OK => {
-                let folders_res: FoldersRes = res.json_with_path()?;
-                Ok(folders_res
-                    .data
-                    .iter()
-                    .map(|folder| (folder.id.clone(), folder.name.clone()))
-                    .collect())
-            }
-            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
-            _ => Err(Error::RequestFailed {
-                status: res.status().as_u16(),
-            }),
-        }
+        let res = Self::check_status(res)?;
+
+        let folders_res: FoldersRes = res.json_with_path()?;
+
+        Ok(folders_res
+            .data
+            .iter()
+            .map(|folder| (folder.id.clone(), folder.name.clone()))
+            .collect())
     }
 
     pub fn create_folder(&self, access_token: &str, name: &str) -> Result<String> {
         let res = ClientBlockingRequest::CreateFolder(access_token, name).req(self)?;
-        match res.status() {
-            reqwest::StatusCode::OK => {
-                let folders_res: FoldersResData = res.json_with_path()?;
-                Ok(folders_res.id)
-            }
-            reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
-            _ => Err(Error::RequestFailed {
-                status: res.status().as_u16(),
-            }),
-        }
+        let res = Self::check_status(res)?;
+
+        let folders_res: FoldersResData = res.json_with_path()?;
+
+        Ok(folders_res.id)
     }
 
     pub fn exchange_refresh_token(&self, refresh_token: &str) -> Result<String> {
