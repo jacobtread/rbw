@@ -232,6 +232,24 @@ struct PreloginRes {
 }
 
 #[derive(Serialize, Debug)]
+#[serde(untagged)]
+enum ConnectTokenAuth<'a> {
+    Password {
+        username: &'a str,
+        password: &'a str,
+    },
+    AuthCode {
+        code: &'a str,
+        code_verifier: &'a str,
+        redirect_uri: &'a str,
+    },
+    ClientCredentials {
+        username: &'a str,
+        client_secret: &'a str,
+    },
+}
+
+#[derive(Serialize, Debug)]
 struct ConnectTokenReq<'a> {
     grant_type: &'a str,
     scope: &'a str,
@@ -250,24 +268,6 @@ struct ConnectTokenReq<'a> {
     two_factor_provider: Option<u32>,
     #[serde(flatten)]
     auth: ConnectTokenAuth<'a>,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(untagged)]
-enum ConnectTokenAuth<'a> {
-    Password {
-        username: &'a str,
-        password: &'a str,
-    },
-    AuthCode {
-        code: &'a str,
-        code_verifier: &'a str,
-        redirect_uri: &'a str,
-    },
-    ClientCredentials {
-        username: &'a str,
-        client_secret: &'a str,
-    },
 }
 
 #[derive(Deserialize, Debug)]
@@ -392,7 +392,7 @@ struct SyncResCipher {
     #[serde(rename = "PasswordHistory", alias = "passwordHistory")]
     password_history: Option<Vec<SyncResPasswordHistory>>,
     #[serde(rename = "Fields", alias = "fields")]
-    fields: Option<Vec<CipherField>>,
+    fields: Option<Vec<CipherDynamicField>>,
     #[serde(rename = "DeletedDate", alias = "deletedDate")]
     deleted_date: Option<String>,
     #[serde(rename = "Key", alias = "key")]
@@ -627,6 +627,11 @@ struct CipherSshKey {
     fingerprint: Option<String>,
 }
 
+// this is just a name and some notes, both of which are already on the cipher
+// object
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CipherSecureNote {}
+
 #[derive(
     serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Debug, Clone, Copy, PartialEq, Eq,
 )]
@@ -673,7 +678,7 @@ pub enum LinkedIdType {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct CipherField {
+struct CipherDynamicField {
     #[serde(rename = "Type", alias = "type")]
     ty: Option<FieldType>,
     #[serde(rename = "Name", alias = "name")]
@@ -683,11 +688,6 @@ struct CipherField {
     #[serde(rename = "LinkedId", alias = "linkedId")]
     linked_id: Option<LinkedIdType>,
 }
-
-// this is just a name and some notes, both of which are already on the cipher
-// object
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct CipherSecureNote {}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SyncResPasswordHistory {
@@ -717,7 +717,7 @@ struct CiphersPutReq<'a> {
     notes: Option<String>,
     #[serde(flatten)]
     data: EntryDataWire<'a>,
-    fields: Vec<CipherField>,
+    fields: Vec<CipherDynamicField>,
     #[serde(rename = "passwordHistory")]
     password_history: Vec<CiphersPutReqHistory>,
 }
@@ -1294,7 +1294,7 @@ impl Client {
             fields: entry
                 .fields
                 .iter()
-                .map(|field| CipherField {
+                .map(|field| CipherDynamicField {
                     ty: field.ty,
                     name: field.name.clone(),
                     value: field.value.clone(),
