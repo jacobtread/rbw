@@ -434,21 +434,7 @@ impl SyncResCipher {
         });
 
         let data = if let Some(login) = self.login {
-            crate::db::EntryData::Login {
-                username: login.username,
-                password: login.password,
-                totp: login.totp,
-                uris: login.uris.map_or_else(Vec::new, |uris| {
-                    uris.into_iter()
-                        .filter_map(|uri| {
-                            uri.uri.map(|s| crate::db::Uri {
-                                uri: s,
-                                match_type: uri.match_type,
-                            })
-                        })
-                        .collect()
-                }),
-            }
+            login.into()
         } else if let Some(card) = self.card {
             crate::db::EntryData::Card {
                 cardholder_name: card.cardholder_name,
@@ -544,6 +530,14 @@ struct SyncResFolder {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct CipherLoginUri {
+    #[serde(rename = "Uri", alias = "uri")]
+    uri: Option<String>,
+    #[serde(rename = "Match", alias = "match")]
+    match_type: Option<UriMatchType>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherLogin {
     #[serde(rename = "Username", alias = "username")]
     username: Option<String>,
@@ -555,12 +549,58 @@ struct CipherLogin {
     uris: Option<Vec<CipherLoginUri>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct CipherLoginUri {
-    #[serde(rename = "Uri", alias = "uri")]
-    uri: Option<String>,
-    #[serde(rename = "Match", alias = "match")]
-    match_type: Option<UriMatchType>,
+impl From<CipherLogin> for crate::db::EntryData {
+    fn from(value: CipherLogin) -> Self {
+        Self::Login {
+            username: value.username,
+            password: value.password,
+            totp: value.totp,
+            uris: value.uris.map_or_else(Vec::new, |uris| {
+                uris.into_iter()
+                    .filter_map(|uri| {
+                        uri.uri.map(|s| crate::db::Uri {
+                            uri: s,
+                            match_type: uri.match_type,
+                        })
+                    })
+                    .collect()
+            }),
+        }
+    }
+}
+
+impl TryFrom<crate::db::EntryData> for CipherLogin {
+    type Error = ();
+
+    fn try_from(value: crate::db::EntryData) -> std::result::Result<Self, Self::Error> {
+        let crate::db::EntryData::Login {
+            username,
+            password,
+            totp,
+            uris,
+        } = value
+        else {
+            return Err(());
+        };
+
+        Ok(CipherLogin {
+            username,
+            password,
+            totp,
+            uris: if uris.is_empty() {
+                None
+            } else {
+                Some(
+                    uris.iter()
+                        .map(|s| CipherLoginUri {
+                            uri: Some(s.uri.clone()),
+                            match_type: s.match_type,
+                        })
+                        .collect(),
+                )
+            },
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -741,32 +781,11 @@ impl Serialize for EntryDataWire<'_> {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(None)?;
         match self.0.clone() {
-            crate::db::EntryData::Login {
-                username,
-                password,
-                totp,
-                uris,
-            } => {
+            crate::db::EntryData::Login { .. } => {
                 map.serialize_entry("type", &1u32)?;
                 map.serialize_entry(
                     "login",
-                    &CipherLogin {
-                        username,
-                        password,
-                        totp,
-                        uris: if uris.is_empty() {
-                            None
-                        } else {
-                            Some(
-                                uris.iter()
-                                    .map(|s| CipherLoginUri {
-                                        uri: Some(s.uri.clone()),
-                                        match_type: s.match_type,
-                                    })
-                                    .collect(),
-                            )
-                        },
-                    },
+                    &TryInto::<CipherLogin>::try_into(self.0.clone()).unwrap(),
                 )?;
             }
             crate::db::EntryData::Card {
