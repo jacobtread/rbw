@@ -910,9 +910,9 @@ struct CiphersPutReq<'a> {
     notes: Option<&'a str>,
     #[serde(flatten)]
     data: EntryDataWire<'a>,
-    fields: Vec<CipherDynamicField>,
+    fields: &'a [CipherDynamicField],
     #[serde(rename = "passwordHistory")]
-    password_history: Vec<CiphersPutReqHistory>,
+    password_history: &'a [CiphersPutReqHistory],
 }
 
 #[derive(Serialize, Debug)]
@@ -1413,19 +1413,19 @@ impl Client {
             name: &entry.name,
             notes: entry.notes.as_deref(),
             data: EntryDataWire(&entry.data),
-            fields: entry
+            fields: &entry
                 .fields
                 .iter()
                 .map(|field| field.clone().into())
-                .collect(),
-            password_history: entry
+                .collect::<Vec<_>>(),
+            password_history: &entry
                 .history
                 .iter()
                 .map(|entry| CiphersPutReqHistory {
                     last_used_date: entry.last_used_date.clone(),
                     password: entry.password.clone(),
                 })
-                .collect(),
+                .collect::<Vec<_>>(),
         };
 
         ClientBlockingRequest::Edit(access_token, &entry.id, req)
