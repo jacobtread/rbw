@@ -788,7 +788,7 @@ struct SyncResCipher {
 }
 
 impl SyncResCipher {
-    fn to_entry(self, folders: &[SyncResFolder]) -> Option<crate::db::Entry<Encrypted>> {
+    fn into_entry(self, folders: &[SyncResFolder]) -> Option<crate::db::Entry<Encrypted>> {
         if self.deleted_date.is_some() {
             return None;
         }
@@ -1366,7 +1366,7 @@ impl Client {
         let ciphers = sync_res
             .ciphers
             .into_iter()
-            .filter_map(|cipher| cipher.to_entry(&sync_res.folders))
+            .filter_map(|cipher| cipher.into_entry(&sync_res.folders))
             .collect();
 
         let org_keys = sync_res
