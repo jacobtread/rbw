@@ -10,7 +10,11 @@ use std::{
     sync::Arc,
 };
 
-use crate::{actions::CryptoParameters, db::{Encrypted, EntryData}, prelude::*};
+use crate::{
+    actions::CryptoParameters,
+    db::{Encrypted, EntryData},
+    prelude::*,
+};
 
 use rand::distr::SampleString as _;
 use serde::{Deserialize, Serialize};
@@ -914,33 +918,29 @@ impl Serialize for EntryDataWire<'_> {
     ) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(None)?;
-        match self.0.clone() {
+        let data = self.0.clone();
+
+        match self.0 {
             EntryData::Login { .. } => {
                 map.serialize_entry("type", &1u32)?;
-                map.serialize_entry(
-                    "login",
-                    &TryInto::<CipherLogin>::try_into(self.0.clone()).unwrap(),
-                )?;
+                map.serialize_entry("login", &TryInto::<CipherLogin>::try_into(data).unwrap())?;
             }
             EntryData::Card { .. } => {
                 map.serialize_entry("type", &3u32)?;
-                map.serialize_entry(
-                    "card",
-                    &TryInto::<CipherCard>::try_into(self.0.clone()).unwrap(),
-                )?;
+                map.serialize_entry("card", &TryInto::<CipherCard>::try_into(data).unwrap())?;
             }
             EntryData::Identity { .. } => {
                 map.serialize_entry("type", &4u32)?;
                 map.serialize_entry(
                     "identity",
-                    &TryInto::<CipherIdentity>::try_into(self.0.clone()).unwrap(),
+                    &TryInto::<CipherIdentity>::try_into(data).unwrap(),
                 )?;
             }
             EntryData::SecureNote => {
                 map.serialize_entry("type", &2u32)?;
                 map.serialize_entry(
                     "secureNote",
-                    &TryInto::<CipherSecureNote>::try_into(self.0.clone()).unwrap(),
+                    &TryInto::<CipherSecureNote>::try_into(data).unwrap(),
                 )?;
             }
             EntryData::SshKey { .. } => {
