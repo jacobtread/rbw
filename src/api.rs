@@ -1249,9 +1249,9 @@ impl Client {
         Ok((sso_code, sso_code_verifier, callback_url))
     }
 
-    fn match_status<T>(status: reqwest::StatusCode, res: T) -> Result<T> {
+    fn match_status(status: reqwest::StatusCode) -> Result<()> {
         match status {
-            reqwest::StatusCode::OK => Ok(res),
+            reqwest::StatusCode::OK => Ok(()),
             reqwest::StatusCode::UNAUTHORIZED => Err(Error::RequestUnauthorized),
             _ => Err(Error::RequestFailed {
                 status: status.as_u16(),
@@ -1260,11 +1260,13 @@ impl Client {
     }
 
     fn async_check_status(res: reqwest::Response) -> Result<reqwest::Response> {
-        Self::match_status(res.status(), res)
+        Self::match_status(res.status())?;
+        Ok(res)
     }
 
     fn check_status(res: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
-        Self::match_status(res.status(), res)
+        Self::match_status(res.status())?;
+        Ok(res)
     }
 
     pub async fn sync(
