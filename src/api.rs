@@ -1416,12 +1416,7 @@ impl Client {
             fields: entry
                 .fields
                 .iter()
-                .map(|field| CipherDynamicField {
-                    ty: field.ty,
-                    name: field.name.clone(),
-                    value: field.value.clone(),
-                    linked_id: field.linked_id,
-                })
+                .map(|field| field.clone().into())
                 .collect(),
             password_history: entry
                 .history
