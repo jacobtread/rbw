@@ -361,143 +361,6 @@ struct ConnectRefreshTokenRes {
     access_token: String,
 }
 
-#[derive(Deserialize, Debug)]
-struct SyncRes {
-    #[serde(rename = "Ciphers", alias = "ciphers")]
-    ciphers: Vec<SyncResCipher>,
-    #[serde(rename = "Profile", alias = "profile")]
-    profile: SyncResProfile,
-    #[serde(rename = "Folders", alias = "folders")]
-    folders: Vec<SyncResFolder>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct SyncResCipher {
-    #[serde(rename = "Id", alias = "id")]
-    id: String,
-    #[serde(rename = "FolderId", alias = "folderId")]
-    folder_id: Option<String>,
-    #[serde(rename = "OrganizationId", alias = "organizationId")]
-    organization_id: Option<String>,
-    #[serde(rename = "Name", alias = "name")]
-    name: String,
-    #[serde(rename = "Login", alias = "login")]
-    login: Option<CipherLogin>,
-    #[serde(rename = "Card", alias = "card")]
-    card: Option<CipherCard>,
-    #[serde(rename = "Identity", alias = "identity")]
-    identity: Option<CipherIdentity>,
-    #[serde(rename = "SecureNote", alias = "secureNote")]
-    secure_note: Option<CipherSecureNote>,
-    #[serde(rename = "SshKey", alias = "sshKey")]
-    ssh_key: Option<CipherSshKey>,
-    #[serde(rename = "Notes", alias = "notes")]
-    notes: Option<String>,
-    #[serde(rename = "PasswordHistory", alias = "passwordHistory")]
-    password_history: Option<Vec<SyncResPasswordHistory>>,
-    #[serde(rename = "Fields", alias = "fields")]
-    fields: Option<Vec<CipherDynamicField>>,
-    #[serde(rename = "DeletedDate", alias = "deletedDate")]
-    deleted_date: Option<String>,
-    #[serde(rename = "Key", alias = "key")]
-    key: Option<String>,
-    #[serde(rename = "Reprompt", alias = "reprompt")]
-    reprompt: CipherRepromptType,
-}
-
-impl SyncResCipher {
-    fn to_entry(self, folders: &[SyncResFolder]) -> Option<crate::db::Entry<Encrypted>> {
-        if self.deleted_date.is_some() {
-            return None;
-        }
-        let history = self
-            .password_history
-            //.as_ref()
-            .map_or_else(Vec::new, |history| {
-                history
-                    .into_iter()
-                    .filter_map(|entry| {
-                        // Gets rid of entries with a non-existent
-                        // password
-                        entry.password.map(|p| crate::db::HistoryEntry {
-                            last_used_date: entry.last_used_date,
-                            password: p,
-                        })
-                    })
-                    .collect()
-            });
-
-        let (folder, folder_id) = self.folder_id.map_or((None, None), |folder_id| {
-            let mut folder_name = None;
-            for folder in folders {
-                if folder.id == folder_id {
-                    folder_name = Some(folder.name.clone());
-                }
-            }
-            (folder_name, Some(folder_id))
-        });
-
-        let data = if let Some(login) = self.login {
-            login.into()
-        } else if let Some(card) = self.card {
-            card.into()
-        } else if let Some(identity) = self.identity {
-            identity.into()
-        } else if let Some(secure_note) = self.secure_note {
-            secure_note.into()
-        } else if let Some(ssh_key) = self.ssh_key {
-            ssh_key.into()
-        } else {
-            return None;
-        };
-
-        let fields: Vec<crate::db::DynamicField> = self.fields.map_or_else(Vec::new, |fields| {
-            fields.into_iter().map(|field| field.into()).collect()
-        });
-
-        Some(crate::db::Entry::<Encrypted> {
-            id: self.id,
-            org_id: self.organization_id,
-            folder,
-            folder_id: folder_id,
-            name: self.name,
-            data,
-            fields,
-            notes: self.notes,
-            history,
-            key: self.key,
-            master_password_reprompt: self.reprompt,
-            _state: std::marker::PhantomData,
-        })
-    }
-}
-
-#[derive(Deserialize, Debug)]
-struct SyncResProfile {
-    #[serde(rename = "Key", alias = "key")]
-    key: String,
-    #[serde(rename = "PrivateKey", alias = "privateKey")]
-    private_key: String,
-    #[serde(rename = "Organizations", alias = "organizations")]
-    organizations: Vec<SyncResProfileOrganization>,
-}
-
-#[derive(Deserialize, Debug)]
-struct SyncResProfileOrganization {
-    #[serde(rename = "Id", alias = "id")]
-    id: String,
-    #[serde(rename = "Key", alias = "key")]
-    key: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct SyncResFolder {
-    #[serde(rename = "Id", alias = "id")]
-    id: String,
-    #[serde(rename = "Name", alias = "name")]
-    name: String,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherLoginUri {
     #[serde(rename = "Uri", alias = "uri")]
@@ -890,6 +753,143 @@ struct SyncResPasswordHistory {
     password: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SyncResCipher {
+    #[serde(rename = "Id", alias = "id")]
+    id: String,
+    #[serde(rename = "FolderId", alias = "folderId")]
+    folder_id: Option<String>,
+    #[serde(rename = "OrganizationId", alias = "organizationId")]
+    organization_id: Option<String>,
+    #[serde(rename = "Name", alias = "name")]
+    name: String,
+    #[serde(rename = "Login", alias = "login")]
+    login: Option<CipherLogin>,
+    #[serde(rename = "Card", alias = "card")]
+    card: Option<CipherCard>,
+    #[serde(rename = "Identity", alias = "identity")]
+    identity: Option<CipherIdentity>,
+    #[serde(rename = "SecureNote", alias = "secureNote")]
+    secure_note: Option<CipherSecureNote>,
+    #[serde(rename = "SshKey", alias = "sshKey")]
+    ssh_key: Option<CipherSshKey>,
+    #[serde(rename = "Notes", alias = "notes")]
+    notes: Option<String>,
+    #[serde(rename = "PasswordHistory", alias = "passwordHistory")]
+    password_history: Option<Vec<SyncResPasswordHistory>>,
+    #[serde(rename = "Fields", alias = "fields")]
+    fields: Option<Vec<CipherDynamicField>>,
+    #[serde(rename = "DeletedDate", alias = "deletedDate")]
+    deleted_date: Option<String>,
+    #[serde(rename = "Key", alias = "key")]
+    key: Option<String>,
+    #[serde(rename = "Reprompt", alias = "reprompt")]
+    reprompt: CipherRepromptType,
+}
+
+impl SyncResCipher {
+    fn to_entry(self, folders: &[SyncResFolder]) -> Option<crate::db::Entry<Encrypted>> {
+        if self.deleted_date.is_some() {
+            return None;
+        }
+        let history = self
+            .password_history
+            //.as_ref()
+            .map_or_else(Vec::new, |history| {
+                history
+                    .into_iter()
+                    .filter_map(|entry| {
+                        // Gets rid of entries with a non-existent
+                        // password
+                        entry.password.map(|p| crate::db::HistoryEntry {
+                            last_used_date: entry.last_used_date,
+                            password: p,
+                        })
+                    })
+                    .collect()
+            });
+
+        let (folder, folder_id) = self.folder_id.map_or((None, None), |folder_id| {
+            let mut folder_name = None;
+            for folder in folders {
+                if folder.id == folder_id {
+                    folder_name = Some(folder.name.clone());
+                }
+            }
+            (folder_name, Some(folder_id))
+        });
+
+        let data = if let Some(login) = self.login {
+            login.into()
+        } else if let Some(card) = self.card {
+            card.into()
+        } else if let Some(identity) = self.identity {
+            identity.into()
+        } else if let Some(secure_note) = self.secure_note {
+            secure_note.into()
+        } else if let Some(ssh_key) = self.ssh_key {
+            ssh_key.into()
+        } else {
+            return None;
+        };
+
+        let fields: Vec<crate::db::DynamicField> = self.fields.map_or_else(Vec::new, |fields| {
+            fields.into_iter().map(|field| field.into()).collect()
+        });
+
+        Some(crate::db::Entry::<Encrypted> {
+            id: self.id,
+            org_id: self.organization_id,
+            folder,
+            folder_id: folder_id,
+            name: self.name,
+            data,
+            fields,
+            notes: self.notes,
+            history,
+            key: self.key,
+            master_password_reprompt: self.reprompt,
+            _state: std::marker::PhantomData,
+        })
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct SyncResProfile {
+    #[serde(rename = "Key", alias = "key")]
+    key: String,
+    #[serde(rename = "PrivateKey", alias = "privateKey")]
+    private_key: String,
+    #[serde(rename = "Organizations", alias = "organizations")]
+    organizations: Vec<SyncResProfileOrganization>,
+}
+
+#[derive(Deserialize, Debug)]
+struct SyncResProfileOrganization {
+    #[serde(rename = "Id", alias = "id")]
+    id: String,
+    #[serde(rename = "Key", alias = "key")]
+    key: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct SyncResFolder {
+    #[serde(rename = "Id", alias = "id")]
+    id: String,
+    #[serde(rename = "Name", alias = "name")]
+    name: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct SyncRes {
+    #[serde(rename = "Ciphers", alias = "ciphers")]
+    ciphers: Vec<SyncResCipher>,
+    #[serde(rename = "Profile", alias = "profile")]
+    profile: SyncResProfile,
+    #[serde(rename = "Folders", alias = "folders")]
+    folders: Vec<SyncResFolder>,
+}
+
 #[derive(Serialize, Debug)]
 struct CiphersPostReq<'a> {
     #[serde(rename = "folderId")]
@@ -968,17 +968,17 @@ impl Serialize for EntryDataWire<'_> {
 }
 
 #[derive(Deserialize, Debug)]
-struct FoldersRes {
-    #[serde(rename = "Data", alias = "data")]
-    data: Vec<FoldersResData>,
-}
-
-#[derive(Deserialize, Debug)]
 struct FoldersResData {
     #[serde(rename = "Id", alias = "id")]
     id: String,
     #[serde(rename = "Name", alias = "name")]
     name: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct FoldersRes {
+    #[serde(rename = "Data", alias = "data")]
+    data: Vec<FoldersResData>,
 }
 
 // Used for the Bitwarden-Client-Name header. Accepted values:
