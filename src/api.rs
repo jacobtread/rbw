@@ -255,41 +255,41 @@ struct PreloginRes {
 }
 
 #[derive(Serialize, Debug)]
-struct ConnectTokenReq {
-    grant_type: String,
-    scope: String,
-    client_id: String,
+struct ConnectTokenReq<'a> {
+    grant_type: &'a str,
+    scope: &'a str,
+    client_id: &'a str,
     #[serde(rename = "deviceType")]
     device_type: u32,
     #[serde(rename = "deviceIdentifier")]
-    device_identifier: String,
+    device_identifier: &'a str,
     #[serde(rename = "deviceName")]
-    device_name: String,
+    device_name: &'a str,
     #[serde(rename = "devicePushToken")]
-    device_push_token: String,
+    device_push_token: &'a str,
     #[serde(rename = "twoFactorToken")]
-    two_factor_token: Option<String>,
+    two_factor_token: Option<&'a str>,
     #[serde(rename = "twoFactorProvider")]
     two_factor_provider: Option<u32>,
     #[serde(flatten)]
-    auth: ConnectTokenAuth,
+    auth: ConnectTokenAuth<'a>,
 }
 
 #[derive(Serialize, Debug)]
 #[serde(untagged)]
-enum ConnectTokenAuth {
+enum ConnectTokenAuth<'a> {
     Password {
-        username: String,
-        password: String,
+        username: &'a str,
+        password: &'a str,
     },
     AuthCode {
-        code: String,
-        code_verifier: String,
-        redirect_uri: String,
+        code: &'a str,
+        code_verifier: &'a str,
+        redirect_uri: &'a str,
     },
     ClientCredentials {
-        username: String,
-        client_secret: String,
+        username: &'a str,
+        client_secret: &'a str,
     },
 }
 
@@ -891,8 +891,8 @@ const DEVICE_TYPE: u8 = 8;
 
 enum ClientRequest<'a> {
     Prelogin(&'a str),
-    ConnectToken(ConnectTokenReq),
-    Login(ConnectTokenReq, &'a str),
+    ConnectToken(ConnectTokenReq<'a>),
+    Login(ConnectTokenReq<'a>, &'a str),
     SendEmailLogin(&'a str, &'a str, &'a str),
     Sync(&'a str),
     ExchangeRefreshToken(&'a str),
@@ -1105,17 +1105,17 @@ impl Client {
     ) -> Result<()> {
         let connect_req = ConnectTokenReq {
             auth: ConnectTokenAuth::ClientCredentials {
-                username: email.to_string(),
-                client_secret: String::from_utf8(apikey.client_secret().to_vec()).unwrap(),
+                username: &email,
+                client_secret: &String::from_utf8(apikey.client_secret().to_vec()).unwrap(),
             },
-            grant_type: "client_credentials".to_string(),
-            scope: "api".to_string(),
+            grant_type: "client_credentials",
+            scope: "api",
             // XXX unwraps here are not necessarily safe
-            client_id: String::from_utf8(apikey.client_id().to_vec()).unwrap(),
+            client_id: &String::from_utf8(apikey.client_id().to_vec()).unwrap(),
             device_type: u32::from(DEVICE_TYPE),
-            device_identifier: device_id.to_string(),
-            device_name: "rbw".to_string(),
-            device_push_token: String::new(),
+            device_identifier: device_id,
+            device_name: "rbw",
+            device_push_token: "",
             two_factor_token: None,
             two_factor_provider: None,
         };
@@ -1142,9 +1142,9 @@ impl Client {
                     self.obtain_sso_code(sso_id).await?;
                 (
                     ConnectTokenAuth::AuthCode {
-                        code: sso_code,
-                        code_verifier: sso_code_verifier,
-                        redirect_uri: callback_url,
+                        code: &sso_code.clone(),
+                        code_verifier: &sso_code_verifier.clone(),
+                        redirect_uri: &callback_url.clone(),
                     },
                     "authorization_code",
                     "api offline_access",
@@ -1152,8 +1152,8 @@ impl Client {
             }
             None => (
                 ConnectTokenAuth::Password {
-                    username: email.to_string(),
-                    password: crate::base64::encode(password_hash.hash()),
+                    username: email,
+                    password: &crate::base64::encode(password_hash.hash()),
                 },
                 "password",
                 "api offline_access",
@@ -1162,14 +1162,14 @@ impl Client {
 
         let connect_req = ConnectTokenReq {
             auth,
-            grant_type: grant_type.to_string(),
-            scope: scope.to_string(),
-            client_id: "cli".to_string(),
+            grant_type: grant_type,
+            scope: scope,
+            client_id: "cli",
             device_type: u32::from(DEVICE_TYPE),
-            device_identifier: device_id.to_string(),
-            device_name: "rbw".to_string(),
-            device_push_token: String::new(),
-            two_factor_token: two_factor_token.map(ToString::to_string),
+            device_identifier: device_id,
+            device_name: "rbw",
+            device_push_token: "",
+            two_factor_token: two_factor_token,
             two_factor_provider: two_factor_provider.map(|ty| ty as u32),
         };
 
