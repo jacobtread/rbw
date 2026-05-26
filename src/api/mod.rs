@@ -805,15 +805,9 @@ impl SyncResCipher {
             return None;
         }
 
-        let history = self
+        let history: Vec<crate::db::HistoryEntry> = self
             .password_history
-            //.as_ref()
-            .map_or_else(Vec::new, |history| {
-                history
-                    .into_iter()
-                    .filter_map(Into::<Option<crate::db::HistoryEntry>>::into)
-                    .collect()
-            });
+            .map_or(vec![], |e| e.into_iter().filter_map(Into::into).collect());
 
         let (folder, folder_id) = self.folder_id.map_or((None, None), |folder_id| {
             let mut folder_name = None;
