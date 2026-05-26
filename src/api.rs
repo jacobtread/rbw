@@ -753,6 +753,28 @@ struct SyncResPasswordHistory {
     password: Option<String>,
 }
 
+impl From<crate::db::HistoryEntry> for SyncResPasswordHistory {
+    fn from(value: crate::db::HistoryEntry) -> Self {
+        Self {
+            last_used_date: value.last_used_date,
+            password: Some(value.password),
+        }
+    }
+}
+
+impl From<SyncResPasswordHistory> for Option<crate::db::HistoryEntry> {
+    fn from(value: SyncResPasswordHistory) -> Self {
+        let Some(password) = value.password else {
+            return None;
+        };
+
+        Some(crate::db::HistoryEntry {
+            last_used_date: value.last_used_date,
+            password,
+        })
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SyncResCipher {
     #[serde(rename = "Id", alias = "id")]
@@ -792,20 +814,14 @@ impl SyncResCipher {
         if self.deleted_date.is_some() {
             return None;
         }
+
         let history = self
             .password_history
             //.as_ref()
             .map_or_else(Vec::new, |history| {
                 history
                     .into_iter()
-                    .filter_map(|entry| {
-                        // Gets rid of entries with a non-existent
-                        // password
-                        entry.password.map(|p| crate::db::HistoryEntry {
-                            last_used_date: entry.last_used_date,
-                            password: p,
-                        })
-                    })
+                    .filter_map(Into::<Option<crate::db::HistoryEntry>>::into)
                     .collect()
             });
 
