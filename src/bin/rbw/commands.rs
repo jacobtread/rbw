@@ -8,20 +8,6 @@ use rbw::db::{Decrypted, Decrypter, Encrypted, Encrypter, EntryData};
 
 use crate::FindArgs;
 
-// The default number of seconds the generated TOTP
-// code lasts for before a new one must be generated
-const TOTP_DEFAULT_STEP: u64 = 30;
-
-const MISSING_CONFIG_HELP: &str =
-    "Before using rbw, you must configure the email address you would like to \
-    use to log in to the server by running:\n\n    \
-        rbw config set email <email>\n\n\
-    Additionally, if you are using a self-hosted installation, you should \
-    run:\n\n    \
-        rbw config set base_url <url>\n\n\
-    and, if your server has a non-default identity url:\n\n    \
-        rbw config set identity_url <url>\n";
-
 #[derive(Debug, Clone)]
 pub enum Needle {
     Name(String),
@@ -1123,6 +1109,16 @@ fn run_agent() -> anyhow::Result<()> {
     Ok(())
 }
 
+const MISSING_CONFIG_HELP: &str =
+    "Before using rbw, you must configure the email address you would like to \
+    use to log in to the server by running:\n\n    \
+        rbw config set email <email>\n\n\
+    Additionally, if you are using a self-hosted installation, you should \
+    run:\n\n    \
+        rbw config set base_url <url>\n\n\
+    and, if your server has a non-default identity url:\n\n    \
+        rbw config set identity_url <url>\n";
+
 fn check_config() -> anyhow::Result<()> {
     rbw::config::Config::validate().map_err(|e| {
         log::error!("{MISSING_CONFIG_HELP}");
@@ -1188,6 +1184,10 @@ fn decode_totp_secret(secret: &str) -> anyhow::Result<Vec<u8>> {
     }
     Err(anyhow::anyhow!("totp secret was not valid base32"))
 }
+
+// The default number of seconds the generated TOTP
+// code lasts for before a new one must be generated
+const TOTP_DEFAULT_STEP: u64 = 30;
 
 fn generate_totp(secret: &str) -> anyhow::Result<String> {
     // Small hack that is not RFC compliant but helps with some services.
