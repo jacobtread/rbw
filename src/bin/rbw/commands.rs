@@ -8,6 +8,40 @@ use rbw::db::{Decrypted, Decrypter, Encrypted, Encrypter, EntryData};
 
 use crate::FindArgs;
 
+/// This Encrypter implementation will send the decrypted string to the agent and wait for it to
+/// encrypt it.
+struct RemoteEncrypter {}
+
+impl<T> rbw::db::Encrypter<T> for RemoteEncrypter {
+    fn encrypt_field(
+        &mut self,
+        entry: Option<&rbw::db::Entry<T>>,
+        field: &str,
+    ) -> rbw::error::Result<String> {
+        crate::actions::encrypt(field, entry.and_then(|e| e.org_id.as_deref()))
+            .map_err(|_e| rbw::error::Error::EncryptRemote)
+    }
+}
+
+/// This Decrypter implementation will send the encrypted string to the agent and wait for it to
+/// decrypt it.
+struct RemoteDecrypter {}
+
+impl<T> rbw::db::Decrypter<T> for RemoteDecrypter {
+    fn decrypt_field(
+        &mut self,
+        entry: Option<&rbw::db::Entry<T>>,
+        field: &str,
+    ) -> rbw::error::Result<String> {
+        crate::actions::decrypt(
+            field,
+            entry.and_then(|e| e.key.as_deref()),
+            entry.and_then(|e| e.org_id.as_deref()),
+        )
+        .map_err(|_e| rbw::error::Error::DecryptRemote)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Needle {
     Name(String),
@@ -40,40 +74,6 @@ impl FromStr for Needle {
         }
 
         Ok(Needle::Name(s.to_string()))
-    }
-}
-
-/// This Encrypter implementation will send the decrypted string to the agent and wait for it to
-/// encrypt it.
-struct RemoteEncrypter {}
-
-impl<T> rbw::db::Encrypter<T> for RemoteEncrypter {
-    fn encrypt_field(
-        &mut self,
-        entry: Option<&rbw::db::Entry<T>>,
-        field: &str,
-    ) -> rbw::error::Result<String> {
-        crate::actions::encrypt(field, entry.and_then(|e| e.org_id.as_deref()))
-            .map_err(|_e| rbw::error::Error::EncryptRemote)
-    }
-}
-
-/// This Decrypter implementation will send the encrypted string to the agent and wait for it to
-/// decrypt it.
-struct RemoteDecrypter {}
-
-impl<T> rbw::db::Decrypter<T> for RemoteDecrypter {
-    fn decrypt_field(
-        &mut self,
-        entry: Option<&rbw::db::Entry<T>>,
-        field: &str,
-    ) -> rbw::error::Result<String> {
-        crate::actions::decrypt(
-            field,
-            entry.and_then(|e| e.key.as_deref()),
-            entry.and_then(|e| e.org_id.as_deref()),
-        )
-        .map_err(|_e| rbw::error::Error::DecryptRemote)
     }
 }
 
