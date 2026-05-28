@@ -1,20 +1,18 @@
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 
 pub const VERSION: u32 = {
-    const fn unwrap(res: &Result<u32, std::num::ParseIntError>) -> u32 {
-        match res {
-            Ok(t) => *t,
+    const fn parse_component(s: &str) -> u32 {
+        match u32::from_str_radix(s, 10) {
+            Ok(n) => n,
             Err(_) => panic!("failed to parse cargo version"),
         }
     }
 
-    let major = env!("CARGO_PKG_VERSION_MAJOR");
-    let minor = env!("CARGO_PKG_VERSION_MINOR");
-    let patch = env!("CARGO_PKG_VERSION_PATCH");
+    let major = parse_component(env!("CARGO_PKG_VERSION_MAJOR"));
+    let minor = parse_component(env!("CARGO_PKG_VERSION_MINOR"));
+    let patch = parse_component(env!("CARGO_PKG_VERSION_PATCH"));
 
-    unwrap(&u32::from_str_radix(major, 10)) * 1_000_000
-        + unwrap(&u32::from_str_radix(minor, 10)) * 1_000_000
-        + unwrap(&u32::from_str_radix(patch, 10)) * 1_000_000
+    major * 1_000_000 + minor * 1_000 + patch
 };
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
