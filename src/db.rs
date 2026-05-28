@@ -908,14 +908,14 @@ impl Db {
         let file = crate::dirs::db_file(server, email)?;
         let mut fh = tokio::fs::File::open(&file)
             .await
-            .map_err(|source| Error::LoadDbAsync {
+            .map_err(|source| Error::LoadDb {
                 source,
                 file: file.clone(),
             })?;
         let mut json = String::new();
         fh.read_to_string(&mut json)
             .await
-            .map_err(|source| Error::LoadDbAsync {
+            .map_err(|source| Error::LoadDb {
                 source,
                 file: file.clone(),
             })?;
@@ -1002,13 +1002,13 @@ impl Db {
         // constructed as a filename in a directory
         tokio::fs::create_dir_all(file.parent().unwrap())
             .await
-            .map_err(|source| Error::SaveDbAsync {
+            .map_err(|source| Error::SaveDb {
                 source,
                 file: file.clone(),
             })?;
         let mut fh = tokio::fs::File::create(&file)
             .await
-            .map_err(|source| Error::SaveDbAsync {
+            .map_err(|source| Error::SaveDb {
                 source,
                 file: file.clone(),
             })?;
@@ -1021,7 +1021,7 @@ impl Db {
                 .as_bytes(),
         )
         .await
-        .map_err(|source| Error::SaveDbAsync { source, file })?;
+        .map_err(|source| Error::SaveDb { source, file })?;
         Ok(())
     }
 

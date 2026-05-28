@@ -91,14 +91,14 @@ impl Config {
         let mut fh =
             tokio::fs::File::open(&file)
                 .await
-                .map_err(|source| Error::LoadConfigAsync {
+                .map_err(|source| Error::LoadConfig {
                     source,
                     file: file.clone(),
                 })?;
         let mut json = String::new();
         fh.read_to_string(&mut json)
             .await
-            .map_err(|source| Error::LoadConfigAsync {
+            .map_err(|source| Error::LoadConfig {
                 source,
                 file: file.clone(),
             })?;

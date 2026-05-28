@@ -110,12 +110,6 @@ pub enum Error {
     },
 
     #[error("failed to load config from {}", .file.display())]
-    LoadConfigAsync {
-        source: tokio::io::Error,
-        file: std::path::PathBuf,
-    },
-
-    #[error("failed to load config from {}", .file.display())]
     LoadConfigJson {
         source: serde_json::Error,
         file: std::path::PathBuf,
@@ -124,12 +118,6 @@ pub enum Error {
     #[error("failed to load db from {}", .file.display())]
     LoadDb {
         source: std::io::Error,
-        file: std::path::PathBuf,
-    },
-
-    #[error("failed to load db from {}", .file.display())]
-    LoadDbAsync {
-        source: tokio::io::Error,
         file: std::path::PathBuf,
     },
 
@@ -217,12 +205,6 @@ pub enum Error {
     #[error("failed to save db to {}", .file.display())]
     SaveDb {
         source: std::io::Error,
-        file: std::path::PathBuf,
-    },
-
-    #[error("failed to save db to {}", .file.display())]
-    SaveDbAsync {
-        source: tokio::io::Error,
         file: std::path::PathBuf,
     },
 
