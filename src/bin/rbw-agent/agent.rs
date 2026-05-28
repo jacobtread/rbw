@@ -79,7 +79,7 @@ impl Agent {
                     });
                 }
                 Event::Timeout(()) => {
-                    self.state.lock().await.clear();
+                    self.state.lock().await.clear().await;
                 }
                 Event::Sync(()) => {
                     let state = self.state.clone();

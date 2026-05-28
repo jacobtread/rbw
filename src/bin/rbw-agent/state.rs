@@ -1,16 +1,16 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use sha2::Digest as _;
 use tokio::sync::RwLock;
 
 pub struct InnerState {
+    pub priv_key: RwLock<Option<Arc<rbw::locked::Keys>>>,
+    pub org_keys: RwLock<Option<std::collections::HashMap<String, Arc<rbw::locked::Keys>>>>,
     pub config: rbw::config::Config,
     pub last_environment: RwLock<rbw::protocol::Environment>,
 }
 
 pub struct State {
-    pub priv_key: Option<rbw::locked::Keys>,
-    pub org_keys: Option<std::collections::HashMap<String, rbw::locked::Keys>>,
     pub timeout: crate::timeout::Timeout,
     pub timeout_duration: std::time::Duration,
     pub sync_timeout: crate::timeout::Timeout,
@@ -36,23 +36,43 @@ pub struct State {
 }
 
 impl State {
-    pub fn key(&self, org_id: Option<&str>) -> Option<&rbw::locked::Keys> {
-        org_id.map_or(self.priv_key.as_ref(), |id| {
-            self.org_keys.as_ref().and_then(|h| h.get(id))
-        })
+    pub async fn key(&self, org_id: Option<&str>) -> Option<Arc<rbw::locked::Keys>> {
+        match org_id {
+            Some(id) => self
+                .inner
+                .org_keys
+                .read()
+                .await
+                .as_ref()
+                .and_then(|h| h.get(id).cloned()),
+            None => self.inner.priv_key.read().await.clone(),
+        }
     }
 
-    pub fn needs_unlock(&self) -> bool {
-        self.priv_key.is_none() || self.org_keys.is_none()
+    pub async fn set_priv_key(&self, priv_key: rbw::locked::Keys) {
+        *self.inner.priv_key.write().await = Some(Arc::new(priv_key));
+    }
+
+    pub async fn set_org_keys(&self, org_keys: HashMap<String, rbw::locked::Keys>) {
+        let org_keys: HashMap<String, Arc<rbw::locked::Keys>> = org_keys
+            .into_iter()
+            .map(|(k, v)| (k, Arc::new(v)))
+            .collect();
+
+        *self.inner.org_keys.write().await = Some(org_keys);
+    }
+
+    pub async fn needs_unlock(&self) -> bool {
+        self.inner.priv_key.read().await.is_none() || self.inner.org_keys.read().await.is_none()
     }
 
     pub fn set_timeout(&self) {
         self.timeout.set(self.timeout_duration);
     }
 
-    pub fn clear(&mut self) {
-        self.priv_key = None;
-        self.org_keys = None;
+    pub async fn clear(&mut self) {
+        *self.inner.priv_key.write().await = None;
+        *self.inner.org_keys.write().await = None;
         self.timeout.clear();
     }
 

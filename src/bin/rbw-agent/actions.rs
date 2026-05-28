@@ -320,9 +320,9 @@ async fn login_success(
 
     match res {
         Ok((keys, org_keys)) => {
-            let mut state = state.lock().await;
-            state.priv_key = Some(keys);
-            state.org_keys = Some(org_keys);
+            let state = state.lock().await;
+            state.set_priv_key(keys).await;
+            state.set_org_keys(org_keys).await;
         }
         Err(e) => return Err(e).context("failed to unlock database"),
     }
@@ -334,7 +334,7 @@ async fn unlock_state(
     state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
-    if state.lock().await.needs_unlock() {
+    if state.lock().await.needs_unlock().await {
         let (db, email) = {
             let guard = state.lock().await;
             let db = load_db(&guard).await?;
@@ -407,9 +407,9 @@ async fn unlock_success(
     keys: rbw::locked::Keys,
     org_keys: std::collections::HashMap<String, rbw::locked::Keys>,
 ) -> anyhow::Result<()> {
-    let mut state = state.lock().await;
-    state.priv_key = Some(keys);
-    state.org_keys = Some(org_keys);
+    let state = state.lock().await;
+    state.set_priv_key(keys).await;
+    state.set_org_keys(org_keys).await;
     Ok(())
 }
 
@@ -417,7 +417,7 @@ pub async fn lock(
     sock: &mut crate::sock::Sock,
     state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
-    state.lock().await.clear();
+    state.lock().await.clear().await;
 
     respond_ack(sock).await?;
 
@@ -428,7 +428,7 @@ pub async fn check_lock(
     sock: &mut crate::sock::Sock,
     state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
-    if state.lock().await.needs_unlock() {
+    if state.lock().await.needs_unlock().await {
         return Err(anyhow::anyhow!("agent is locked"));
     }
 
@@ -578,13 +578,13 @@ async fn decrypt_cipher(
         state.set_master_password_reprompt(&db.entries);
     }
 
-    let Some(keys) = state.key(org_id) else {
+    let Some(keys) = state.key(org_id).await else {
         return Err(anyhow::anyhow!(
             "failed to find decryption keys in in-memory state"
         ));
     };
 
-    let entry_key = decrypt_entry_key(entry_key, keys)?;
+    let entry_key = decrypt_entry_key(entry_key, keys.as_ref())?;
 
     maybe_reprompt_password(&state, environment, cipherstring).await?;
 
@@ -593,7 +593,7 @@ async fn decrypt_cipher(
 
     let plaintext = String::from_utf8(
         cipherstring
-            .decrypt_symmetric(keys, entry_key.as_ref())
+            .decrypt_symmetric(keys.as_ref(), entry_key.as_ref())
             .context("failed to decrypt encrypted secret")?,
     )
     .context("failed to parse decrypted secret")?;
@@ -622,13 +622,13 @@ pub async fn encrypt(
     org_id: Option<&str>,
 ) -> anyhow::Result<()> {
     let state = state.lock().await;
-    let Some(keys) = state.key(org_id) else {
+    let Some(keys) = state.key(org_id).await else {
         return Err(anyhow::anyhow!(
             "failed to find encryption keys in in-memory state"
         ));
     };
     let cipherstring =
-        rbw::cipherstring::CipherString::encrypt_symmetric(keys, plaintext.as_bytes())
+        rbw::cipherstring::CipherString::encrypt_symmetric(keys.as_ref(), plaintext.as_bytes())
             .context("failed to encrypt plaintext secret")?;
 
     respond_encrypt(sock, cipherstring.to_string()).await?;
