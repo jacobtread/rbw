@@ -288,8 +288,7 @@ async fn login_success(
 
     match res {
         Ok((keys, org_keys)) => {
-            state.set_priv_key(keys).await;
-            state.set_org_keys(org_keys).await;
+            state.set_keys(keys, org_keys).await;
         }
         Err(e) => return Err(e).context("failed to unlock database"),
     }
@@ -373,8 +372,7 @@ async fn unlock_success(
     keys: rbw::locked::Keys,
     org_keys: std::collections::HashMap<String, rbw::locked::Keys>,
 ) -> anyhow::Result<()> {
-    state.set_priv_key(keys).await;
-    state.set_org_keys(org_keys).await;
+    state.set_keys(keys, org_keys).await;
 
     Ok(())
 }

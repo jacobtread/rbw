@@ -11,8 +11,8 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::notifications::NotificationsHandler;
 
 pub struct InnerState {
-    pub priv_key: RwLock<Option<Arc<rbw::locked::Keys>>>,
-    pub org_keys: RwLock<Option<std::collections::HashMap<String, Arc<rbw::locked::Keys>>>>,
+    priv_key: RwLock<Option<Arc<rbw::locked::Keys>>>,
+    org_keys: RwLock<Option<std::collections::HashMap<String, Arc<rbw::locked::Keys>>>>,
     pub notifications_handler: RwLock<NotificationsHandler>,
     pub timeout: crate::timeout::Timeout,
     pub timeout_duration: std::time::Duration,
@@ -86,6 +86,7 @@ impl State {
 
         state
     }
+
     pub async fn key(&self, org_id: Option<&str>) -> Option<Arc<rbw::locked::Keys>> {
         match org_id {
             Some(id) => self
@@ -99,17 +100,22 @@ impl State {
         }
     }
 
-    pub async fn set_priv_key(&self, priv_key: rbw::locked::Keys) {
-        *self.inner.priv_key.write().await = Some(Arc::new(priv_key));
-    }
+    pub async fn set_keys(
+        &self,
+        priv_key: rbw::locked::Keys,
+        org_keys: HashMap<String, rbw::locked::Keys>,
+    ) {
+        let mut priv_key_guard = self.inner.priv_key.write().await;
+        let mut org_keys_guard = self.inner.org_keys.write().await;
 
-    pub async fn set_org_keys(&self, org_keys: HashMap<String, rbw::locked::Keys>) {
+        *priv_key_guard = Some(Arc::new(priv_key));
+
         let org_keys: HashMap<String, Arc<rbw::locked::Keys>> = org_keys
             .into_iter()
             .map(|(k, v)| (k, Arc::new(v)))
             .collect();
 
-        *self.inner.org_keys.write().await = Some(org_keys);
+        *org_keys_guard = Some(org_keys);
     }
 
     pub async fn needs_unlock(&self) -> bool {
@@ -129,8 +135,14 @@ impl State {
     }
 
     pub async fn clear(&self) {
-        *self.inner.priv_key.write().await = None;
-        *self.inner.org_keys.write().await = None;
+        {
+            let mut priv_key_guard = self.inner.priv_key.write().await;
+            let mut org_keys_guard = self.inner.org_keys.write().await;
+
+            *priv_key_guard = None;
+            *org_keys_guard = None;
+        }
+
         self.inner.timeout.clear();
     }
 
