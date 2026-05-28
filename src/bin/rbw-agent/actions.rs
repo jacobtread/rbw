@@ -715,7 +715,13 @@ async fn save_db(state: &crate::state::State, db: &rbw::db::Db) -> anyhow::Resul
 pub async fn subscribe_to_notifications(
     state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
-    if state.lock().await.notifications_handler.is_connected() {
+    if state
+        .lock()
+        .await
+        .notifications_handler()
+        .await
+        .is_connected()
+    {
         return Ok(());
     }
 
@@ -732,10 +738,10 @@ pub async fn subscribe_to_notifications(
     let websocket_url = format!("{}/hub?access_token={}", notifications_url, access_token)
         .replace("https://", "wss://");
 
-    let mut state = state.lock().await;
-    state
-        .notifications_handler
-        .connect(websocket_url)
+    let state = state.lock().await;
+    let mut nh = state.notifications_handler_mut().await;
+
+    nh.connect(websocket_url)
         .await
         .err()
         .map_or_else(|| Ok(()), |err| Err(anyhow::anyhow!(err.to_string())))

@@ -34,12 +34,12 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
         timeout_duration,
         sync_timeout,
         sync_timeout_duration,
-        notifications_handler,
         master_password_reprompt: std::collections::HashSet::new(),
         master_password_reprompt_initialized: false,
         inner: Arc::new(crate::state::InnerState {
             priv_key: RwLock::new(None),
             org_keys: RwLock::new(None),
+            notifications_handler: RwLock::new(notifications_handler),
             config,
             last_environment: RwLock::new(rbw::protocol::Environment::default()),
         }),

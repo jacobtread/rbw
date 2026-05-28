@@ -1,11 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use sha2::Digest as _;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use crate::notifications::NotificationsHandler;
 
 pub struct InnerState {
     pub priv_key: RwLock<Option<Arc<rbw::locked::Keys>>>,
     pub org_keys: RwLock<Option<std::collections::HashMap<String, Arc<rbw::locked::Keys>>>>,
+    pub notifications_handler: RwLock<NotificationsHandler>,
     pub config: rbw::config::Config,
     pub last_environment: RwLock<rbw::protocol::Environment>,
 }
@@ -15,7 +18,6 @@ pub struct State {
     pub timeout_duration: std::time::Duration,
     pub sync_timeout: crate::timeout::Timeout,
     pub sync_timeout_duration: std::time::Duration,
-    pub notifications_handler: crate::notifications::NotificationsHandler,
     pub master_password_reprompt: std::collections::HashSet<[u8; 32]>,
     pub master_password_reprompt_initialized: bool,
 
@@ -68,6 +70,14 @@ impl State {
 
     pub fn set_timeout(&self) {
         self.timeout.set(self.timeout_duration);
+    }
+
+    pub async fn notifications_handler(&self) -> RwLockReadGuard<'_, NotificationsHandler> {
+        self.inner.notifications_handler.read().await
+    }
+
+    pub async fn notifications_handler_mut(&self) -> RwLockWriteGuard<'_, NotificationsHandler> {
+        self.inner.notifications_handler.write().await
     }
 
     pub async fn clear(&mut self) {

@@ -38,7 +38,8 @@ impl Agent {
             .state
             .lock()
             .await
-            .notifications_handler
+            .notifications_handler()
+            .await
             .get_channel()
             .await;
         let notifications = UnboundedReceiverStream::new(notifications)
