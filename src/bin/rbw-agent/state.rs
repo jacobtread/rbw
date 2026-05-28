@@ -9,15 +9,15 @@ pub struct InnerState {
     pub priv_key: RwLock<Option<Arc<rbw::locked::Keys>>>,
     pub org_keys: RwLock<Option<std::collections::HashMap<String, Arc<rbw::locked::Keys>>>>,
     pub notifications_handler: RwLock<NotificationsHandler>,
+    pub timeout: crate::timeout::Timeout,
+    pub timeout_duration: std::time::Duration,
+    pub sync_timeout: crate::timeout::Timeout,
+    pub sync_timeout_duration: std::time::Duration,
     pub config: rbw::config::Config,
     pub last_environment: RwLock<rbw::protocol::Environment>,
 }
 
 pub struct State {
-    pub timeout: crate::timeout::Timeout,
-    pub timeout_duration: std::time::Duration,
-    pub sync_timeout: crate::timeout::Timeout,
-    pub sync_timeout_duration: std::time::Duration,
     pub master_password_reprompt: std::collections::HashSet<[u8; 32]>,
     pub master_password_reprompt_initialized: bool,
 
@@ -69,7 +69,7 @@ impl State {
     }
 
     pub fn set_timeout(&self) {
-        self.timeout.set(self.timeout_duration);
+        self.inner.timeout.set(self.inner.timeout_duration);
     }
 
     pub async fn notifications_handler(&self) -> RwLockReadGuard<'_, NotificationsHandler> {
@@ -83,11 +83,13 @@ impl State {
     pub async fn clear(&mut self) {
         *self.inner.priv_key.write().await = None;
         *self.inner.org_keys.write().await = None;
-        self.timeout.clear();
+        self.inner.timeout.clear();
     }
 
     pub fn set_sync_timeout(&self) {
-        self.sync_timeout.set(self.sync_timeout_duration);
+        self.inner
+            .sync_timeout
+            .set(self.inner.sync_timeout_duration);
     }
 
     // the way we structure the client/agent split in rbw makes the master

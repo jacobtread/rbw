@@ -30,16 +30,16 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
     }
     let notifications_handler = crate::notifications::NotificationsHandler::new();
     let state = Arc::new(tokio::sync::Mutex::new(crate::state::State {
-        timeout,
-        timeout_duration,
-        sync_timeout,
-        sync_timeout_duration,
         master_password_reprompt: std::collections::HashSet::new(),
         master_password_reprompt_initialized: false,
         inner: Arc::new(crate::state::InnerState {
             priv_key: RwLock::new(None),
             org_keys: RwLock::new(None),
             notifications_handler: RwLock::new(notifications_handler),
+            timeout,
+            timeout_duration,
+            sync_timeout,
+            sync_timeout_duration,
             config,
             last_environment: RwLock::new(rbw::protocol::Environment::default()),
         }),
