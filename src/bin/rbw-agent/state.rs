@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use sha2::Digest as _;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -13,14 +16,13 @@ pub struct InnerState {
     pub timeout_duration: std::time::Duration,
     pub sync_timeout: crate::timeout::Timeout,
     pub sync_timeout_duration: std::time::Duration,
+    pub master_password_reprompt: RwLock<std::collections::HashSet<[u8; 32]>>,
+    pub master_password_reprompt_initialized: AtomicBool,
     pub config: rbw::config::Config,
     pub last_environment: RwLock<rbw::protocol::Environment>,
 }
 
 pub struct State {
-    pub master_password_reprompt: std::collections::HashSet<[u8; 32]>,
-    pub master_password_reprompt_initialized: bool,
-
     // this is stored here specifically for the use of the ssh agent, because
     // requests made to the ssh agent don't include an environment, and so we
     // can't properly initialize the pinentry process. we work around this by
@@ -113,19 +115,23 @@ impl State {
     // if the agent gets a request for any of those cipherstrings that it saw
     // marked as master password reprompt during the most recent sync, it
     // forces a reprompt.
-    pub fn set_master_password_reprompt<T>(&mut self, entries: &[rbw::db::Entry<T>]) {
-        self.master_password_reprompt.clear();
 
-        let mut hasher = sha2::Sha256::new();
-        let mut insert = |s: Option<&str>| {
-            if let Some(s) = s {
-                if !s.is_empty() {
-                    hasher.update(s);
-                    self.master_password_reprompt
-                        .insert(hasher.finalize_reset().into());
-                }
+    async fn add_mpr(&self, s: Option<&str>) {
+        if let Some(s) = s {
+            if !s.is_empty() {
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(s);
+                self.inner
+                    .master_password_reprompt
+                    .write()
+                    .await
+                    .insert(hasher.finalize().into());
             }
-        };
+        }
+    }
+
+    pub async fn set_master_password_reprompt<T>(&self, entries: &[rbw::db::Entry<T>]) {
+        self.inner.master_password_reprompt.write().await.clear();
 
         for entry in entries {
             if !entry.master_password_reprompt() {
@@ -134,39 +140,43 @@ impl State {
 
             match &entry.data {
                 rbw::db::EntryData::Login { password, totp, .. } => {
-                    insert(password.as_deref());
-                    insert(totp.as_deref());
+                    self.add_mpr(password.as_deref()).await;
+                    self.add_mpr(totp.as_deref()).await;
                 }
                 rbw::db::EntryData::Card { number, code, .. } => {
-                    insert(number.as_deref());
-                    insert(code.as_deref());
+                    self.add_mpr(number.as_deref()).await;
+                    self.add_mpr(code.as_deref()).await;
                 }
                 rbw::db::EntryData::Identity {
                     ssn,
                     passport_number,
                     ..
                 } => {
-                    insert(ssn.as_deref());
-                    insert(passport_number.as_deref());
+                    self.add_mpr(ssn.as_deref()).await;
+                    self.add_mpr(passport_number.as_deref()).await;
                 }
                 rbw::db::EntryData::SecureNote => {}
                 rbw::db::EntryData::SshKey { private_key, .. } => {
-                    insert(private_key.as_deref());
+                    self.add_mpr(private_key.as_deref()).await;
                 }
             }
 
             for field in &entry.fields {
                 if field.ty == Some(rbw::api::FieldType::Hidden) {
-                    insert(field.value.as_deref());
+                    self.add_mpr(field.value.as_deref()).await;
                 }
             }
         }
 
-        self.master_password_reprompt_initialized = true;
+        self.inner
+            .master_password_reprompt_initialized
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn master_password_reprompt_initialized(&self) -> bool {
-        self.master_password_reprompt_initialized
+        self.inner
+            .master_password_reprompt_initialized
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub async fn last_environment(

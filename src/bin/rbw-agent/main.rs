@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 
 use anyhow::Context as _;
 use tokio::sync::RwLock;
@@ -30,8 +30,6 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
     }
     let notifications_handler = crate::notifications::NotificationsHandler::new();
     let state = Arc::new(tokio::sync::Mutex::new(crate::state::State {
-        master_password_reprompt: std::collections::HashSet::new(),
-        master_password_reprompt_initialized: false,
         inner: Arc::new(crate::state::InnerState {
             priv_key: RwLock::new(None),
             org_keys: RwLock::new(None),
@@ -40,6 +38,8 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
             timeout_duration,
             sync_timeout,
             sync_timeout_duration,
+            master_password_reprompt: RwLock::new(std::collections::HashSet::new()),
+            master_password_reprompt_initialized: AtomicBool::new(false),
             config,
             last_environment: RwLock::new(rbw::protocol::Environment::default()),
         }),

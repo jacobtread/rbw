@@ -458,7 +458,11 @@ pub async fn sync(
         rbw::actions::sync(access_token, refresh_token)
             .await
             .context("failed to sync database from server")?;
-    state.lock().await.set_master_password_reprompt(&entries);
+    state
+        .lock()
+        .await
+        .set_master_password_reprompt(&entries)
+        .await;
 
     db.update_access_token(access_token);
 
@@ -509,7 +513,10 @@ async fn maybe_reprompt_password(
     let master_password_reprompt: [u8; 32] = sha256.finalize().into();
 
     if state
+        .inner
         .master_password_reprompt
+        .read()
+        .await
         .contains(&master_password_reprompt)
     {
         let db = load_db(state).await?;
@@ -571,11 +578,11 @@ async fn decrypt_cipher(
     entry_key: Option<&str>,
     org_id: Option<&str>,
 ) -> anyhow::Result<String> {
-    let mut state = state.lock().await;
+    let state = state.lock().await;
 
     if !state.master_password_reprompt_initialized() {
         let db = load_db(&state).await?;
-        state.set_master_password_reprompt(&db.entries);
+        state.set_master_password_reprompt(&db.entries).await;
     }
 
     let Some(keys) = state.key(org_id).await else {
