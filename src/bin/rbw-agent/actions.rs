@@ -746,8 +746,9 @@ pub async fn get_ssh_public_keys(
 ) -> anyhow::Result<Vec<String>> {
     let environment = {
         let state = state.lock().await;
+        let le = state.last_environment().await;
         state.set_timeout();
-        state.last_environment().clone()
+        le.clone()
     };
 
     unlock_state(state.clone(), &environment).await?;
@@ -786,8 +787,9 @@ pub async fn find_ssh_private_key(
 ) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
     let environment = {
         let state = state.lock().await;
+        let le = state.last_environment().await;
         state.set_timeout();
-        state.last_environment().clone()
+        le.clone()
     };
 
     unlock_state(state.clone(), &environment).await?;

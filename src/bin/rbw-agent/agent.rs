@@ -167,8 +167,10 @@ async fn handle_request(
         }
     };
 
-    let mut state = state.lock().await;
-    state.set_last_environment(environment);
+    let state = state.lock().await;
+
+    state.set_last_environment(environment).await;
+
     if set_timeout {
         state.set_timeout();
     }

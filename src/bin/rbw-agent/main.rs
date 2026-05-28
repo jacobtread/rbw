@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use tokio::sync::RwLock;
 
 mod actions;
 mod agent;
@@ -38,8 +39,10 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
         notifications_handler,
         master_password_reprompt: std::collections::HashSet::new(),
         master_password_reprompt_initialized: false,
-        last_environment: rbw::protocol::Environment::default(),
-        inner: Arc::new(crate::state::InnerState { config }),
+        inner: Arc::new(crate::state::InnerState {
+            config,
+            last_environment: RwLock::new(rbw::protocol::Environment::default()),
+        }),
         #[cfg(feature = "clipboard")]
         clipboard: arboard::Clipboard::new()
             .inspect_err(|e| {

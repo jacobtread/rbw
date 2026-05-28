@@ -59,11 +59,12 @@ impl ssh_agent_lib::agent::Session for SshAgent {
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
 
         let (confirm_ssh, pinentry, last_environment) = {
-            let guard = self.state.lock().await;
+            let state = self.state.lock().await;
+            let le = state.last_environment().await;
             (
-                guard.confirm_ssh(),
-                guard.pinentry().to_string(),
-                guard.last_environment().clone(),
+                state.confirm_ssh(),
+                state.pinentry().to_string(),
+                le.clone(),
             )
         };
 

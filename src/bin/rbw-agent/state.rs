@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use sha2::Digest as _;
+use tokio::sync::RwLock;
 
 pub struct InnerState {
     pub config: rbw::config::Config,
+    pub last_environment: RwLock<rbw::protocol::Environment>,
 }
 
 pub struct State {
@@ -27,7 +29,6 @@ pub struct State {
     //
     // we should not use this for any requests on the main agent, those
     // should all send their own environment over.
-    pub last_environment: rbw::protocol::Environment,
     pub inner: Arc<InnerState>,
 
     #[cfg(feature = "clipboard")]
@@ -136,12 +137,14 @@ impl State {
         self.master_password_reprompt_initialized
     }
 
-    pub fn last_environment(&self) -> &rbw::protocol::Environment {
-        &self.last_environment
+    pub async fn last_environment(
+        &self,
+    ) -> tokio::sync::RwLockReadGuard<'_, rbw::protocol::Environment> {
+        self.inner.last_environment.read().await
     }
 
-    pub fn set_last_environment(&mut self, environment: rbw::protocol::Environment) {
-        self.last_environment = environment;
+    pub async fn set_last_environment(&self, environment: rbw::protocol::Environment) {
+        *self.inner.last_environment.write().await = environment;
     }
 
     pub fn email(&self) -> anyhow::Result<&str> {
