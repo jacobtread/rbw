@@ -1,4 +1,10 @@
+use std::sync::Arc;
+
 use sha2::Digest as _;
+
+pub struct InnerState {
+    pub config: rbw::config::Config,
+}
 
 pub struct State {
     pub priv_key: Option<rbw::locked::Keys>,
@@ -22,6 +28,7 @@ pub struct State {
     // we should not use this for any requests on the main agent, those
     // should all send their own environment over.
     pub last_environment: rbw::protocol::Environment,
+    pub inner: Arc<InnerState>,
 
     #[cfg(feature = "clipboard")]
     pub clipboard: Option<arboard::Clipboard>,
@@ -135,5 +142,33 @@ impl State {
 
     pub fn set_last_environment(&mut self, environment: rbw::protocol::Environment) {
         self.last_environment = environment;
+    }
+
+    pub fn email(&self) -> anyhow::Result<&str> {
+        self.inner
+            .config
+            .email
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("failed to find email address in config"))
+    }
+
+    pub fn base_url(&self) -> String {
+        self.inner.config.base_url()
+    }
+
+    pub fn pinentry(&self) -> &str {
+        &self.inner.config.pinentry
+    }
+
+    pub fn notifications_url(&self) -> String {
+        self.inner.config.notifications_url()
+    }
+
+    pub fn server_name(&self) -> String {
+        self.inner.config.server_name()
+    }
+
+    pub fn confirm_ssh(&self) -> bool {
+        self.inner.config.confirm_ssh.is_some_and(|o| o)
     }
 }

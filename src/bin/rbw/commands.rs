@@ -343,6 +343,7 @@ pub fn config_show() -> anyhow::Result<()> {
     Ok(())
 }
 
+// TODO: Make this a Config method
 pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
     let mut config = rbw::config::Config::load().unwrap_or_else(|_| rbw::config::Config::new());
     match key {

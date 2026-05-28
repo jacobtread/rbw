@@ -113,7 +113,7 @@ async fn handle_request(
     let (action, environment) = req.into_parts();
     let set_timeout = match &action {
         rbw::protocol::Action::Register => {
-            crate::actions::register(sock, &environment).await?;
+            crate::actions::register(sock, state.clone(), &environment).await?;
             true
         }
         rbw::protocol::Action::Login => {

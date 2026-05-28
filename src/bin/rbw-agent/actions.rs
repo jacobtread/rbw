@@ -6,29 +6,24 @@ use sha2::Digest as _;
 use tokio::sync::Mutex;
 
 async fn getpin(
+    pinentry: &str,
     desc: &str,
     prompt: &str,
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
     grab: bool,
 ) -> anyhow::Result<rbw::locked::Password> {
-    Ok(rbw::pinentry::getpin(
-        &config_pinentry().await?,
-        prompt,
-        desc,
-        err.as_deref(),
-        environment,
-        grab,
-    )
-    .await?)
+    Ok(rbw::pinentry::getpin(pinentry, prompt, desc, err.as_deref(), environment, grab).await?)
 }
 
 async fn get_client_id(
+    pinentry: &str,
     host: &str,
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
     getpin(
+        pinentry,
         "API key client__id",
         &format!("Log in to {host}"),
         err,
@@ -40,11 +35,13 @@ async fn get_client_id(
 }
 
 async fn get_client_secret(
+    pinentry: &str,
     host: &str,
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
     getpin(
+        pinentry,
         "API key client__secret",
         &format!("Log in to {host}"),
         err,
@@ -55,8 +52,8 @@ async fn get_client_secret(
     .context("failed to read client_secret from pinentry")
 }
 
-async fn get_host() -> anyhow::Result<String> {
-    let url_str = config_base_url().await?;
+fn get_host(state: &crate::state::State) -> anyhow::Result<String> {
+    let url_str = state.base_url();
     let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
     let Some(host) = url.host_str() else {
         return Err(anyhow::anyhow!(
@@ -69,23 +66,38 @@ async fn get_host() -> anyhow::Result<String> {
 
 pub async fn register(
     sock: &mut crate::sock::Sock,
+    state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
-    let db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
+    let db = {
+        let guard = state.lock().await;
+        load_db(&guard).await.unwrap_or_else(|_| rbw::db::Db::new())
+    };
 
     if !db.needs_login() {
         return respond_ack(sock).await;
     }
 
-    let host = get_host().await?;
+    let host = {
+        let guard = state.lock().await;
+        get_host(&guard)?
+    };
 
-    let email = config_email().await?;
+    let email = {
+        let guard = state.lock().await;
+        guard.email()?.to_string()
+    };
+
+    let pinentry = {
+        let guard = state.lock().await;
+        guard.pinentry().to_string()
+    };
 
     let mut err_msg = None;
     for i in 1_u8..=3 {
         let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-        let client_id = get_client_id(&host, &err, environment).await?;
-        let client_secret = get_client_secret(&host, &err, environment).await?;
+        let client_id = get_client_id(&pinentry, &host, &err, environment).await?;
+        let client_secret = get_client_secret(&pinentry, &host, &err, environment).await?;
 
         let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
 
@@ -106,17 +118,19 @@ pub async fn register(
 }
 
 async fn get_password(
+    pinentry: &str,
     desc: &str,
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
-    getpin("Master Password", desc, err, environment, true)
+    getpin(pinentry, "Master Password", desc, err, environment, true)
         .await
         .context("failed to read password from pinentry")
 }
 
 async fn two_factor_required(
     state: &Arc<Mutex<crate::state::State>>,
+    pinentry: &str,
     email: &str,
     password: rbw::locked::Password,
     providers: Vec<rbw::api::TwoFactorProviderType>,
@@ -142,7 +156,7 @@ async fn two_factor_required(
         }
     }
 
-    let creds = two_factor(environment, email, password.clone(), provider).await?;
+    let creds = two_factor(pinentry, environment, email, password.clone(), provider).await?;
 
     login_success(state.clone(), creds, password, db, email).await
 }
@@ -152,23 +166,37 @@ pub async fn login(
     state: Arc<Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
-    let mut db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
+    let mut db = {
+        let guard = state.lock().await;
+        load_db(&guard).await.unwrap_or_else(|_| rbw::db::Db::new())
+    };
 
     if !db.needs_login() {
         return respond_ack(sock).await;
     }
 
-    let host = get_host().await?;
+    let host = {
+        let guard = state.lock().await;
+        get_host(&guard)?
+    };
 
-    let email = config_email().await?;
+    let email = {
+        let guard = state.lock().await;
+        guard.email()?.to_string()
+    };
 
+    let pinentry = {
+        let guard = state.lock().await;
+        guard.pinentry().to_string()
+    };
     let mut err_msg = None;
     for i in 1_u8..=3 {
         let err = err_msg
             .as_deref()
             .map(|msg| format!("{msg} (attempt {i}/3)"));
 
-        let password = get_password(&format!("Log in to {host}"), &err, environment).await?;
+        let password =
+            get_password(&pinentry, &format!("Log in to {host}"), &err, environment).await?;
 
         match rbw::actions::login(&email, password.clone(), None, None).await {
             Ok(creds) => {
@@ -182,6 +210,7 @@ pub async fn login(
             }) => {
                 two_factor_required(
                     &state,
+                    &pinentry,
                     &email,
                     password,
                     providers,
@@ -206,11 +235,13 @@ pub async fn login(
 }
 
 async fn get_code(
+    pinentry: &str,
     provider: rbw::api::TwoFactorProviderType,
     err: &Option<String>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<rbw::locked::Password> {
     getpin(
+        pinentry,
         provider.header(),
         provider.message(),
         err,
@@ -222,6 +253,7 @@ async fn get_code(
 }
 
 async fn two_factor(
+    pinentry: &str,
     environment: &rbw::protocol::Environment,
     email: &str,
     password: rbw::locked::Password,
@@ -231,7 +263,7 @@ async fn two_factor(
     for i in 1_u8..=3 {
         let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
 
-        let code = get_code(provider, &err, environment).await?;
+        let code = get_code(pinentry, provider, &err, environment).await?;
         let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
 
         match rbw::actions::login(email, password.clone(), Some(code), Some(provider)).await {
@@ -259,11 +291,17 @@ async fn login_success(
 ) -> anyhow::Result<()> {
     db.apply_session_parameters(&creds);
 
-    save_db(db).await?;
+    {
+        let guard = state.lock().await;
+        save_db(&guard, db).await?;
+    }
 
     sync(None, state.clone()).await?;
 
-    let db = load_db().await?;
+    let db = {
+        let guard = state.lock().await;
+        load_db(&guard).await?
+    };
 
     let Some(protected_private_key) = db.protected_private_key else {
         return Err(anyhow::anyhow!(
@@ -297,7 +335,12 @@ async fn unlock_state(
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
     if state.lock().await.needs_unlock() {
-        let db = load_db().await?;
+        let (db, email) = {
+            let guard = state.lock().await;
+            let db = load_db(&guard).await?;
+            let email = guard.email()?.to_string();
+            (db, email)
+        };
 
         let crypto_params = db.get_crypto_parameters()?;
 
@@ -311,13 +354,13 @@ async fn unlock_state(
             ));
         };
 
-        let email = config_email().await?;
-
+        let pinentry = state.lock().await.pinentry().to_string();
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
 
             let password = get_password(
+                &pinentry,
                 &format!("Unlock the local database for '{}'", rbw::dirs::profile()),
                 &err,
                 environment,
@@ -398,7 +441,10 @@ pub async fn sync(
     sock: Option<&mut crate::sock::Sock>,
     state: Arc<Mutex<crate::state::State>>,
 ) -> anyhow::Result<()> {
-    let mut db = load_db().await?;
+    let mut db = {
+        let guard = state.lock().await;
+        load_db(&guard).await?
+    };
 
     let Some(access_token) = &db.access_token else {
         anyhow::bail!("failed to find access token in db");
@@ -421,7 +467,10 @@ pub async fn sync(
     db.protected_org_keys = protected_org_keys;
     db.entries = entries;
 
-    save_db(&db).await?;
+    {
+        let guard = state.lock().await;
+        save_db(&guard, &db).await?;
+    }
 
     if let Err(e) = subscribe_to_notifications(state.clone()).await {
         eprintln!("failed to subscribe to notifications: {e}");
@@ -463,7 +512,7 @@ async fn maybe_reprompt_password(
         .master_password_reprompt
         .contains(&master_password_reprompt)
     {
-        let db = load_db().await?;
+        let db = load_db(state).await?;
 
         let crypto_params = db.get_crypto_parameters()?;
 
@@ -477,14 +526,16 @@ async fn maybe_reprompt_password(
             ));
         };
 
-        let email = config_email().await?;
+        let email = state.email()?;
 
+        let pinentry = state.pinentry().to_string();
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
 
             // TODO: Remember somewhere that only GUI pinentry work, since this is a daemon.
             let password = get_password(
+                &pinentry,
                 "Accessing this entry requires the master password",
                 &err,
                 environment,
@@ -523,7 +574,7 @@ async fn decrypt_cipher(
     let mut state = state.lock().await;
 
     if !state.master_password_reprompt_initialized() {
-        let db = load_db().await?;
+        let db = load_db(&state).await?;
         state.set_master_password_reprompt(&db.entries);
     }
 
@@ -647,43 +698,18 @@ async fn respond_encrypt(sock: &mut crate::sock::Sock, cipherstring: String) -> 
     Ok(())
 }
 
-async fn config_email() -> anyhow::Result<String> {
-    let config = rbw::config::Config::load_async().await?;
-    config
-        .email
-        .ok_or(anyhow::anyhow!("failed to find email address in config"))
+async fn load_db(state: &crate::state::State) -> anyhow::Result<rbw::db::Db> {
+    let email = state.email()?;
+    rbw::db::Db::load_async(&state.server_name(), email)
+        .await
+        .map_err(anyhow::Error::new)
 }
 
-async fn load_db() -> anyhow::Result<rbw::db::Db> {
-    let config = rbw::config::Config::load_async().await?;
-    if let Some(email) = &config.email {
-        rbw::db::Db::load_async(&config.server_name(), email)
-            .await
-            .map_err(anyhow::Error::new)
-    } else {
-        Err(anyhow::anyhow!("failed to find email address in config"))
-    }
-}
-
-async fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {
-    let config = rbw::config::Config::load_async().await?;
-    if let Some(email) = &config.email {
-        db.save_async(&config.server_name(), email)
-            .await
-            .map_err(anyhow::Error::new)
-    } else {
-        Err(anyhow::anyhow!("failed to find email address in config"))
-    }
-}
-
-async fn config_base_url() -> anyhow::Result<String> {
-    let config = rbw::config::Config::load_async().await?;
-    Ok(config.base_url())
-}
-
-async fn config_pinentry() -> anyhow::Result<String> {
-    let config = rbw::config::Config::load_async().await?;
-    Ok(config.pinentry)
+async fn save_db(state: &crate::state::State, db: &rbw::db::Db) -> anyhow::Result<()> {
+    let email = state.email()?;
+    db.save_async(&state.server_name(), email)
+        .await
+        .map_err(anyhow::Error::new)
 }
 
 pub async fn subscribe_to_notifications(
@@ -693,19 +719,18 @@ pub async fn subscribe_to_notifications(
         return Ok(());
     }
 
-    let config = rbw::config::Config::load_async()
-        .await
-        .context("Config is missing")?;
-    let email = config.email.clone().context("Config is missing email")?;
-    let db = rbw::db::Db::load_async(config.server_name().as_str(), &email).await?;
+    let (email, server_name, notifications_url) = {
+        let guard = state.lock().await;
+        let email = guard.email()?.to_string();
+        let server_name = guard.server_name();
+        let notifications_url = guard.notifications_url();
+        (email, server_name, notifications_url)
+    };
+    let db = rbw::db::Db::load_async(&server_name, &email).await?;
     let access_token = db.access_token.context("Error getting access token")?;
 
-    let websocket_url = format!(
-        "{}/hub?access_token={}",
-        config.notifications_url(),
-        access_token
-    )
-    .replace("https://", "wss://");
+    let websocket_url = format!("{}/hub?access_token={}", notifications_url, access_token)
+        .replace("https://", "wss://");
 
     let mut state = state.lock().await;
     state
@@ -727,7 +752,10 @@ pub async fn get_ssh_public_keys(
 
     unlock_state(state.clone(), &environment).await?;
 
-    let db = load_db().await?;
+    let db = {
+        let guard = state.lock().await;
+        load_db(&guard).await?
+    };
     let mut pubkeys = Vec::new();
 
     for entry in db.entries {
@@ -766,7 +794,10 @@ pub async fn find_ssh_private_key(
 
     let request_bytes = request_public_key.to_bytes();
 
-    let db = load_db().await?;
+    let db = {
+        let guard = state.lock().await;
+        load_db(&guard).await?
+    };
 
     for entry in db.entries {
         let rbw::db::EntryData::SshKey {

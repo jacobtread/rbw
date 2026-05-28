@@ -6,16 +6,6 @@ use tokio::sync::Mutex;
 const SSH_AGENT_RSA_SHA2_256: u32 = 2;
 const SSH_AGENT_RSA_SHA2_512: u32 = 4;
 
-async fn config_pinentry() -> anyhow::Result<String> {
-    let config = rbw::config::Config::load_async().await?;
-    Ok(config.pinentry)
-}
-
-async fn config_confirm_ssh() -> anyhow::Result<bool> {
-    let config = rbw::config::Config::load_async().await?;
-    Ok(config.confirm_ssh.is_some_and(|o| o))
-}
-
 #[derive(Clone)]
 pub struct SshAgent {
     state: Arc<Mutex<crate::state::State>>,
@@ -68,19 +58,20 @@ impl ssh_agent_lib::agent::Session for SshAgent {
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
 
-        if config_confirm_ssh().await.map_err(|_| {
-            ssh_agent_lib::error::AgentError::Other("Unable to load configuration".into())
-        })? {
-            let confirmed = rbw::pinentry::confirm(
-                &config_pinentry()
-                    .await
-                    .map_err(|_| ssh_agent_lib::error::AgentError::Failure)?,
-                "Allow SSH key use?",
-                &self.state.lock().await.last_environment,
-                true,
+        let (confirm_ssh, pinentry, last_environment) = {
+            let guard = self.state.lock().await;
+            (
+                guard.confirm_ssh(),
+                guard.pinentry().to_string(),
+                guard.last_environment().clone(),
             )
-            .await
-            .map_err(|_| ssh_agent_lib::error::AgentError::Failure)?;
+        };
+
+        if confirm_ssh {
+            let confirmed =
+                rbw::pinentry::confirm(&pinentry, "Allow SSH key use?", &last_environment, true)
+                    .await
+                    .map_err(|_| ssh_agent_lib::error::AgentError::Failure)?;
 
             if !confirmed {
                 return Err(ssh_agent_lib::error::AgentError::Other(

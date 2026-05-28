@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Context as _;
 
 mod actions;
@@ -26,7 +28,7 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
         sync_timeout.set(sync_timeout_duration);
     }
     let notifications_handler = crate::notifications::NotificationsHandler::new();
-    let state = std::sync::Arc::new(tokio::sync::Mutex::new(crate::state::State {
+    let state = Arc::new(tokio::sync::Mutex::new(crate::state::State {
         priv_key: None,
         org_keys: None,
         timeout,
@@ -37,6 +39,7 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
         master_password_reprompt: std::collections::HashSet::new(),
         master_password_reprompt_initialized: false,
         last_environment: rbw::protocol::Environment::default(),
+        inner: Arc::new(crate::state::InnerState { config }),
         #[cfg(feature = "clipboard")]
         clipboard: arboard::Clipboard::new()
             .inspect_err(|e| {
