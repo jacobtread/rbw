@@ -1,24 +1,22 @@
-use std::sync::Arc;
-
 use anyhow::Context as _;
 use futures_util::StreamExt as _;
 use tokio::{
     net::{UnixListener, UnixStream},
-    sync::{mpsc::UnboundedReceiver, Mutex},
+    sync::mpsc::UnboundedReceiver,
 };
 use tokio_stream::wrappers::{UnboundedReceiverStream, UnixListenerStream};
 
 pub struct Agent {
     timer_r: UnboundedReceiver<()>,
     sync_timer_r: UnboundedReceiver<()>,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
 }
 
 impl Agent {
     pub fn new(
         timer_r: UnboundedReceiver<()>,
         sync_timer_r: UnboundedReceiver<()>,
-        state: Arc<Mutex<crate::state::State>>,
+        state: crate::state::State,
     ) -> Self {
         Self {
             timer_r,
@@ -34,14 +32,7 @@ impl Agent {
             Sync(()),
         }
 
-        let notifications = self
-            .state
-            .lock()
-            .await
-            .notifications_handler()
-            .await
-            .get_channel()
-            .await;
+        let notifications = self.state.notifications_handler().await.get_channel().await;
         let notifications = UnboundedReceiverStream::new(notifications)
             .map(|message| match message {
                 crate::notifications::Message::Logout => Event::Timeout(()),
@@ -61,13 +52,16 @@ impl Agent {
                 .boxed(),
             notifications,
         ]);
+
         while let Some(event) = stream.next().await {
             match event {
                 Event::Request(res) => {
                     let mut sock = crate::sock::Sock::new(
                         res.context("failed to accept incoming connection")?,
                     );
+
                     let state = self.state.clone();
+
                     tokio::spawn(async move {
                         let res = handle_request(&mut sock, state.clone()).await;
                         if let Err(e) = res {
@@ -80,28 +74,29 @@ impl Agent {
                     });
                 }
                 Event::Timeout(()) => {
-                    self.state.lock().await.clear().await;
+                    self.state.clear().await;
                 }
                 Event::Sync(()) => {
                     let state = self.state.clone();
                     tokio::spawn(async move {
                         // this could fail if we aren't logged in, but we
                         // don't care about that
-                        if let Err(e) = crate::actions::sync(None, state.clone()).await {
+                        if let Err(e) = crate::actions::sync(None, state).await {
                             eprintln!("failed to sync: {e:#}");
                         }
                     });
-                    self.state.lock().await.set_sync_timeout();
+                    self.state.set_sync_timeout();
                 }
             }
         }
+
         Ok(())
     }
 }
 
 async fn handle_request(
     sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
 ) -> anyhow::Result<()> {
     let req = sock.recv().await?;
     let req = match req {
@@ -122,7 +117,7 @@ async fn handle_request(
             true
         }
         rbw::protocol::Action::Unlock => {
-            crate::actions::unlock(sock, state.clone(), &environment).await?;
+            crate::actions::unlock(sock, &state, &environment).await?;
             true
         }
         rbw::protocol::Action::CheckLock => {
@@ -167,8 +162,6 @@ async fn handle_request(
             false
         }
     };
-
-    let state = state.lock().await;
 
     state.set_last_environment(environment).await;
 

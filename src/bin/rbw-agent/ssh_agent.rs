@@ -1,18 +1,15 @@
-use std::sync::Arc;
-
 use signature::{RandomizedSigner as _, SignatureEncoding as _, Signer as _};
-use tokio::sync::Mutex;
 
 const SSH_AGENT_RSA_SHA2_256: u32 = 2;
 const SSH_AGENT_RSA_SHA2_512: u32 = 4;
 
 #[derive(Clone)]
 pub struct SshAgent {
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
 }
 
 impl SshAgent {
-    pub fn new(state: Arc<Mutex<crate::state::State>>) -> Self {
+    pub fn new(state: crate::state::State) -> Self {
         Self { state }
     }
 
@@ -59,11 +56,10 @@ impl ssh_agent_lib::agent::Session for SshAgent {
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
 
         let (confirm_ssh, pinentry, last_environment) = {
-            let state = self.state.lock().await;
-            let le = state.last_environment().await;
+            let le = self.state.last_environment().await;
             (
-                state.confirm_ssh(),
-                state.pinentry().to_string(),
+                self.state.confirm_ssh(),
+                self.state.pinentry().to_string(),
                 le.clone(),
             )
         };

@@ -38,11 +38,54 @@ pub struct InnerState {
     pub clipboard: Mutex<Option<arboard::Clipboard>>,
 }
 
+#[derive(Clone)]
 pub struct State {
     pub inner: Arc<InnerState>,
 }
 
 impl State {
+    pub fn new(
+        config: rbw::config::Config,
+        timeout: crate::timeout::Timeout,
+        sync_timeout: crate::timeout::Timeout,
+    ) -> Self {
+        let notifications_handler = crate::notifications::NotificationsHandler::new();
+
+        let timeout_duration = std::time::Duration::from_secs(config.lock_timeout);
+
+        let sync_timeout_duration = std::time::Duration::from_secs(config.sync_interval);
+
+        if sync_timeout_duration > std::time::Duration::ZERO {
+            sync_timeout.set(sync_timeout_duration);
+        }
+
+        let state = crate::state::State {
+            inner: Arc::new(crate::state::InnerState {
+                priv_key: RwLock::new(None),
+                org_keys: RwLock::new(None),
+                notifications_handler: RwLock::new(notifications_handler),
+                timeout,
+                timeout_duration,
+                sync_timeout,
+                sync_timeout_duration,
+                master_password_reprompt: RwLock::new(std::collections::HashSet::new()),
+                master_password_reprompt_initialized: AtomicBool::new(false),
+                config,
+                last_environment: RwLock::new(rbw::protocol::Environment::default()),
+
+                #[cfg(feature = "clipboard")]
+                clipboard: Mutex::new(
+                    arboard::Clipboard::new()
+                        .inspect_err(|e| {
+                            log::warn!("couldn't create clipboard context: {e}");
+                        })
+                        .ok(),
+                ),
+            }),
+        };
+
+        state
+    }
     pub async fn key(&self, org_id: Option<&str>) -> Option<Arc<rbw::locked::Keys>> {
         match org_id {
             Some(id) => self
@@ -85,7 +128,7 @@ impl State {
         self.inner.notifications_handler.write().await
     }
 
-    pub async fn clear(&mut self) {
+    pub async fn clear(&self) {
         *self.inner.priv_key.write().await = None;
         *self.inner.org_keys.write().await = None;
         self.inner.timeout.clear();

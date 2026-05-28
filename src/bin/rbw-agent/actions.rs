@@ -1,9 +1,6 @@
-use std::sync::Arc;
-
 use anyhow::Context as _;
 use rbw::actions::SessionParameters;
 use sha2::Digest as _;
-use tokio::sync::Mutex;
 
 async fn getpin(
     pinentry: &str,
@@ -66,32 +63,20 @@ fn get_host(state: &crate::state::State) -> anyhow::Result<String> {
 
 pub async fn register(
     sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
-    let db = {
-        let guard = state.lock().await;
-        load_db(&guard).await.unwrap_or_else(|_| rbw::db::Db::new())
-    };
+    let db = load_db(&state).await.unwrap_or_else(|_| rbw::db::Db::new());
 
     if !db.needs_login() {
         return respond_ack(sock).await;
     }
 
-    let host = {
-        let guard = state.lock().await;
-        get_host(&guard)?
-    };
+    let host = get_host(&state)?;
 
-    let email = {
-        let guard = state.lock().await;
-        guard.email()?.to_string()
-    };
+    let email = state.email()?.to_string();
 
-    let pinentry = {
-        let guard = state.lock().await;
-        guard.pinentry().to_string()
-    };
+    let pinentry = state.pinentry().to_string();
 
     let mut err_msg = None;
     for i in 1_u8..=3 {
@@ -129,7 +114,7 @@ async fn get_password(
 }
 
 async fn two_factor_required(
-    state: &Arc<Mutex<crate::state::State>>,
+    state: &crate::state::State,
     pinentry: &str,
     email: &str,
     password: rbw::locked::Password,
@@ -163,32 +148,21 @@ async fn two_factor_required(
 
 pub async fn login(
     sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
-    let mut db = {
-        let guard = state.lock().await;
-        load_db(&guard).await.unwrap_or_else(|_| rbw::db::Db::new())
-    };
+    let mut db = load_db(&state).await.unwrap_or_else(|_| rbw::db::Db::new());
 
     if !db.needs_login() {
         return respond_ack(sock).await;
     }
 
-    let host = {
-        let guard = state.lock().await;
-        get_host(&guard)?
-    };
+    let host = get_host(&state)?;
 
-    let email = {
-        let guard = state.lock().await;
-        guard.email()?.to_string()
-    };
+    let email = state.email()?.to_string();
 
-    let pinentry = {
-        let guard = state.lock().await;
-        guard.pinentry().to_string()
-    };
+    let pinentry = state.pinentry().to_string();
+
     let mut err_msg = None;
     for i in 1_u8..=3 {
         let err = err_msg
@@ -283,7 +257,7 @@ async fn two_factor(
 }
 
 async fn login_success(
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
     creds: SessionParameters,
     password: rbw::locked::Password,
     db: &mut rbw::db::Db,
@@ -291,17 +265,11 @@ async fn login_success(
 ) -> anyhow::Result<()> {
     db.apply_session_parameters(&creds);
 
-    {
-        let guard = state.lock().await;
-        save_db(&guard, db).await?;
-    }
+    save_db(&state, db).await?;
 
     sync(None, state.clone()).await?;
 
-    let db = {
-        let guard = state.lock().await;
-        load_db(&guard).await?
-    };
+    let db = load_db(&state).await?;
 
     let Some(protected_private_key) = db.protected_private_key else {
         return Err(anyhow::anyhow!(
@@ -320,7 +288,6 @@ async fn login_success(
 
     match res {
         Ok((keys, org_keys)) => {
-            let state = state.lock().await;
             state.set_priv_key(keys).await;
             state.set_org_keys(org_keys).await;
         }
@@ -331,14 +298,13 @@ async fn login_success(
 }
 
 async fn unlock_state(
-    state: Arc<Mutex<crate::state::State>>,
+    state: &crate::state::State,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
-    if state.lock().await.needs_unlock().await {
+    if state.needs_unlock().await {
         let (db, email) = {
-            let guard = state.lock().await;
-            let db = load_db(&guard).await?;
-            let email = guard.email()?.to_string();
+            let db = load_db(&state).await?;
+            let email = state.email()?.to_string();
             (db, email)
         };
 
@@ -354,7 +320,7 @@ async fn unlock_state(
             ));
         };
 
-        let pinentry = state.lock().await.pinentry().to_string();
+        let pinentry = state.pinentry().to_string();
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -392,7 +358,7 @@ async fn unlock_state(
 
 pub async fn unlock(
     sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
+    state: &crate::state::State,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
     unlock_state(state, environment).await?;
@@ -403,21 +369,18 @@ pub async fn unlock(
 }
 
 async fn unlock_success(
-    state: Arc<Mutex<crate::state::State>>,
+    state: &crate::state::State,
     keys: rbw::locked::Keys,
     org_keys: std::collections::HashMap<String, rbw::locked::Keys>,
 ) -> anyhow::Result<()> {
-    let state = state.lock().await;
     state.set_priv_key(keys).await;
     state.set_org_keys(org_keys).await;
+
     Ok(())
 }
 
-pub async fn lock(
-    sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
-) -> anyhow::Result<()> {
-    state.lock().await.clear().await;
+pub async fn lock(sock: &mut crate::sock::Sock, state: crate::state::State) -> anyhow::Result<()> {
+    state.clear().await;
 
     respond_ack(sock).await?;
 
@@ -426,9 +389,9 @@ pub async fn lock(
 
 pub async fn check_lock(
     sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
 ) -> anyhow::Result<()> {
-    if state.lock().await.needs_unlock().await {
+    if state.needs_unlock().await {
         return Err(anyhow::anyhow!("agent is locked"));
     }
 
@@ -439,12 +402,9 @@ pub async fn check_lock(
 
 pub async fn sync(
     sock: Option<&mut crate::sock::Sock>,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
 ) -> anyhow::Result<()> {
-    let mut db = {
-        let guard = state.lock().await;
-        load_db(&guard).await?
-    };
+    let mut db = load_db(&state).await?;
 
     let Some(access_token) = &db.access_token else {
         anyhow::bail!("failed to find access token in db");
@@ -458,11 +418,8 @@ pub async fn sync(
         rbw::actions::sync(access_token, refresh_token)
             .await
             .context("failed to sync database from server")?;
-    state
-        .lock()
-        .await
-        .set_master_password_reprompt(&entries)
-        .await;
+
+    state.set_master_password_reprompt(&entries).await;
 
     db.update_access_token(access_token);
 
@@ -471,10 +428,7 @@ pub async fn sync(
     db.protected_org_keys = protected_org_keys;
     db.entries = entries;
 
-    {
-        let guard = state.lock().await;
-        save_db(&guard, &db).await?;
-    }
+    save_db(&state, &db).await?;
 
     if let Err(e) = subscribe_to_notifications(state.clone()).await {
         eprintln!("failed to subscribe to notifications: {e}");
@@ -572,14 +526,12 @@ async fn maybe_reprompt_password(
 }
 
 async fn decrypt_cipher(
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
     environment: &rbw::protocol::Environment,
     cipherstring: &str,
     entry_key: Option<&str>,
     org_id: Option<&str>,
 ) -> anyhow::Result<String> {
-    let state = state.lock().await;
-
     if !state.master_password_reprompt_initialized() {
         let db = load_db(&state).await?;
         state.set_master_password_reprompt(&db.entries).await;
@@ -610,7 +562,7 @@ async fn decrypt_cipher(
 
 pub async fn decrypt(
     sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
     environment: &rbw::protocol::Environment,
     cipherstring: &str,
     entry_key: Option<&str>,
@@ -624,16 +576,16 @@ pub async fn decrypt(
 
 pub async fn encrypt(
     sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
     plaintext: &str,
     org_id: Option<&str>,
 ) -> anyhow::Result<()> {
-    let state = state.lock().await;
     let Some(keys) = state.key(org_id).await else {
         return Err(anyhow::anyhow!(
             "failed to find encryption keys in in-memory state"
         ));
     };
+
     let cipherstring =
         rbw::cipherstring::CipherString::encrypt_symmetric(keys.as_ref(), plaintext.as_bytes())
             .context("failed to encrypt plaintext secret")?;
@@ -646,10 +598,9 @@ pub async fn encrypt(
 #[cfg(feature = "clipboard")]
 pub async fn clipboard_store(
     sock: &mut crate::sock::Sock,
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
     text: &str,
 ) -> anyhow::Result<()> {
-    let state = state.lock().await;
     if let Some(clipboard) = &mut (*state.clipboard_mut().await) {
         clipboard
             .set_text(text)
@@ -665,7 +616,7 @@ pub async fn clipboard_store(
 
 pub async fn clipboard_store(
     sock: &mut crate::sock::Sock,
-    _state: Arc<Mutex<crate::state::State>>,
+    _state: crate::state::State,
     _text: &str,
 ) -> anyhow::Result<()> {
     sock.send(&rbw::protocol::Response::Error {
@@ -719,33 +670,24 @@ async fn save_db(state: &crate::state::State, db: &rbw::db::Db) -> anyhow::Resul
         .map_err(anyhow::Error::new)
 }
 
-pub async fn subscribe_to_notifications(
-    state: Arc<Mutex<crate::state::State>>,
-) -> anyhow::Result<()> {
-    if state
-        .lock()
-        .await
-        .notifications_handler()
-        .await
-        .is_connected()
-    {
+pub async fn subscribe_to_notifications(state: crate::state::State) -> anyhow::Result<()> {
+    if state.notifications_handler().await.is_connected() {
         return Ok(());
     }
 
     let (email, server_name, notifications_url) = {
-        let guard = state.lock().await;
-        let email = guard.email()?.to_string();
-        let server_name = guard.server_name();
-        let notifications_url = guard.notifications_url();
+        let email = state.email()?.to_string();
+        let server_name = state.server_name();
+        let notifications_url = state.notifications_url();
         (email, server_name, notifications_url)
     };
+
     let db = rbw::db::Db::load_async(&server_name, &email).await?;
     let access_token = db.access_token.context("Error getting access token")?;
 
     let websocket_url = format!("{}/hub?access_token={}", notifications_url, access_token)
         .replace("https://", "wss://");
 
-    let state = state.lock().await;
     let mut nh = state.notifications_handler_mut().await;
 
     nh.connect(websocket_url)
@@ -754,22 +696,17 @@ pub async fn subscribe_to_notifications(
         .map_or_else(|| Ok(()), |err| Err(anyhow::anyhow!(err.to_string())))
 }
 
-pub async fn get_ssh_public_keys(
-    state: Arc<Mutex<crate::state::State>>,
-) -> anyhow::Result<Vec<String>> {
+pub async fn get_ssh_public_keys(state: crate::state::State) -> anyhow::Result<Vec<String>> {
     let environment = {
-        let state = state.lock().await;
         let le = state.last_environment().await;
         state.set_timeout();
         le.clone()
     };
 
-    unlock_state(state.clone(), &environment).await?;
+    unlock_state(&state, &environment).await?;
 
-    let db = {
-        let guard = state.lock().await;
-        load_db(&guard).await?
-    };
+    let db = load_db(&state).await?;
+
     let mut pubkeys = Vec::new();
 
     for entry in db.entries {
@@ -795,24 +732,20 @@ pub async fn get_ssh_public_keys(
 }
 
 pub async fn find_ssh_private_key(
-    state: Arc<Mutex<crate::state::State>>,
+    state: crate::state::State,
     request_public_key: ssh_agent_lib::ssh_key::PublicKey,
 ) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
     let environment = {
-        let state = state.lock().await;
         let le = state.last_environment().await;
         state.set_timeout();
         le.clone()
     };
 
-    unlock_state(state.clone(), &environment).await?;
+    unlock_state(&state, &environment).await?;
 
     let request_bytes = request_public_key.to_bytes();
 
-    let db = {
-        let guard = state.lock().await;
-        load_db(&guard).await?
-    };
+    let db = load_db(&state).await?;
 
     for entry in db.entries {
         let rbw::db::EntryData::SshKey {
