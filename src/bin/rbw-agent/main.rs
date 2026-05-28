@@ -1,6 +1,8 @@
 use std::sync::{atomic::AtomicBool, Arc};
 
 use anyhow::Context as _;
+#[cfg(feature = "clipboard")]
+use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
 mod actions;
@@ -29,7 +31,7 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
         sync_timeout.set(sync_timeout_duration);
     }
     let notifications_handler = crate::notifications::NotificationsHandler::new();
-    let state = Arc::new(tokio::sync::Mutex::new(crate::state::State {
+    let state = Arc::new(Mutex::new(crate::state::State {
         inner: Arc::new(crate::state::InnerState {
             priv_key: RwLock::new(None),
             org_keys: RwLock::new(None),
@@ -42,13 +44,16 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
             master_password_reprompt_initialized: AtomicBool::new(false),
             config,
             last_environment: RwLock::new(rbw::protocol::Environment::default()),
+
+            #[cfg(feature = "clipboard")]
+            clipboard: Mutex::new(
+                arboard::Clipboard::new()
+                    .inspect_err(|e| {
+                        log::warn!("couldn't create clipboard context: {e}");
+                    })
+                    .ok(),
+            ),
         }),
-        #[cfg(feature = "clipboard")]
-        clipboard: arboard::Clipboard::new()
-            .inspect_err(|e| {
-                log::warn!("couldn't create clipboard context: {e}");
-            })
-            .ok(),
     }));
 
     let agent = crate::agent::Agent::new(timer_r, sync_timer_r, state.clone());

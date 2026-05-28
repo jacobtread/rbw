@@ -649,8 +649,8 @@ pub async fn clipboard_store(
     state: Arc<Mutex<crate::state::State>>,
     text: &str,
 ) -> anyhow::Result<()> {
-    let mut state = state.lock().await;
-    if let Some(clipboard) = &mut state.clipboard {
+    let state = state.lock().await;
+    if let Some(clipboard) = &mut (*state.clipboard_mut().await) {
         clipboard
             .set_text(text)
             .map_err(|e| anyhow::anyhow!("couldn't store value to clipboard: {e}"))?;

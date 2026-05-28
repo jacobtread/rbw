@@ -4,6 +4,8 @@ use std::{
 };
 
 use sha2::Digest as _;
+#[cfg(feature = "clipboard")]
+use tokio::sync::Mutex;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::notifications::NotificationsHandler;
@@ -19,10 +21,7 @@ pub struct InnerState {
     pub master_password_reprompt: RwLock<std::collections::HashSet<[u8; 32]>>,
     pub master_password_reprompt_initialized: AtomicBool,
     pub config: rbw::config::Config,
-    pub last_environment: RwLock<rbw::protocol::Environment>,
-}
 
-pub struct State {
     // this is stored here specifically for the use of the ssh agent, because
     // requests made to the ssh agent don't include an environment, and so we
     // can't properly initialize the pinentry process. we work around this by
@@ -33,10 +32,14 @@ pub struct State {
     //
     // we should not use this for any requests on the main agent, those
     // should all send their own environment over.
-    pub inner: Arc<InnerState>,
+    pub last_environment: RwLock<rbw::protocol::Environment>,
 
     #[cfg(feature = "clipboard")]
-    pub clipboard: Option<arboard::Clipboard>,
+    pub clipboard: Mutex<Option<arboard::Clipboard>>,
+}
+
+pub struct State {
+    pub inner: Arc<InnerState>,
 }
 
 impl State {
@@ -211,6 +214,11 @@ impl State {
 
     pub fn server_name(&self) -> String {
         self.inner.config.server_name()
+    }
+
+    #[cfg(feature = "clipboard")]
+    pub async fn clipboard_mut(&self) -> tokio::sync::MutexGuard<'_, Option<arboard::Clipboard>> {
+        self.inner.clipboard.lock().await
     }
 
     pub fn confirm_ssh(&self) -> bool {
