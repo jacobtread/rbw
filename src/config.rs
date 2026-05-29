@@ -60,7 +60,7 @@ pub fn default_confirm_ssh() -> Option<bool> {
     None
 }
 
-const RBW_EU_URL: &str = "https://api.bitwarden.eu";
+const BW_EU_URL: &str = "https://api.bitwarden.eu";
 
 impl Config {
     pub fn new() -> Self {
@@ -145,17 +145,17 @@ impl Config {
     }
 
     fn resolve_url(&self, default: String, eu_default: String, suffix: &str) -> String {
-        self.base_url.clone().map_or_else(
-            || default,
-            |url| {
-                let clean_url = url.trim_end_matches('/');
-                if clean_url == RBW_EU_URL {
+        match &self.base_url {
+            Some(url) => {
+                let url = url.trim_end_matches('/');
+                if url == BW_EU_URL {
                     eu_default
                 } else {
-                    format!("{clean_url}{suffix}")
+                    format!("{url}{suffix}")
                 }
-            },
-        )
+            }
+            None => default,
+        }
     }
 
     pub fn base_url(&self) -> String {
