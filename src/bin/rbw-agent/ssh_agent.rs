@@ -1,4 +1,5 @@
 use signature::{RandomizedSigner as _, SignatureEncoding as _, Signer as _};
+use tokio::net::UnixListener;
 
 const SSH_AGENT_RSA_SHA2_256: u32 = 2;
 const SSH_AGENT_RSA_SHA2_512: u32 = 4;
@@ -18,7 +19,7 @@ impl SshAgent {
 
         let _ = std::fs::remove_file(&socket); // Ignore error if it doesn't exist
 
-        let listener = tokio::net::UnixListener::bind(socket)?;
+        let listener = UnixListener::bind(socket)?;
         ssh_agent_lib::agent::listen(listener, self).await?;
 
         Ok(())

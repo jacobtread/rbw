@@ -1,4 +1,5 @@
 use anyhow::Context as _;
+use tokio::signal::unix::{signal, SignalKind};
 
 mod actions;
 mod agent;
@@ -8,7 +9,6 @@ mod notifications;
 mod sock;
 mod ssh_agent;
 mod state;
-mod timeout;
 
 async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::Result<()> {
     let listener = crate::sock::listen()?;
@@ -18,15 +18,25 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
     }
 
     let config = rbw::config::Config::load()?;
-    let (timeout, timer_r) = crate::timeout::Timeout::new();
-    let (sync_timeout, sync_timer_r) = crate::timeout::Timeout::new();
 
-    let state = crate::state::State::new(config, timeout, sync_timeout);
-    let agent = crate::agent::Agent::new(timer_r, sync_timer_r, state.clone());
+    let state = crate::state::State::new(config);
+    let agent = crate::agent::Agent::new(state.clone());
 
     let ssh_agent = crate::ssh_agent::SshAgent::new(state);
 
-    tokio::try_join!(agent.run(listener), ssh_agent.run())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigint = signal(SignalKind::interrupt())?;
+
+    tokio::select!(
+        _ = agent.run(listener) => {},
+        _ = ssh_agent.run() => {},
+        _ = sigint.recv() => {
+            log::warn!("SIGINT received. Closing the application.");
+        },
+        _ = sigterm.recv() => {
+            log::warn!("SIGTERM received. Closing the application.");
+        }
+    );
 
     Ok(())
 }

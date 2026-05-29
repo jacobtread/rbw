@@ -267,7 +267,7 @@ async fn login_success(
 
     save_db(&state, db).await?;
 
-    sync(None, state.clone()).await?;
+    sync(None, &state).await?;
 
     let db = load_db(&state).await?;
 
@@ -400,7 +400,7 @@ pub async fn check_lock(
 
 pub async fn sync(
     sock: Option<&mut crate::sock::Sock>,
-    state: crate::state::State,
+    state: &crate::state::State,
 ) -> anyhow::Result<()> {
     let mut db = load_db(&state).await?;
 
@@ -697,7 +697,7 @@ pub async fn subscribe_to_notifications(state: crate::state::State) -> anyhow::R
 pub async fn get_ssh_public_keys(state: crate::state::State) -> anyhow::Result<Vec<String>> {
     let environment = {
         let le = state.last_environment().await;
-        state.set_timeout();
+        state.set_timeout().await;
         le.clone()
     };
 
@@ -735,7 +735,7 @@ pub async fn find_ssh_private_key(
 ) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
     let environment = {
         let le = state.last_environment().await;
-        state.set_timeout();
+        state.set_timeout().await;
         le.clone()
     };
 

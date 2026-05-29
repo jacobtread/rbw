@@ -1,12 +1,15 @@
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicBool, Arc},
+    time::Duration,
 };
 
 use sha2::Digest as _;
-#[cfg(feature = "clipboard")]
-use tokio::sync::Mutex;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use tokio::{
+    sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    time::Instant,
+};
 
 use crate::notifications::NotificationsHandler;
 
@@ -14,10 +17,8 @@ pub struct InnerState {
     priv_key: RwLock<Option<Arc<rbw::locked::Keys>>>,
     org_keys: RwLock<Option<std::collections::HashMap<String, Arc<rbw::locked::Keys>>>>,
     notifications_handler: RwLock<NotificationsHandler>,
-    timeout: crate::timeout::Timeout,
-    timeout_duration: std::time::Duration,
-    sync_timeout: crate::timeout::Timeout,
-    sync_timeout_duration: std::time::Duration,
+    pub lock_deadline: Mutex<Option<Instant>>,
+    pub sync_deadline: Mutex<Option<Instant>>,
     pub master_password_reprompt: RwLock<std::collections::HashSet<[u8; 32]>>,
     master_password_reprompt_initialized: AtomicBool,
     config: rbw::config::Config,
@@ -44,19 +45,15 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(
-        config: rbw::config::Config,
-        timeout: crate::timeout::Timeout,
-        sync_timeout: crate::timeout::Timeout,
-    ) -> Self {
+    pub fn new(config: rbw::config::Config) -> Self {
         let notifications_handler = crate::notifications::NotificationsHandler::new();
 
-        let timeout_duration = std::time::Duration::from_secs(config.lock_timeout);
-
+        // TODO: ugly
+        let mut sync_deadline: Option<Instant> = None;
         let sync_timeout_duration = std::time::Duration::from_secs(config.sync_interval);
 
         if sync_timeout_duration > std::time::Duration::ZERO {
-            sync_timeout.set(sync_timeout_duration);
+            sync_deadline = Some(Instant::now() + sync_timeout_duration);
         }
 
         let state = crate::state::State {
@@ -64,10 +61,8 @@ impl State {
                 priv_key: RwLock::new(None),
                 org_keys: RwLock::new(None),
                 notifications_handler: RwLock::new(notifications_handler),
-                timeout,
-                timeout_duration,
-                sync_timeout,
-                sync_timeout_duration,
+                lock_deadline: Mutex::new(None),
+                sync_deadline: Mutex::new(sync_deadline),
                 master_password_reprompt: RwLock::new(std::collections::HashSet::new()),
                 master_password_reprompt_initialized: AtomicBool::new(false),
                 config,
@@ -122,8 +117,9 @@ impl State {
         self.inner.priv_key.read().await.is_none() || self.inner.org_keys.read().await.is_none()
     }
 
-    pub fn set_timeout(&self) {
-        self.inner.timeout.set(self.inner.timeout_duration);
+    pub async fn set_timeout(&self) {
+        *self.inner.lock_deadline.lock().await =
+            Some(Instant::now() + Duration::from_secs(self.inner.config.lock_timeout));
     }
 
     pub async fn notifications_handler(&self) -> RwLockReadGuard<'_, NotificationsHandler> {
@@ -143,13 +139,15 @@ impl State {
             *org_keys_guard = None;
         }
 
-        self.inner.timeout.clear();
+        *self.inner.lock_deadline.lock().await = None;
     }
 
-    pub fn set_sync_timeout(&self) {
-        self.inner
-            .sync_timeout
-            .set(self.inner.sync_timeout_duration);
+    pub async fn set_sync_timeout(&self) {
+        *self.inner.sync_deadline.lock().await =
+            Some(Instant::now() + Duration::from_secs(self.inner.config.sync_interval));
+        // self.inner
+        //     .sync_timeout
+        //     .set(self.inner.sync_timeout_duration);
     }
 
     // the way we structure the client/agent split in rbw makes the master
