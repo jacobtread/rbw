@@ -21,6 +21,7 @@ impl Agent {
     }
 
     pub async fn run(self, listener: UnixListener) -> anyhow::Result<()> {
+        // TODO: Notification stuff is only created after first Sync is issued.
         let mut nchannel = self.state.notifications_handler().await.get_channel().await;
 
         loop {
