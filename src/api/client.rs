@@ -230,7 +230,6 @@ fn sso_query_code(params: &HashMap<String, String>, state: &str) -> Result<Strin
 
     Ok(sso_code.clone())
 }
-
 #[derive(Debug)]
 pub struct Client {
     base_url: String,
