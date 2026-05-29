@@ -13,14 +13,14 @@ use crate::notifications::NotificationsHandler;
 pub struct InnerState {
     priv_key: RwLock<Option<Arc<rbw::locked::Keys>>>,
     org_keys: RwLock<Option<std::collections::HashMap<String, Arc<rbw::locked::Keys>>>>,
-    pub notifications_handler: RwLock<NotificationsHandler>,
-    pub timeout: crate::timeout::Timeout,
-    pub timeout_duration: std::time::Duration,
-    pub sync_timeout: crate::timeout::Timeout,
-    pub sync_timeout_duration: std::time::Duration,
+    notifications_handler: RwLock<NotificationsHandler>,
+    timeout: crate::timeout::Timeout,
+    timeout_duration: std::time::Duration,
+    sync_timeout: crate::timeout::Timeout,
+    sync_timeout_duration: std::time::Duration,
     pub master_password_reprompt: RwLock<std::collections::HashSet<[u8; 32]>>,
-    pub master_password_reprompt_initialized: AtomicBool,
-    pub config: rbw::config::Config,
+    master_password_reprompt_initialized: AtomicBool,
+    config: rbw::config::Config,
 
     // this is stored here specifically for the use of the ssh agent, because
     // requests made to the ssh agent don't include an environment, and so we
