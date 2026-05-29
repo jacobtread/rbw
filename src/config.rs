@@ -60,6 +60,8 @@ pub fn default_confirm_ssh() -> Option<bool> {
     None
 }
 
+const RBW_EU_URL: &str = "https://api.bitwarden.eu";
+
 impl Config {
     pub fn new() -> Self {
         Self::default()
@@ -88,13 +90,12 @@ impl Config {
 
     pub async fn load_async() -> Result<Self> {
         let file = crate::dirs::config_file()?;
-        let mut fh =
-            tokio::fs::File::open(&file)
-                .await
-                .map_err(|source| Error::LoadConfig {
-                    source,
-                    file: file.clone(),
-                })?;
+        let mut fh = tokio::fs::File::open(&file)
+            .await
+            .map_err(|source| Error::LoadConfig {
+                source,
+                file: file.clone(),
+            })?;
         let mut json = String::new();
         fh.read_to_string(&mut json)
             .await
@@ -143,64 +144,54 @@ impl Config {
         Ok(())
     }
 
-    pub fn base_url(&self) -> String {
+    fn resolve_url(&self, default: String, eu_default: String, suffix: &str) -> String {
         self.base_url.clone().map_or_else(
-            || "https://api.bitwarden.com".to_string(),
+            || default,
             |url| {
                 let clean_url = url.trim_end_matches('/');
-                if clean_url == "https://api.bitwarden.eu" {
-                    "https://api.bitwarden.eu".to_string()
+                if clean_url == RBW_EU_URL {
+                    eu_default
                 } else {
-                    format!("{clean_url}/api")
+                    format!("{clean_url}{suffix}")
                 }
             },
         )
     }
 
+    pub fn base_url(&self) -> String {
+        self.resolve_url(
+            "https://api.bitwarden.com".to_string(),
+            "https://api.bitwarden.eu".to_string(),
+            "/api",
+        )
+    }
+
     pub fn identity_url(&self) -> String {
         self.identity_url.clone().unwrap_or_else(|| {
-            self.base_url.clone().map_or_else(
-                || "https://identity.bitwarden.com".to_string(),
-                |url| {
-                    let clean_url = url.trim_end_matches('/');
-                    if clean_url == "https://api.bitwarden.eu" {
-                        "https://identity.bitwarden.eu".to_string()
-                    } else {
-                        format!("{clean_url}/identity")
-                    }
-                },
+            self.resolve_url(
+                "https://identity.bitwarden.com".to_string(),
+                "https://identity.bitwarden.eu".to_string(),
+                "/identity",
             )
         })
     }
 
     pub fn ui_url(&self) -> String {
         self.ui_url.clone().unwrap_or_else(|| {
-            self.base_url.clone().map_or_else(
-                || "https://vault.bitwarden.com".to_string(),
-                |url| {
-                    let clean_url = url.trim_end_matches('/');
-                    if clean_url == "https://api.bitwarden.eu" {
-                        "https://vault.bitwarden.eu".to_string()
-                    } else {
-                        clean_url.to_string()
-                    }
-                },
+            self.resolve_url(
+                "https://vault.bitwarden.com".to_string(),
+                "https://vault.bitwarden.eu".to_string(),
+                "",
             )
         })
     }
 
     pub fn notifications_url(&self) -> String {
         self.notifications_url.clone().unwrap_or_else(|| {
-            self.base_url.clone().map_or_else(
-                || "https://notifications.bitwarden.com".to_string(),
-                |url| {
-                    let clean_url = url.trim_end_matches('/');
-                    if clean_url == "https://api.bitwarden.eu" {
-                        "https://notifications.bitwarden.eu".to_string()
-                    } else {
-                        format!("{clean_url}/notifications")
-                    }
-                },
+            self.resolve_url(
+                "https://notifications.bitwarden.com".to_string(),
+                "https://notifications.bitwarden.eu".to_string(),
+                "/notifications",
             )
         })
     }
