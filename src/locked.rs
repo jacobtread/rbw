@@ -1,21 +1,22 @@
-use zeroize::Zeroize as _;
+use zeroize::Zeroize;
 
 const LEN: usize = 4096;
 
 static REGION_LOCK_WORKS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 pub struct LockedVec {
-    data: Box<arrayvec::ArrayVec<u8, LEN>>,
+    data: Box<([u8; LEN], usize)>,
     _lock: Option<region::LockGuard>,
 }
 
+// TODO: Think about making the memory lock a hard requirement instead
 impl Default for LockedVec {
     fn default() -> Self {
-        let data = Box::new(arrayvec::ArrayVec::<_, LEN>::new());
+        let data = Box::new(([0u8; LEN], 0));
         let lock = match REGION_LOCK_WORKS.get() {
-            Some(true) => Some(region::lock(data.as_ptr(), data.capacity()).unwrap()),
+            Some(true) => Some(region::lock(data.0.as_ptr(), LEN).unwrap()),
             Some(false) => None,
-            None => match region::lock(data.as_ptr(), data.capacity()) {
+            None => match region::lock(data.0.as_ptr(), LEN) {
                 Ok(lock) => {
                     let _ = REGION_LOCK_WORKS.set(true);
                     Some(lock)
@@ -37,31 +38,54 @@ impl LockedVec {
         Self::default()
     }
 
+    pub fn capacity(&self) -> usize {
+        LEN
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.1
+    }
+
     pub fn data(&self) -> &[u8] {
-        self.data.as_slice()
+        &self.data.0[0..self.len()]
     }
 
     pub fn data_mut(&mut self) -> &mut [u8] {
-        self.data.as_mut_slice()
+        let len = self.len();
+        &mut self.data.0[0..len]
     }
 
-    pub fn zero(&mut self) {
-        self.data.zeroize();
-        self.data.extend(std::iter::repeat_n(0, LEN));
+    pub fn push(&mut self, el: u8) {
+        let len = self.len();
+
+        if len == self.capacity() {
+            panic!("Array capacity exceeded");
+        }
+
+        self.data.0[len] = el;
+        self.data.1 += 1;
+    }
+
+    pub fn alloc_all(&mut self) {
+        self.truncate(0);
+        self.extend(std::iter::repeat_n(0, self.capacity()));
     }
 
     pub fn extend(&mut self, it: impl Iterator<Item = u8>) {
-        self.data.extend(it);
+        for el in it {
+            self.push(el);
+        }
     }
 
     pub fn truncate(&mut self, len: usize) {
-        self.data.truncate(len);
+        self.data.1 = usize::min(len, self.len());
+        self.data.0[self.data.1..].zeroize();
     }
 }
 
 impl Drop for LockedVec {
     fn drop(&mut self) {
-        self.zero();
+        self.data.zeroize()
     }
 }
 
