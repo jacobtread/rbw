@@ -4,26 +4,33 @@ use sha2::Digest as _;
 
 use crate::agent::Agent;
 
-async fn getpin(
-    pinentry: &str,
-    desc: &str,
-    prompt: &str,
-    err: &Option<String>,
-    environment: &rbw::protocol::Environment,
-    grab: bool,
-) -> anyhow::Result<rbw::locked::Password> {
-    Ok(rbw::pinentry::getpin(pinentry, prompt, desc, err.as_deref(), environment, grab).await?)
-}
-
 impl Agent {
+    async fn getpin(
+        &self,
+        desc: &str,
+        prompt: &str,
+        err: &Option<String>,
+        environment: &rbw::protocol::Environment,
+        grab: bool,
+    ) -> anyhow::Result<rbw::locked::Password> {
+        Ok(rbw::pinentry::getpin(
+            self.state.config_pinentry(),
+            prompt,
+            desc,
+            err.as_deref(),
+            environment,
+            grab,
+        )
+        .await?)
+    }
+
     async fn get_client_id(
         &self,
         host: &str,
         err: &Option<String>,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<rbw::locked::Password> {
-        getpin(
-            self.state.config_pinentry(),
+        self.getpin(
             "API key client__id",
             &format!("Log in to {host}"),
             err,
@@ -40,8 +47,7 @@ impl Agent {
         err: &Option<String>,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<rbw::locked::Password> {
-        getpin(
-            self.state.config_pinentry(),
+        self.getpin(
             "API key client__secret",
             &format!("Log in to {host}"),
             err,
@@ -111,8 +117,7 @@ impl Agent {
         err: &Option<String>,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<rbw::locked::Password> {
-        getpin(
-            self.state.config_pinentry(),
+        self.getpin(
             provider.header(),
             provider.message(),
             err,
@@ -193,8 +198,7 @@ impl Agent {
         err: &Option<String>,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<rbw::locked::Password> {
-        getpin(
-            self.state.config_pinentry(),
+        self.getpin(
             "Master Password",
             desc,
             err,
