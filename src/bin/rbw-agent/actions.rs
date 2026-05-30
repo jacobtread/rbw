@@ -428,7 +428,7 @@ pub async fn sync(
 
     save_db(&state, &db).await?;
 
-    if let Err(e) = subscribe_to_notifications(state.clone()).await {
+    if let Err(e) = subscribe_to_notifications(&state).await {
         eprintln!("failed to subscribe to notifications: {e}");
     }
 
@@ -668,7 +668,7 @@ async fn save_db(state: &crate::state::State, db: &rbw::db::Db) -> anyhow::Resul
         .map_err(anyhow::Error::new)
 }
 
-pub async fn subscribe_to_notifications(state: crate::state::State) -> anyhow::Result<()> {
+pub async fn subscribe_to_notifications(state: &crate::state::State) -> anyhow::Result<()> {
     if state.notifications_handler().await.is_connected() {
         return Ok(());
     }

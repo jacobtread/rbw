@@ -21,8 +21,16 @@ impl Agent {
     }
 
     pub async fn run(self, listener: UnixListener) -> anyhow::Result<()> {
-        // TODO: Notification stuff is only created after first Sync is issued.
-        let mut nchannel = self.state.notifications_handler().await.get_channel().await;
+        let mut nchannel = self.state.notifications_handler().await.get_channel();
+
+        match crate::actions::subscribe_to_notifications(&self.state).await {
+            Ok(_) => {
+                log::debug!("Successfully subscribed to notifications");
+            }
+            Err(e) => {
+                log::warn!("Failed to subscribe to notifications: {e}");
+            }
+        };
 
         loop {
             let lock_deadline = *self.state.inner.lock_deadline.lock().await;
@@ -30,12 +38,12 @@ impl Agent {
 
             tokio::select! {
                 message = nchannel.recv() => {
-                    match message {
-                        Some(crate::notifications::Message::Logout) => {
+                    match message? {
+                        crate::notifications::Message::Logout => {
                             log::debug!("Received Logout Message via notification channel");
                             self.state.clear().await;
                         },
-                        Some(crate::notifications::Message::Sync) => {
+                        crate::notifications::Message::Sync => {
                             log::debug!("Received Sync Message via notification channel");
                             self.state.set_sync_timeout().await;
 
@@ -43,14 +51,8 @@ impl Agent {
                                 eprintln!("failed to sync: {e:#}");
                             }
                         },
-                        None => {
-                            log::debug!("Notification channel dropped. Recreating it...");
-                            nchannel = self
-                            .state
-                            .notifications_handler()
-                            .await
-                            .get_channel()
-                            .await;
+                        crate::notifications::Message::Disconnected => {
+                            log::warn!("Notifications websocket disconnected");
                         },
                     }
 
