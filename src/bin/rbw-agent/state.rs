@@ -257,7 +257,7 @@ impl State {
         self.inner.config.base_url()
     }
 
-    pub fn pinentry(&self) -> &str {
+    pub fn config_pinentry(&self) -> &str {
         &self.inner.config.pinentry
     }
 

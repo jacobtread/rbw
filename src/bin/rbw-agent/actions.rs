@@ -76,7 +76,7 @@ pub async fn register(
 
     let email = state.email()?.to_string();
 
-    let pinentry = state.pinentry().to_string();
+    let pinentry = state.config_pinentry().to_string();
 
     let mut err_msg = None;
     for i in 1_u8..=3 {
@@ -161,7 +161,7 @@ pub async fn login(
 
     let email = state.email()?.to_string();
 
-    let pinentry = state.pinentry().to_string();
+    let pinentry = state.config_pinentry().to_string();
 
     let mut err_msg = None;
     for i in 1_u8..=3 {
@@ -319,7 +319,7 @@ async fn unlock_state(
             ));
         };
 
-        let pinentry = state.pinentry().to_string();
+        let pinentry = state.config_pinentry().to_string();
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -487,7 +487,7 @@ async fn maybe_reprompt_password(
 
         let email = state.email()?;
 
-        let pinentry = state.pinentry().to_string();
+        let pinentry = state.config_pinentry().to_string();
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));

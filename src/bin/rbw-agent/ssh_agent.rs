@@ -56,20 +56,15 @@ impl ssh_agent_lib::agent::Session for SshAgent {
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
 
-        let (confirm_ssh, pinentry, last_environment) = {
-            let le = self.state.last_environment().await;
-            (
-                self.state.confirm_ssh(),
-                self.state.pinentry().to_string(),
-                le.clone(),
+        if self.state.confirm_ssh() {
+            let confirmed = rbw::pinentry::confirm(
+                &self.state.config_pinentry(),
+                "Allow SSH key use?",
+                &self.state.last_environment().await.clone(),
+                true,
             )
-        };
-
-        if confirm_ssh {
-            let confirmed =
-                rbw::pinentry::confirm(&pinentry, "Allow SSH key use?", &last_environment, true)
-                    .await
-                    .map_err(|_| ssh_agent_lib::error::AgentError::Failure)?;
+            .await
+            .map_err(|_| ssh_agent_lib::error::AgentError::Failure)?;
 
             if !confirmed {
                 return Err(ssh_agent_lib::error::AgentError::Other(
