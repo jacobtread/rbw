@@ -28,28 +28,25 @@ fn parse_message(message: tokio_tungstenite::tungstenite::Message) -> Option<Mes
 
     let unpacked_message = unpacked_messagepack.as_array()?;
     let message_type = unpacked_message.first()?.as_u64()?;
+    let target = unpacked_message.get(3)?.as_str()?;
+    let args = unpacked_message.get(4)?.as_array()?;
+
     // invocation
     if message_type != 1 {
         return None;
     }
-    let target = unpacked_message.get(3)?.as_str()?;
+
     if target != "ReceiveMessage" {
         return None;
     }
 
-    let args = unpacked_message.get(4)?.as_array()?;
     let map = args.first()?.as_map()?;
-    for (k, v) in map {
-        if k.as_str()? == "Type" {
-            let ty = v.as_i64()?;
-            return match ty {
-                11 => Some(Message::Logout),
-                _ => Some(Message::Sync),
-            };
-        }
-    }
+    let (_, ty) = map.iter().find(|(k, _)| k.as_str() == Some("Type"))?;
 
-    None
+    match ty.as_i64()? {
+        11 => Some(Message::Logout),
+        _ => Some(Message::Sync),
+    }
 }
 
 pub struct NotificationsHandler {
