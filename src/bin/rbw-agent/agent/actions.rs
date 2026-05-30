@@ -15,72 +15,43 @@ async fn getpin(
     Ok(rbw::pinentry::getpin(pinentry, prompt, desc, err.as_deref(), environment, grab).await?)
 }
 
-async fn get_client_id(
-    pinentry: &str,
-    host: &str,
-    err: &Option<String>,
-    environment: &rbw::protocol::Environment,
-) -> anyhow::Result<rbw::locked::Password> {
-    getpin(
-        pinentry,
-        "API key client__id",
-        &format!("Log in to {host}"),
-        err,
-        environment,
-        false,
-    )
-    .await
-    .context("failed to read client_id from pinentry")
-}
-
-async fn get_client_secret(
-    pinentry: &str,
-    host: &str,
-    err: &Option<String>,
-    environment: &rbw::protocol::Environment,
-) -> anyhow::Result<rbw::locked::Password> {
-    getpin(
-        pinentry,
-        "API key client__secret",
-        &format!("Log in to {host}"),
-        err,
-        environment,
-        false,
-    )
-    .await
-    .context("failed to read client_secret from pinentry")
-}
-
-async fn get_password(
-    pinentry: &str,
-    desc: &str,
-    err: &Option<String>,
-    environment: &rbw::protocol::Environment,
-) -> anyhow::Result<rbw::locked::Password> {
-    getpin(pinentry, "Master Password", desc, err, environment, true)
-        .await
-        .context("failed to read password from pinentry")
-}
-
-async fn get_code(
-    pinentry: &str,
-    provider: rbw::api::TwoFactorProviderType,
-    err: &Option<String>,
-    environment: &rbw::protocol::Environment,
-) -> anyhow::Result<rbw::locked::Password> {
-    getpin(
-        pinentry,
-        provider.header(),
-        provider.message(),
-        err,
-        environment,
-        provider.grab(),
-    )
-    .await
-    .context("failed to read code from pinentry")
-}
-
 impl Agent {
+    async fn get_client_id(
+        &self,
+        host: &str,
+        err: &Option<String>,
+        environment: &rbw::protocol::Environment,
+    ) -> anyhow::Result<rbw::locked::Password> {
+        getpin(
+            self.state.config_pinentry(),
+            "API key client__id",
+            &format!("Log in to {host}"),
+            err,
+            environment,
+            false,
+        )
+        .await
+        .context("failed to read client_id from pinentry")
+    }
+
+    async fn get_client_secret(
+        &self,
+        host: &str,
+        err: &Option<String>,
+        environment: &rbw::protocol::Environment,
+    ) -> anyhow::Result<rbw::locked::Password> {
+        getpin(
+            self.state.config_pinentry(),
+            "API key client__secret",
+            &format!("Log in to {host}"),
+            err,
+            environment,
+            false,
+        )
+        .await
+        .context("failed to read client_secret from pinentry")
+    }
+
     fn get_host(&self) -> anyhow::Result<String> {
         let url_str = self.state.base_url();
         let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
@@ -110,13 +81,11 @@ impl Agent {
 
         let email = self.state.email()?.to_string();
 
-        let pinentry = self.state.config_pinentry().to_string();
-
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-            let client_id = get_client_id(&pinentry, &host, &err, environment).await?;
-            let client_secret = get_client_secret(&pinentry, &host, &err, environment).await?;
+            let client_id = self.get_client_id(&host, &err, environment).await?;
+            let client_secret = self.get_client_secret(&host, &err, environment).await?;
 
             let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
 
@@ -136,9 +105,56 @@ impl Agent {
         Ok(())
     }
 
+    async fn get_code(
+        &self,
+        provider: rbw::api::TwoFactorProviderType,
+        err: &Option<String>,
+        environment: &rbw::protocol::Environment,
+    ) -> anyhow::Result<rbw::locked::Password> {
+        getpin(
+            self.state.config_pinentry(),
+            provider.header(),
+            provider.message(),
+            err,
+            environment,
+            provider.grab(),
+        )
+        .await
+        .context("failed to read code from pinentry")
+    }
+
+    async fn two_factor(
+        &self,
+        environment: &rbw::protocol::Environment,
+        email: &str,
+        password: rbw::locked::Password,
+        provider: rbw::api::TwoFactorProviderType,
+    ) -> anyhow::Result<SessionParameters> {
+        let mut err_msg = None;
+        for i in 1_u8..=3 {
+            let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+
+            let code = self.get_code(provider, &err, environment).await?;
+            let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
+
+            match rbw::actions::login(email, password.clone(), Some(code), Some(provider)).await {
+                Ok(creds) => return Ok(creds),
+                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                    err_msg = Some(message);
+                }
+                // can get this if the user passes an empty string
+                Err(rbw::error::Error::TwoFactorRequired { .. }) if i < 3 => {
+                    err_msg = Some("TOTP code is not a number".to_string());
+                }
+                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
+            }
+        }
+
+        unreachable!()
+    }
+
     async fn two_factor_required(
         &self,
-        pinentry: &str,
         email: &str,
         password: rbw::locked::Password,
         providers: Vec<rbw::api::TwoFactorProviderType>,
@@ -164,9 +180,29 @@ impl Agent {
             }
         }
 
-        let creds = two_factor(pinentry, environment, email, password.clone(), provider).await?;
+        let creds = self
+            .two_factor(environment, email, password.clone(), provider)
+            .await?;
 
         self.login_success(creds, password, db, email).await
+    }
+
+    async fn get_password(
+        &self,
+        desc: &str,
+        err: &Option<String>,
+        environment: &rbw::protocol::Environment,
+    ) -> anyhow::Result<rbw::locked::Password> {
+        getpin(
+            self.state.config_pinentry(),
+            "Master Password",
+            desc,
+            err,
+            environment,
+            true,
+        )
+        .await
+        .context("failed to read password from pinentry")
     }
 
     pub async fn login(
@@ -186,16 +222,15 @@ impl Agent {
 
         let email = self.state.email()?.to_string();
 
-        let pinentry = self.state.config_pinentry().to_string();
-
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg
                 .as_deref()
                 .map(|msg| format!("{msg} (attempt {i}/3)"));
 
-            let password =
-                get_password(&pinentry, &format!("Log in to {host}"), &err, environment).await?;
+            let password = self
+                .get_password(&format!("Log in to {host}"), &err, environment)
+                .await?;
 
             match rbw::actions::login(&email, password.clone(), None, None).await {
                 Ok(creds) => {
@@ -208,7 +243,6 @@ impl Agent {
                     sso_email_2fa_session_token,
                 }) => {
                     self.two_factor_required(
-                        &pinentry,
                         &email,
                         password,
                         providers,
@@ -237,7 +271,7 @@ impl Agent {
         sock: &mut crate::sock::Sock,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<()> {
-        unlock_state(&self.state, environment).await?;
+        self.unlock_state(environment).await?;
 
         respond_ack(sock).await?;
 
@@ -289,7 +323,7 @@ impl Agent {
 
         save_db(&self.state, &db).await?;
 
-        if let Err(e) = subscribe_to_notifications(&self.state).await {
+        if let Err(e) = self.subscribe_to_notifications().await {
             eprintln!("failed to subscribe to notifications: {e}");
         }
 
@@ -348,14 +382,9 @@ impl Agent {
         entry_key: Option<&str>,
         org_id: Option<&str>,
     ) -> anyhow::Result<()> {
-        let plaintext = decrypt_cipher(
-            self.state.clone(),
-            environment,
-            cipherstring,
-            entry_key,
-            org_id,
-        )
-        .await?;
+        let plaintext = self
+            .decrypt_cipher(environment, cipherstring, entry_key, org_id)
+            .await?;
         respond_decrypt(sock, plaintext).await?;
 
         Ok(())
@@ -413,105 +442,290 @@ impl Agent {
 
         Ok(())
     }
-}
 
-async fn two_factor(
-    pinentry: &str,
-    environment: &rbw::protocol::Environment,
-    email: &str,
-    password: rbw::locked::Password,
-    provider: rbw::api::TwoFactorProviderType,
-) -> anyhow::Result<SessionParameters> {
-    let mut err_msg = None;
-    for i in 1_u8..=3 {
-        let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+    async fn unlock_state(&self, environment: &rbw::protocol::Environment) -> anyhow::Result<()> {
+        if self.state.needs_unlock().await {
+            let (db, email) = {
+                let db = load_db(&self.state).await?;
+                let email = self.state.email()?.to_string();
+                (db, email)
+            };
 
-        let code = get_code(pinentry, provider, &err, environment).await?;
-        let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
+            let crypto_params = db.get_crypto_parameters()?;
 
-        match rbw::actions::login(email, password.clone(), Some(code), Some(provider)).await {
-            Ok(creds) => return Ok(creds),
-            Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                err_msg = Some(message);
+            let Some(protected_key) = db.protected_key else {
+                return Err(anyhow::anyhow!("failed to find protected key in db"));
+            };
+
+            let Some(protected_private_key) = db.protected_private_key else {
+                return Err(anyhow::anyhow!(
+                    "failed to find protected private key in db"
+                ));
+            };
+
+            let mut err_msg = None;
+            for i in 1_u8..=3 {
+                let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+
+                let password = self
+                    .get_password(
+                        &format!("Unlock the local database for '{}'", rbw::dirs::profile()),
+                        &err,
+                        environment,
+                    )
+                    .await?;
+
+                match rbw::actions::unlock(
+                    &email,
+                    &password,
+                    &crypto_params,
+                    &protected_key,
+                    &protected_private_key,
+                    &db.protected_org_keys,
+                ) {
+                    Ok((keys, org_keys)) => {
+                        self.state.set_keys(keys, org_keys).await;
+                        break;
+                    }
+                    Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                        err_msg = Some(message);
+                    }
+                    Err(e) => return Err(e).context("failed to unlock database"),
+                }
             }
-            // can get this if the user passes an empty string
-            Err(rbw::error::Error::TwoFactorRequired { .. }) if i < 3 => {
-                err_msg = Some("TOTP code is not a number".to_string());
-            }
-            Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
         }
+
+        Ok(())
     }
 
-    unreachable!()
-}
+    async fn maybe_reprompt_password(
+        &self,
+        environment: &rbw::protocol::Environment,
+        cipherstring: &str,
+    ) -> anyhow::Result<()> {
+        let mut sha256 = sha2::Sha256::new();
+        sha256.update(cipherstring);
+        let master_password_reprompt: [u8; 32] = sha256.finalize().into();
 
-async fn unlock_state(
-    state: &crate::agent::state::State,
-    environment: &rbw::protocol::Environment,
-) -> anyhow::Result<()> {
-    if state.needs_unlock().await {
-        let (db, email) = {
-            let db = load_db(&state).await?;
-            let email = state.email()?.to_string();
-            (db, email)
-        };
+        if self
+            .state
+            .inner
+            .master_password_reprompt
+            .read()
+            .await
+            .contains(&master_password_reprompt)
+        {
+            let db = load_db(&self.state).await?;
 
-        let crypto_params = db.get_crypto_parameters()?;
+            let crypto_params = db.get_crypto_parameters()?;
 
-        let Some(protected_key) = db.protected_key else {
-            return Err(anyhow::anyhow!("failed to find protected key in db"));
-        };
+            let Some(protected_key) = db.protected_key else {
+                return Err(anyhow::anyhow!("failed to find protected key in db"));
+            };
 
-        let Some(protected_private_key) = db.protected_private_key else {
+            let Some(protected_private_key) = db.protected_private_key else {
+                return Err(anyhow::anyhow!(
+                    "failed to find protected private key in db"
+                ));
+            };
+
+            let mut err_msg = None;
+            for i in 1_u8..=3 {
+                let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+
+                // TODO: Remember somewhere that only GUI pinentry work, since this is a daemon.
+                let password = self
+                    .get_password(
+                        "Accessing this entry requires the master password",
+                        &err,
+                        environment,
+                    )
+                    .await?;
+
+                match rbw::actions::unlock(
+                    &self.state.email()?,
+                    &password,
+                    &crypto_params,
+                    &protected_key,
+                    &protected_private_key,
+                    &db.protected_org_keys,
+                ) {
+                    Ok(_) => {
+                        break;
+                    }
+                    Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                        err_msg = Some(message);
+                    }
+                    Err(e) => return Err(e).context("failed to unlock database"),
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn decrypt_cipher(
+        &self,
+        environment: &rbw::protocol::Environment,
+        cipherstring: &str,
+        entry_key: Option<&str>,
+        org_id: Option<&str>,
+    ) -> anyhow::Result<String> {
+        if !self.state.master_password_reprompt_initialized() {
+            let db = load_db(&self.state).await?;
+            self.state.set_master_password_reprompt(&db.entries).await;
+        }
+
+        let Some(keys) = self.state.key(org_id).await else {
             return Err(anyhow::anyhow!(
-                "failed to find protected private key in db"
+                "failed to find decryption keys in in-memory state"
             ));
         };
 
-        let pinentry = state.config_pinentry().to_string();
-        let mut err_msg = None;
-        for i in 1_u8..=3 {
-            let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+        let entry_key = decrypt_entry_key(entry_key, keys.as_ref())?;
 
-            let password = get_password(
-                &pinentry,
-                &format!("Unlock the local database for '{}'", rbw::dirs::profile()),
-                &err,
-                environment,
-            )
+        self.maybe_reprompt_password(environment, cipherstring)
             .await?;
 
-            match rbw::actions::unlock(
-                &email,
-                &password,
-                &crypto_params,
-                &protected_key,
-                &protected_private_key,
-                &db.protected_org_keys,
-            ) {
-                Ok((keys, org_keys)) => {
-                    unlock_success(state, keys, org_keys).await?;
-                    break;
-                }
-                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                    err_msg = Some(message);
-                }
-                Err(e) => return Err(e).context("failed to unlock database"),
-            }
-        }
+        let cipherstring = rbw::cipherstring::CipherString::new(cipherstring)
+            .context("failed to parse encrypted secret")?;
+
+        let plaintext = String::from_utf8(
+            cipherstring
+                .decrypt_symmetric(keys.as_ref(), entry_key.as_ref())
+                .context("failed to decrypt encrypted secret")?,
+        )
+        .context("failed to parse decrypted secret")?;
+
+        Ok(plaintext)
     }
 
-    Ok(())
-}
+    pub async fn get_ssh_public_keys(&self) -> anyhow::Result<Vec<String>> {
+        let environment = {
+            let le = self.state.last_environment().await;
+            self.state.set_timeout().await;
+            le.clone()
+        };
 
-async fn unlock_success(
-    state: &crate::agent::state::State,
-    keys: rbw::locked::Keys,
-    org_keys: std::collections::HashMap<String, rbw::locked::Keys>,
-) -> anyhow::Result<()> {
-    state.set_keys(keys, org_keys).await;
+        self.unlock_state(&environment).await?;
 
-    Ok(())
+        let db = load_db(&self.state).await?;
+
+        let mut pubkeys = Vec::new();
+
+        for entry in db.entries {
+            if let rbw::db::EntryData::SshKey {
+                public_key: Some(encrypted),
+                ..
+            } = &entry.data
+            {
+                let plaintext = self
+                    .decrypt_cipher(
+                        &environment,
+                        encrypted,
+                        entry.key.as_deref(),
+                        entry.org_id.as_deref(),
+                    )
+                    .await?;
+
+                pubkeys.push(plaintext);
+            }
+        }
+
+        Ok(pubkeys)
+    }
+
+    pub async fn find_ssh_private_key(
+        &self,
+        request_public_key: ssh_agent_lib::ssh_key::PublicKey,
+    ) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
+        let environment = {
+            let le = self.state.last_environment().await;
+            self.state.set_timeout().await;
+            le.clone()
+        };
+
+        self.unlock_state(&environment).await?;
+
+        let request_bytes = request_public_key.to_bytes();
+
+        let db = load_db(&self.state).await?;
+
+        for entry in db.entries {
+            let rbw::db::EntryData::SshKey {
+                private_key,
+                public_key,
+                ..
+            } = &entry.data
+            else {
+                continue;
+            };
+
+            let Some(public_key_enc) = public_key else {
+                continue;
+            };
+
+            let public_key_plaintext = self
+                .decrypt_cipher(
+                    &environment,
+                    public_key_enc,
+                    entry.key.as_deref(),
+                    entry.org_id.as_deref(),
+                )
+                .await?;
+
+            let public_key_bytes =
+                ssh_agent_lib::ssh_key::PublicKey::from_openssh(&public_key_plaintext)?.to_bytes();
+
+            if public_key_bytes != request_bytes {
+                continue;
+            }
+
+            let private_key_enc = private_key
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Matching entry has no private key"))?;
+
+            let private_key_plaintext = self
+                .decrypt_cipher(
+                    &environment,
+                    private_key_enc,
+                    entry.key.as_deref(),
+                    entry.org_id.as_deref(),
+                )
+                .await?;
+
+            return ssh_agent_lib::ssh_key::PrivateKey::from_openssh(private_key_plaintext)
+                .map_err(anyhow::Error::new);
+        }
+
+        Err(anyhow::anyhow!("No matching private key found"))
+    }
+
+    pub async fn subscribe_to_notifications(&self) -> anyhow::Result<()> {
+        if self.state.notifications_handler().await.is_connected() {
+            return Ok(());
+        }
+
+        let (email, server_name, notifications_url) = {
+            let email = self.state.email()?.to_string();
+            let server_name = self.state.server_name();
+            let notifications_url = self.state.notifications_url();
+            (email, server_name, notifications_url)
+        };
+
+        let db = rbw::db::Db::load_async(&server_name, &email).await?;
+        let access_token = db.access_token.context("Error getting access token")?;
+
+        let websocket_url = format!("{}/hub?access_token={}", notifications_url, access_token)
+            .replace("https://", "wss://");
+
+        let mut nh = self.state.notifications_handler_mut().await;
+
+        nh.connect(websocket_url)
+            .await
+            .err()
+            .map_or_else(|| Ok(()), |err| Err(anyhow::anyhow!(err.to_string())))
+    }
 }
 
 fn decrypt_entry_key(
@@ -528,109 +742,6 @@ fn decrypt_entry_key(
             ))
         })
         .transpose()
-}
-
-async fn maybe_reprompt_password(
-    state: &crate::agent::state::State,
-    environment: &rbw::protocol::Environment,
-    cipherstring: &str,
-) -> anyhow::Result<()> {
-    let mut sha256 = sha2::Sha256::new();
-    sha256.update(cipherstring);
-    let master_password_reprompt: [u8; 32] = sha256.finalize().into();
-
-    if state
-        .inner
-        .master_password_reprompt
-        .read()
-        .await
-        .contains(&master_password_reprompt)
-    {
-        let db = load_db(state).await?;
-
-        let crypto_params = db.get_crypto_parameters()?;
-
-        let Some(protected_key) = db.protected_key else {
-            return Err(anyhow::anyhow!("failed to find protected key in db"));
-        };
-
-        let Some(protected_private_key) = db.protected_private_key else {
-            return Err(anyhow::anyhow!(
-                "failed to find protected private key in db"
-            ));
-        };
-
-        let email = state.email()?;
-
-        let pinentry = state.config_pinentry().to_string();
-        let mut err_msg = None;
-        for i in 1_u8..=3 {
-            let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-
-            // TODO: Remember somewhere that only GUI pinentry work, since this is a daemon.
-            let password = get_password(
-                &pinentry,
-                "Accessing this entry requires the master password",
-                &err,
-                environment,
-            )
-            .await?;
-
-            match rbw::actions::unlock(
-                &email,
-                &password,
-                &crypto_params,
-                &protected_key,
-                &protected_private_key,
-                &db.protected_org_keys,
-            ) {
-                Ok(_) => {
-                    break;
-                }
-                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                    err_msg = Some(message);
-                }
-                Err(e) => return Err(e).context("failed to unlock database"),
-            }
-        }
-    }
-
-    Ok(())
-}
-
-async fn decrypt_cipher(
-    state: crate::agent::state::State,
-    environment: &rbw::protocol::Environment,
-    cipherstring: &str,
-    entry_key: Option<&str>,
-    org_id: Option<&str>,
-) -> anyhow::Result<String> {
-    if !state.master_password_reprompt_initialized() {
-        let db = load_db(&state).await?;
-        state.set_master_password_reprompt(&db.entries).await;
-    }
-
-    let Some(keys) = state.key(org_id).await else {
-        return Err(anyhow::anyhow!(
-            "failed to find decryption keys in in-memory state"
-        ));
-    };
-
-    let entry_key = decrypt_entry_key(entry_key, keys.as_ref())?;
-
-    maybe_reprompt_password(&state, environment, cipherstring).await?;
-
-    let cipherstring = rbw::cipherstring::CipherString::new(cipherstring)
-        .context("failed to parse encrypted secret")?;
-
-    let plaintext = String::from_utf8(
-        cipherstring
-            .decrypt_symmetric(keys.as_ref(), entry_key.as_ref())
-            .context("failed to decrypt encrypted secret")?,
-    )
-    .context("failed to parse decrypted secret")?;
-
-    Ok(plaintext)
 }
 
 async fn respond_ack(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
@@ -665,131 +776,4 @@ async fn save_db(state: &crate::agent::state::State, db: &rbw::db::Db) -> anyhow
     db.save_async(&state.server_name(), email)
         .await
         .map_err(anyhow::Error::new)
-}
-
-pub async fn subscribe_to_notifications(state: &crate::agent::state::State) -> anyhow::Result<()> {
-    if state.notifications_handler().await.is_connected() {
-        return Ok(());
-    }
-
-    let (email, server_name, notifications_url) = {
-        let email = state.email()?.to_string();
-        let server_name = state.server_name();
-        let notifications_url = state.notifications_url();
-        (email, server_name, notifications_url)
-    };
-
-    let db = rbw::db::Db::load_async(&server_name, &email).await?;
-    let access_token = db.access_token.context("Error getting access token")?;
-
-    let websocket_url = format!("{}/hub?access_token={}", notifications_url, access_token)
-        .replace("https://", "wss://");
-
-    let mut nh = state.notifications_handler_mut().await;
-
-    nh.connect(websocket_url)
-        .await
-        .err()
-        .map_or_else(|| Ok(()), |err| Err(anyhow::anyhow!(err.to_string())))
-}
-
-pub async fn get_ssh_public_keys(state: crate::agent::state::State) -> anyhow::Result<Vec<String>> {
-    let environment = {
-        let le = state.last_environment().await;
-        state.set_timeout().await;
-        le.clone()
-    };
-
-    unlock_state(&state, &environment).await?;
-
-    let db = load_db(&state).await?;
-
-    let mut pubkeys = Vec::new();
-
-    for entry in db.entries {
-        if let rbw::db::EntryData::SshKey {
-            public_key: Some(encrypted),
-            ..
-        } = &entry.data
-        {
-            let plaintext = decrypt_cipher(
-                state.clone(),
-                &environment,
-                encrypted,
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            )
-            .await?;
-
-            pubkeys.push(plaintext);
-        }
-    }
-
-    Ok(pubkeys)
-}
-
-pub async fn find_ssh_private_key(
-    state: crate::agent::state::State,
-    request_public_key: ssh_agent_lib::ssh_key::PublicKey,
-) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
-    let environment = {
-        let le = state.last_environment().await;
-        state.set_timeout().await;
-        le.clone()
-    };
-
-    unlock_state(&state, &environment).await?;
-
-    let request_bytes = request_public_key.to_bytes();
-
-    let db = load_db(&state).await?;
-
-    for entry in db.entries {
-        let rbw::db::EntryData::SshKey {
-            private_key,
-            public_key,
-            ..
-        } = &entry.data
-        else {
-            continue;
-        };
-
-        let Some(public_key_enc) = public_key else {
-            continue;
-        };
-
-        let public_key_plaintext = decrypt_cipher(
-            state.clone(),
-            &environment,
-            public_key_enc,
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        )
-        .await?;
-
-        let public_key_bytes =
-            ssh_agent_lib::ssh_key::PublicKey::from_openssh(&public_key_plaintext)?.to_bytes();
-
-        if public_key_bytes != request_bytes {
-            continue;
-        }
-
-        let private_key_enc = private_key
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Matching entry has no private key"))?;
-
-        let private_key_plaintext = decrypt_cipher(
-            state.clone(),
-            &environment,
-            private_key_enc,
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        )
-        .await?;
-
-        return ssh_agent_lib::ssh_key::PrivateKey::from_openssh(private_key_plaintext)
-            .map_err(anyhow::Error::new);
-    }
-
-    Err(anyhow::anyhow!("No matching private key found"))
 }

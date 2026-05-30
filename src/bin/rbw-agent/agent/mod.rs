@@ -69,7 +69,7 @@ impl Agent {
     pub async fn run(self, listener: UnixListener) -> anyhow::Result<()> {
         let mut nchannel = self.state.notifications_handler().await.get_channel();
 
-        match actions::subscribe_to_notifications(&self.state).await {
+        match self.subscribe_to_notifications().await {
             Ok(_) => {
                 log::debug!("Successfully subscribed to notifications");
             }

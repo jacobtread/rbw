@@ -1,19 +1,17 @@
 use signature::{RandomizedSigner as _, SignatureEncoding as _, Signer as _};
 use tokio::net::UnixListener;
 
-use crate::agent::actions;
-
 const SSH_AGENT_RSA_SHA2_256: u32 = 2;
 const SSH_AGENT_RSA_SHA2_512: u32 = 4;
 
 #[derive(Clone)]
 pub struct SshAgent {
-    state: crate::agent::state::State,
+    agent: crate::agent::Agent,
 }
 
 impl SshAgent {
-    pub fn new(state: crate::agent::state::State) -> Self {
-        Self { state }
+    pub fn new(agent: crate::agent::Agent) -> Self {
+        Self { agent }
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
@@ -33,7 +31,8 @@ impl ssh_agent_lib::agent::Session for SshAgent {
     async fn request_identities(
         &mut self,
     ) -> Result<Vec<ssh_agent_lib::proto::Identity>, ssh_agent_lib::error::AgentError> {
-        actions::get_ssh_public_keys(self.state.clone())
+        self.agent
+            .get_ssh_public_keys()
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?
             .into_iter()
@@ -54,15 +53,17 @@ impl ssh_agent_lib::agent::Session for SshAgent {
     ) -> Result<ssh_agent_lib::ssh_key::Signature, ssh_agent_lib::error::AgentError> {
         let pubkey = ssh_agent_lib::ssh_key::PublicKey::new(request.pubkey, "");
 
-        let private_key = actions::find_ssh_private_key(self.state.clone(), pubkey)
+        let private_key = self
+            .agent
+            .find_ssh_private_key(pubkey)
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
 
-        if self.state.confirm_ssh() {
+        if self.agent.state.confirm_ssh() {
             let confirmed = rbw::pinentry::confirm(
-                &self.state.config_pinentry(),
+                &self.agent.state.config_pinentry(),
                 "Allow SSH key use?",
-                &self.state.last_environment().await.clone(),
+                &self.agent.state.last_environment().await.clone(),
                 true,
             )
             .await

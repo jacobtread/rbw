@@ -19,7 +19,7 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
     let state = crate::agent::state::State::new(config);
     let agent = crate::agent::Agent::new(state.clone());
 
-    let ssh_agent = crate::agent::ssh_agent::SshAgent::new(state);
+    let ssh_agent = crate::agent::ssh_agent::SshAgent::new(agent.clone());
 
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
