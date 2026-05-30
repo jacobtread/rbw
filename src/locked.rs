@@ -46,7 +46,7 @@ impl LockedVec {
     }
 
     pub fn zero(&mut self) {
-        self.truncate(0);
+        self.data.zeroize();
         self.data.extend(std::iter::repeat_n(0, LEN));
     }
 
@@ -62,7 +62,6 @@ impl LockedVec {
 impl Drop for LockedVec {
     fn drop(&mut self) {
         self.zero();
-        self.data.as_mut().zeroize();
     }
 }
 
