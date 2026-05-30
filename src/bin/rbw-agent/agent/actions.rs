@@ -339,6 +339,89 @@ impl Agent {
 
         Ok(())
     }
+
+    pub async fn decrypt(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+        cipherstring: &str,
+        entry_key: Option<&str>,
+        org_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let plaintext = decrypt_cipher(
+            self.state.clone(),
+            environment,
+            cipherstring,
+            entry_key,
+            org_id,
+        )
+        .await?;
+        respond_decrypt(sock, plaintext).await?;
+
+        Ok(())
+    }
+
+    pub async fn encrypt(
+        &self,
+        sock: &mut crate::sock::Sock,
+        plaintext: &str,
+        org_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let Some(keys) = self.state.key(org_id).await else {
+            return Err(anyhow::anyhow!(
+                "failed to find encryption keys in in-memory state"
+            ));
+        };
+
+        let cipherstring =
+            rbw::cipherstring::CipherString::encrypt_symmetric(keys.as_ref(), plaintext.as_bytes())
+                .context("failed to encrypt plaintext secret")?;
+
+        respond_encrypt(sock, cipherstring.to_string()).await?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "clipboard")]
+    pub async fn clipboard_store(
+        &self,
+        sock: &mut crate::sock::Sock,
+        text: &str,
+    ) -> anyhow::Result<()> {
+        if let Some(clipboard) = &mut (*self.state.clipboard_mut().await) {
+            clipboard
+                .set_text(text)
+                .map_err(|e| anyhow::anyhow!("couldn't store value to clipboard: {e}"))?;
+        }
+
+        respond_ack(sock).await?;
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "clipboard"))]
+
+    pub async fn clipboard_store(
+        &self,
+        sock: &mut crate::sock::Sock,
+        _text: &str,
+    ) -> anyhow::Result<()> {
+        sock.send(&rbw::protocol::Response::Error {
+            error: "clipboard not supported".to_string(),
+        })
+        .await?;
+
+        Ok(())
+    }
+}
+
+pub async fn version(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
+    sock.send(&rbw::protocol::Response::Version {
+        version: rbw::protocol::VERSION,
+    })
+    .await?;
+
+    Ok(())
 }
 
 async fn two_factor(
@@ -557,82 +640,6 @@ async fn decrypt_cipher(
     .context("failed to parse decrypted secret")?;
 
     Ok(plaintext)
-}
-
-pub async fn decrypt(
-    sock: &mut crate::sock::Sock,
-    state: crate::agent::state::State,
-    environment: &rbw::protocol::Environment,
-    cipherstring: &str,
-    entry_key: Option<&str>,
-    org_id: Option<&str>,
-) -> anyhow::Result<()> {
-    let plaintext = decrypt_cipher(state, environment, cipherstring, entry_key, org_id).await?;
-    respond_decrypt(sock, plaintext).await?;
-
-    Ok(())
-}
-
-pub async fn encrypt(
-    sock: &mut crate::sock::Sock,
-    state: crate::agent::state::State,
-    plaintext: &str,
-    org_id: Option<&str>,
-) -> anyhow::Result<()> {
-    let Some(keys) = state.key(org_id).await else {
-        return Err(anyhow::anyhow!(
-            "failed to find encryption keys in in-memory state"
-        ));
-    };
-
-    let cipherstring =
-        rbw::cipherstring::CipherString::encrypt_symmetric(keys.as_ref(), plaintext.as_bytes())
-            .context("failed to encrypt plaintext secret")?;
-
-    respond_encrypt(sock, cipherstring.to_string()).await?;
-
-    Ok(())
-}
-
-#[cfg(feature = "clipboard")]
-pub async fn clipboard_store(
-    sock: &mut crate::sock::Sock,
-    state: crate::agent::state::State,
-    text: &str,
-) -> anyhow::Result<()> {
-    if let Some(clipboard) = &mut (*state.clipboard_mut().await) {
-        clipboard
-            .set_text(text)
-            .map_err(|e| anyhow::anyhow!("couldn't store value to clipboard: {e}"))?;
-    }
-
-    respond_ack(sock).await?;
-
-    Ok(())
-}
-
-#[cfg(not(feature = "clipboard"))]
-
-pub async fn clipboard_store(
-    sock: &mut crate::sock::Sock,
-    _state: crate::agent::state::State,
-    _text: &str,
-) -> anyhow::Result<()> {
-    sock.send(&rbw::protocol::Response::Error {
-        error: "clipboard not supported".to_string(),
-    })
-    .await?;
-
-    Ok(())
-}
-
-pub async fn version(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
-    sock.send(&rbw::protocol::Response::Version {
-        version: rbw::protocol::VERSION,
-    })
-    .await?;
-
-    Ok(())
 }
 
 async fn respond_ack(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {

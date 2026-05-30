@@ -158,9 +158,8 @@ impl Agent {
                 entry_key,
                 org_id,
             } => {
-                actions::decrypt(
+                self.decrypt(
                     sock,
-                    self.state.clone(),
                     &environment,
                     cipherstring,
                     entry_key.as_deref(),
@@ -170,11 +169,11 @@ impl Agent {
                 true
             }
             rbw::protocol::Action::Encrypt { plaintext, org_id } => {
-                actions::encrypt(sock, self.state.clone(), plaintext, org_id.as_deref()).await?;
+                self.encrypt(sock, plaintext, org_id.as_deref()).await?;
                 true
             }
             rbw::protocol::Action::ClipboardStore { text } => {
-                actions::clipboard_store(sock, self.state.clone(), text).await?;
+                self.clipboard_store(sock, text).await?;
                 true
             }
             // TODO: It's better to handle the closing more gracefully
