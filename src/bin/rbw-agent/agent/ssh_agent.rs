@@ -1,16 +1,18 @@
 use signature::{RandomizedSigner as _, SignatureEncoding as _, Signer as _};
 use tokio::net::UnixListener;
 
+use crate::agent::actions;
+
 const SSH_AGENT_RSA_SHA2_256: u32 = 2;
 const SSH_AGENT_RSA_SHA2_512: u32 = 4;
 
 #[derive(Clone)]
 pub struct SshAgent {
-    state: crate::state::State,
+    state: crate::agent::state::State,
 }
 
 impl SshAgent {
-    pub fn new(state: crate::state::State) -> Self {
+    pub fn new(state: crate::agent::state::State) -> Self {
         Self { state }
     }
 
@@ -31,7 +33,7 @@ impl ssh_agent_lib::agent::Session for SshAgent {
     async fn request_identities(
         &mut self,
     ) -> Result<Vec<ssh_agent_lib::proto::Identity>, ssh_agent_lib::error::AgentError> {
-        crate::actions::get_ssh_public_keys(self.state.clone())
+        actions::get_ssh_public_keys(self.state.clone())
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?
             .into_iter()
@@ -52,7 +54,7 @@ impl ssh_agent_lib::agent::Session for SshAgent {
     ) -> Result<ssh_agent_lib::ssh_key::Signature, ssh_agent_lib::error::AgentError> {
         let pubkey = ssh_agent_lib::ssh_key::PublicKey::new(request.pubkey, "");
 
-        let private_key = crate::actions::find_ssh_private_key(self.state.clone(), pubkey)
+        let private_key = actions::find_ssh_private_key(self.state.clone(), pubkey)
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
 

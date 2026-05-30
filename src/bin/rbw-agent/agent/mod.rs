@@ -4,12 +4,20 @@ use tokio::{
     time::{sleep_until, Instant},
 };
 
+use crate::agent::state::State;
+
+mod actions;
+pub mod ssh_agent;
+
+pub(crate) mod state;
+
+#[derive(Clone)]
 pub struct Agent {
-    state: crate::state::State,
+    state: State,
 }
 
 impl Agent {
-    pub fn new(state: crate::state::State) -> Self {
+    pub fn new(state: State) -> Self {
         Self { state }
     }
 
@@ -30,7 +38,7 @@ impl Agent {
                 log::debug!("Received Sync Message via notification channel");
                 self.state.set_sync_timeout().await;
 
-                if let Err(e) = crate::actions::sync(None, &self.state).await {
+                if let Err(e) = self.sync(None).await {
                     eprintln!("failed to sync: {e:#}");
                 }
             }
@@ -43,11 +51,11 @@ impl Agent {
     async fn on_connection(&self, stream: UnixStream) {
         let mut sock = crate::sock::Sock::new(stream);
 
-        let state = self.state.clone();
+        let self_ref = self.clone();
 
         // TODO: Check if does it make sense to handle this in another task
         tokio::spawn(async move {
-            let res = handle_request(&mut sock, state.clone()).await;
+            let res = self_ref.handle_request(&mut sock).await;
             if let Err(e) = res {
                 sock.send(&rbw::protocol::Response::Error {
                     error: format!("{e:#}"),
@@ -61,7 +69,7 @@ impl Agent {
     pub async fn run(self, listener: UnixListener) -> anyhow::Result<()> {
         let mut nchannel = self.state.notifications_handler().await.get_channel();
 
-        match crate::actions::subscribe_to_notifications(&self.state).await {
+        match actions::subscribe_to_notifications(&self.state).await {
             Ok(_) => {
                 log::debug!("Successfully subscribed to notifications");
             }
@@ -98,7 +106,7 @@ impl Agent {
 
                     // this could fail if we aren't logged in, but we
                     // don't care about that
-                    if let Err(e) = crate::actions::sync(None, &self.state).await {
+                    if let Err(e) = self.sync(None).await {
                         eprintln!("failed to sync: {e:#}");
                     }
 
@@ -106,86 +114,83 @@ impl Agent {
             }
         }
     }
-}
 
-async fn handle_request(
-    sock: &mut crate::sock::Sock,
-    state: crate::state::State,
-) -> anyhow::Result<()> {
-    let req = match sock.recv().await? {
-        Ok(msg) => msg,
-        Err(error) => {
-            sock.send(&rbw::protocol::Response::Error { error }).await?;
-            return Ok(());
-        }
-    };
+    async fn handle_request(&self, sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
+        let req = match sock.recv().await? {
+            Ok(msg) => msg,
+            Err(error) => {
+                sock.send(&rbw::protocol::Response::Error { error }).await?;
+                return Ok(());
+            }
+        };
 
-    let (action, environment) = req.into_parts();
+        let (action, environment) = req.into_parts();
 
-    let set_timeout = match &action {
-        rbw::protocol::Action::Register => {
-            crate::actions::register(sock, state.clone(), &environment).await?;
-            true
-        }
-        rbw::protocol::Action::Login => {
-            crate::actions::login(sock, state.clone(), &environment).await?;
-            true
-        }
-        rbw::protocol::Action::Unlock => {
-            crate::actions::unlock(sock, &state, &environment).await?;
-            true
-        }
-        rbw::protocol::Action::CheckLock => {
-            crate::actions::check_lock(sock, state.clone()).await?;
-            false
-        }
-        rbw::protocol::Action::Lock => {
-            crate::actions::lock(sock, state.clone()).await?;
-            false
-        }
-        rbw::protocol::Action::Sync => {
-            crate::actions::sync(Some(sock), &state).await?;
-            false
-        }
-        // TODO: This alone does not do much, as it's a simple oracle open for everybody, to
-        // decrypt stuff.
-        rbw::protocol::Action::Decrypt {
-            cipherstring,
-            entry_key,
-            org_id,
-        } => {
-            crate::actions::decrypt(
-                sock,
-                state.clone(),
-                &environment,
+        let set_timeout = match &action {
+            rbw::protocol::Action::Register => {
+                self.register(sock, &environment).await?;
+                true
+            }
+            rbw::protocol::Action::Login => {
+                self.login(sock, &environment).await?;
+                true
+            }
+            rbw::protocol::Action::Unlock => {
+                self.unlock(sock, &environment).await?;
+                true
+            }
+            rbw::protocol::Action::CheckLock => {
+                self.check_lock(sock).await?;
+                false
+            }
+            rbw::protocol::Action::Lock => {
+                self.lock(sock).await?;
+                false
+            }
+            rbw::protocol::Action::Sync => {
+                self.sync(Some(sock)).await?;
+                false
+            }
+            // TODO: This alone does not do much, as it's a simple oracle open for everybody, to
+            // decrypt stuff.
+            rbw::protocol::Action::Decrypt {
                 cipherstring,
-                entry_key.as_deref(),
-                org_id.as_deref(),
-            )
-            .await?;
-            true
-        }
-        rbw::protocol::Action::Encrypt { plaintext, org_id } => {
-            crate::actions::encrypt(sock, state.clone(), plaintext, org_id.as_deref()).await?;
-            true
-        }
-        rbw::protocol::Action::ClipboardStore { text } => {
-            crate::actions::clipboard_store(sock, state.clone(), text).await?;
-            true
-        }
-        // TODO: It's better to handle the closing more gracefully
-        rbw::protocol::Action::Quit => std::process::exit(0),
-        rbw::protocol::Action::Version => {
-            crate::actions::version(sock).await?;
-            false
-        }
-    };
+                entry_key,
+                org_id,
+            } => {
+                actions::decrypt(
+                    sock,
+                    self.state.clone(),
+                    &environment,
+                    cipherstring,
+                    entry_key.as_deref(),
+                    org_id.as_deref(),
+                )
+                .await?;
+                true
+            }
+            rbw::protocol::Action::Encrypt { plaintext, org_id } => {
+                actions::encrypt(sock, self.state.clone(), plaintext, org_id.as_deref()).await?;
+                true
+            }
+            rbw::protocol::Action::ClipboardStore { text } => {
+                actions::clipboard_store(sock, self.state.clone(), text).await?;
+                true
+            }
+            // TODO: It's better to handle the closing more gracefully
+            rbw::protocol::Action::Quit => std::process::exit(0),
+            rbw::protocol::Action::Version => {
+                actions::version(sock).await?;
+                false
+            }
+        };
 
-    state.set_last_environment(environment).await;
+        self.state.set_last_environment(environment).await;
 
-    if set_timeout {
-        state.set_timeout().await;
+        if set_timeout {
+            self.state.set_timeout().await;
+        }
+
+        Ok(())
     }
-
-    Ok(())
 }

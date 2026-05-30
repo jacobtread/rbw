@@ -2,6 +2,8 @@ use anyhow::Context as _;
 use rbw::actions::SessionParameters;
 use sha2::Digest as _;
 
+use crate::agent::Agent;
+
 async fn getpin(
     pinentry: &str,
     desc: &str,
@@ -49,59 +51,6 @@ async fn get_client_secret(
     .context("failed to read client_secret from pinentry")
 }
 
-fn get_host(state: &crate::state::State) -> anyhow::Result<String> {
-    let url_str = state.base_url();
-    let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
-    let Some(host) = url.host_str() else {
-        return Err(anyhow::anyhow!(
-            "couldn't find host in rbw base url {url_str}"
-        ));
-    };
-
-    Ok(host.to_string())
-}
-
-pub async fn register(
-    sock: &mut crate::sock::Sock,
-    state: crate::state::State,
-    environment: &rbw::protocol::Environment,
-) -> anyhow::Result<()> {
-    let db = load_db(&state).await.unwrap_or_else(|_| rbw::db::Db::new());
-
-    if !db.needs_login() {
-        return respond_ack(sock).await;
-    }
-
-    let host = get_host(&state)?;
-
-    let email = state.email()?.to_string();
-
-    let pinentry = state.config_pinentry().to_string();
-
-    let mut err_msg = None;
-    for i in 1_u8..=3 {
-        let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-        let client_id = get_client_id(&pinentry, &host, &err, environment).await?;
-        let client_secret = get_client_secret(&pinentry, &host, &err, environment).await?;
-
-        let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
-
-        match rbw::actions::register(&email, apikey).await {
-            Ok(()) => {
-                break;
-            }
-            Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                err_msg = Some(message);
-            }
-            Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
-        }
-    }
-
-    respond_ack(sock).await?;
-
-    Ok(())
-}
-
 async fn get_password(
     pinentry: &str,
     desc: &str,
@@ -111,101 +60,6 @@ async fn get_password(
     getpin(pinentry, "Master Password", desc, err, environment, true)
         .await
         .context("failed to read password from pinentry")
-}
-
-async fn two_factor_required(
-    state: &crate::state::State,
-    pinentry: &str,
-    email: &str,
-    password: rbw::locked::Password,
-    providers: Vec<rbw::api::TwoFactorProviderType>,
-    sso_email_2fa_session_token: Option<String>,
-    environment: &rbw::protocol::Environment,
-    db: &mut rbw::db::Db,
-) -> anyhow::Result<()> {
-    let supported_types = [
-        rbw::api::TwoFactorProviderType::Authenticator,
-        rbw::api::TwoFactorProviderType::Yubikey,
-        rbw::api::TwoFactorProviderType::Email,
-    ];
-
-    let Some(provider) = supported_types.into_iter().find(|p| providers.contains(p)) else {
-        return Err(anyhow::anyhow!(
-            "unsupported two factor methods: {providers:?}"
-        ));
-    };
-
-    if provider == rbw::api::TwoFactorProviderType::Email {
-        if let Some(token) = sso_email_2fa_session_token {
-            rbw::actions::send_two_factor_email(email, &token).await?;
-        }
-    }
-
-    let creds = two_factor(pinentry, environment, email, password.clone(), provider).await?;
-
-    login_success(state.clone(), creds, password, db, email).await
-}
-
-pub async fn login(
-    sock: &mut crate::sock::Sock,
-    state: crate::state::State,
-    environment: &rbw::protocol::Environment,
-) -> anyhow::Result<()> {
-    let mut db = load_db(&state).await.unwrap_or_else(|_| rbw::db::Db::new());
-
-    if !db.needs_login() {
-        return respond_ack(sock).await;
-    }
-
-    let host = get_host(&state)?;
-
-    let email = state.email()?.to_string();
-
-    let pinentry = state.config_pinentry().to_string();
-
-    let mut err_msg = None;
-    for i in 1_u8..=3 {
-        let err = err_msg
-            .as_deref()
-            .map(|msg| format!("{msg} (attempt {i}/3)"));
-
-        let password =
-            get_password(&pinentry, &format!("Log in to {host}"), &err, environment).await?;
-
-        match rbw::actions::login(&email, password.clone(), None, None).await {
-            Ok(creds) => {
-                login_success(state.clone(), creds, password, &mut db, &email).await?;
-
-                break;
-            }
-            Err(rbw::error::Error::TwoFactorRequired {
-                providers,
-                sso_email_2fa_session_token,
-            }) => {
-                two_factor_required(
-                    &state,
-                    &pinentry,
-                    &email,
-                    password,
-                    providers,
-                    sso_email_2fa_session_token,
-                    environment,
-                    &mut db,
-                )
-                .await?;
-
-                break;
-            }
-            Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                err_msg = Some(message);
-            }
-            Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
-        }
-    }
-
-    respond_ack(sock).await?;
-
-    Ok(())
 }
 
 async fn get_code(
@@ -224,6 +78,267 @@ async fn get_code(
     )
     .await
     .context("failed to read code from pinentry")
+}
+
+impl Agent {
+    fn get_host(&self) -> anyhow::Result<String> {
+        let url_str = self.state.base_url();
+        let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
+        let Some(host) = url.host_str() else {
+            return Err(anyhow::anyhow!(
+                "couldn't find host in rbw base url {url_str}"
+            ));
+        };
+
+        Ok(host.to_string())
+    }
+
+    pub async fn register(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+    ) -> anyhow::Result<()> {
+        let db = load_db(&self.state)
+            .await
+            .unwrap_or_else(|_| rbw::db::Db::new());
+
+        if !db.needs_login() {
+            return respond_ack(sock).await;
+        }
+
+        let host = self.get_host()?;
+
+        let email = self.state.email()?.to_string();
+
+        let pinentry = self.state.config_pinentry().to_string();
+
+        let mut err_msg = None;
+        for i in 1_u8..=3 {
+            let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+            let client_id = get_client_id(&pinentry, &host, &err, environment).await?;
+            let client_secret = get_client_secret(&pinentry, &host, &err, environment).await?;
+
+            let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
+
+            match rbw::actions::register(&email, apikey).await {
+                Ok(()) => {
+                    break;
+                }
+                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                    err_msg = Some(message);
+                }
+                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
+            }
+        }
+
+        respond_ack(sock).await?;
+
+        Ok(())
+    }
+
+    async fn two_factor_required(
+        &self,
+        pinentry: &str,
+        email: &str,
+        password: rbw::locked::Password,
+        providers: Vec<rbw::api::TwoFactorProviderType>,
+        sso_email_2fa_session_token: Option<String>,
+        environment: &rbw::protocol::Environment,
+        db: &mut rbw::db::Db,
+    ) -> anyhow::Result<()> {
+        let supported_types = [
+            rbw::api::TwoFactorProviderType::Authenticator,
+            rbw::api::TwoFactorProviderType::Yubikey,
+            rbw::api::TwoFactorProviderType::Email,
+        ];
+
+        let Some(provider) = supported_types.into_iter().find(|p| providers.contains(p)) else {
+            return Err(anyhow::anyhow!(
+                "unsupported two factor methods: {providers:?}"
+            ));
+        };
+
+        if provider == rbw::api::TwoFactorProviderType::Email {
+            if let Some(token) = sso_email_2fa_session_token {
+                rbw::actions::send_two_factor_email(email, &token).await?;
+            }
+        }
+
+        let creds = two_factor(pinentry, environment, email, password.clone(), provider).await?;
+
+        self.login_success(creds, password, db, email).await
+    }
+
+    pub async fn login(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+    ) -> anyhow::Result<()> {
+        let mut db = load_db(&self.state)
+            .await
+            .unwrap_or_else(|_| rbw::db::Db::new());
+
+        if !db.needs_login() {
+            return respond_ack(sock).await;
+        }
+
+        let host = self.get_host()?;
+
+        let email = self.state.email()?.to_string();
+
+        let pinentry = self.state.config_pinentry().to_string();
+
+        let mut err_msg = None;
+        for i in 1_u8..=3 {
+            let err = err_msg
+                .as_deref()
+                .map(|msg| format!("{msg} (attempt {i}/3)"));
+
+            let password =
+                get_password(&pinentry, &format!("Log in to {host}"), &err, environment).await?;
+
+            match rbw::actions::login(&email, password.clone(), None, None).await {
+                Ok(creds) => {
+                    self.login_success(creds, password, &mut db, &email).await?;
+
+                    break;
+                }
+                Err(rbw::error::Error::TwoFactorRequired {
+                    providers,
+                    sso_email_2fa_session_token,
+                }) => {
+                    self.two_factor_required(
+                        &pinentry,
+                        &email,
+                        password,
+                        providers,
+                        sso_email_2fa_session_token,
+                        environment,
+                        &mut db,
+                    )
+                    .await?;
+
+                    break;
+                }
+                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                    err_msg = Some(message);
+                }
+                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
+            }
+        }
+
+        respond_ack(sock).await?;
+
+        Ok(())
+    }
+
+    pub async fn unlock(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+    ) -> anyhow::Result<()> {
+        unlock_state(&self.state, environment).await?;
+
+        respond_ack(sock).await?;
+
+        Ok(())
+    }
+
+    pub async fn lock(&self, sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
+        self.state.clear().await;
+
+        respond_ack(sock).await?;
+
+        Ok(())
+    }
+
+    pub async fn check_lock(&self, sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
+        if self.state.needs_unlock().await {
+            return Err(anyhow::anyhow!("agent is locked"));
+        }
+
+        respond_ack(sock).await?;
+
+        Ok(())
+    }
+
+    pub async fn sync(&self, sock: Option<&mut crate::sock::Sock>) -> anyhow::Result<()> {
+        let mut db = load_db(&self.state).await?;
+
+        let Some(access_token) = &db.access_token else {
+            anyhow::bail!("failed to find access token in db");
+        };
+
+        let Some(refresh_token) = &db.refresh_token else {
+            anyhow::bail!("failed to find refresh token in db");
+        };
+
+        let (access_token, (protected_key, protected_private_key, protected_org_keys, entries)) =
+            rbw::actions::sync(access_token, refresh_token)
+                .await
+                .context("failed to sync database from server")?;
+
+        self.state.set_master_password_reprompt(&entries).await;
+
+        db.update_access_token(access_token);
+
+        db.protected_key = Some(protected_key);
+        db.protected_private_key = Some(protected_private_key);
+        db.protected_org_keys = protected_org_keys;
+        db.entries = entries;
+
+        save_db(&self.state, &db).await?;
+
+        if let Err(e) = subscribe_to_notifications(&self.state).await {
+            eprintln!("failed to subscribe to notifications: {e}");
+        }
+
+        if let Some(sock) = sock {
+            respond_ack(sock).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn login_success(
+        &self,
+        creds: SessionParameters,
+        password: rbw::locked::Password,
+        db: &mut rbw::db::Db,
+        email: &str,
+    ) -> anyhow::Result<()> {
+        db.apply_session_parameters(&creds);
+
+        save_db(&self.state, db).await?;
+
+        self.sync(None).await?;
+
+        let db = load_db(&self.state).await?;
+
+        let Some(protected_private_key) = db.protected_private_key else {
+            return Err(anyhow::anyhow!(
+                "failed to find protected private key in db"
+            ));
+        };
+
+        let res = rbw::actions::unlock(
+            email,
+            &password,
+            &creds.crypto_params,
+            &creds.protected_key,
+            &protected_private_key,
+            &db.protected_org_keys,
+        );
+
+        match res {
+            Ok((keys, org_keys)) => {
+                self.state.set_keys(keys, org_keys).await;
+            }
+            Err(e) => return Err(e).context("failed to unlock database"),
+        }
+
+        Ok(())
+    }
 }
 
 async fn two_factor(
@@ -256,48 +371,8 @@ async fn two_factor(
     unreachable!()
 }
 
-async fn login_success(
-    state: crate::state::State,
-    creds: SessionParameters,
-    password: rbw::locked::Password,
-    db: &mut rbw::db::Db,
-    email: &str,
-) -> anyhow::Result<()> {
-    db.apply_session_parameters(&creds);
-
-    save_db(&state, db).await?;
-
-    sync(None, &state).await?;
-
-    let db = load_db(&state).await?;
-
-    let Some(protected_private_key) = db.protected_private_key else {
-        return Err(anyhow::anyhow!(
-            "failed to find protected private key in db"
-        ));
-    };
-
-    let res = rbw::actions::unlock(
-        email,
-        &password,
-        &creds.crypto_params,
-        &creds.protected_key,
-        &protected_private_key,
-        &db.protected_org_keys,
-    );
-
-    match res {
-        Ok((keys, org_keys)) => {
-            state.set_keys(keys, org_keys).await;
-        }
-        Err(e) => return Err(e).context("failed to unlock database"),
-    }
-
-    Ok(())
-}
-
 async fn unlock_state(
-    state: &crate::state::State,
+    state: &crate::agent::state::State,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
     if state.needs_unlock().await {
@@ -355,86 +430,12 @@ async fn unlock_state(
     Ok(())
 }
 
-pub async fn unlock(
-    sock: &mut crate::sock::Sock,
-    state: &crate::state::State,
-    environment: &rbw::protocol::Environment,
-) -> anyhow::Result<()> {
-    unlock_state(state, environment).await?;
-
-    respond_ack(sock).await?;
-
-    Ok(())
-}
-
 async fn unlock_success(
-    state: &crate::state::State,
+    state: &crate::agent::state::State,
     keys: rbw::locked::Keys,
     org_keys: std::collections::HashMap<String, rbw::locked::Keys>,
 ) -> anyhow::Result<()> {
     state.set_keys(keys, org_keys).await;
-
-    Ok(())
-}
-
-pub async fn lock(sock: &mut crate::sock::Sock, state: crate::state::State) -> anyhow::Result<()> {
-    state.clear().await;
-
-    respond_ack(sock).await?;
-
-    Ok(())
-}
-
-pub async fn check_lock(
-    sock: &mut crate::sock::Sock,
-    state: crate::state::State,
-) -> anyhow::Result<()> {
-    if state.needs_unlock().await {
-        return Err(anyhow::anyhow!("agent is locked"));
-    }
-
-    respond_ack(sock).await?;
-
-    Ok(())
-}
-
-pub async fn sync(
-    sock: Option<&mut crate::sock::Sock>,
-    state: &crate::state::State,
-) -> anyhow::Result<()> {
-    let mut db = load_db(&state).await?;
-
-    let Some(access_token) = &db.access_token else {
-        anyhow::bail!("failed to find access token in db");
-    };
-
-    let Some(refresh_token) = &db.refresh_token else {
-        anyhow::bail!("failed to find refresh token in db");
-    };
-
-    let (access_token, (protected_key, protected_private_key, protected_org_keys, entries)) =
-        rbw::actions::sync(access_token, refresh_token)
-            .await
-            .context("failed to sync database from server")?;
-
-    state.set_master_password_reprompt(&entries).await;
-
-    db.update_access_token(access_token);
-
-    db.protected_key = Some(protected_key);
-    db.protected_private_key = Some(protected_private_key);
-    db.protected_org_keys = protected_org_keys;
-    db.entries = entries;
-
-    save_db(&state, &db).await?;
-
-    if let Err(e) = subscribe_to_notifications(&state).await {
-        eprintln!("failed to subscribe to notifications: {e}");
-    }
-
-    if let Some(sock) = sock {
-        respond_ack(sock).await?;
-    }
 
     Ok(())
 }
@@ -456,7 +457,7 @@ fn decrypt_entry_key(
 }
 
 async fn maybe_reprompt_password(
-    state: &crate::state::State,
+    state: &crate::agent::state::State,
     environment: &rbw::protocol::Environment,
     cipherstring: &str,
 ) -> anyhow::Result<()> {
@@ -524,7 +525,7 @@ async fn maybe_reprompt_password(
 }
 
 async fn decrypt_cipher(
-    state: crate::state::State,
+    state: crate::agent::state::State,
     environment: &rbw::protocol::Environment,
     cipherstring: &str,
     entry_key: Option<&str>,
@@ -560,7 +561,7 @@ async fn decrypt_cipher(
 
 pub async fn decrypt(
     sock: &mut crate::sock::Sock,
-    state: crate::state::State,
+    state: crate::agent::state::State,
     environment: &rbw::protocol::Environment,
     cipherstring: &str,
     entry_key: Option<&str>,
@@ -574,7 +575,7 @@ pub async fn decrypt(
 
 pub async fn encrypt(
     sock: &mut crate::sock::Sock,
-    state: crate::state::State,
+    state: crate::agent::state::State,
     plaintext: &str,
     org_id: Option<&str>,
 ) -> anyhow::Result<()> {
@@ -596,7 +597,7 @@ pub async fn encrypt(
 #[cfg(feature = "clipboard")]
 pub async fn clipboard_store(
     sock: &mut crate::sock::Sock,
-    state: crate::state::State,
+    state: crate::agent::state::State,
     text: &str,
 ) -> anyhow::Result<()> {
     if let Some(clipboard) = &mut (*state.clipboard_mut().await) {
@@ -614,7 +615,7 @@ pub async fn clipboard_store(
 
 pub async fn clipboard_store(
     sock: &mut crate::sock::Sock,
-    _state: crate::state::State,
+    _state: crate::agent::state::State,
     _text: &str,
 ) -> anyhow::Result<()> {
     sock.send(&rbw::protocol::Response::Error {
@@ -654,21 +655,21 @@ async fn respond_encrypt(sock: &mut crate::sock::Sock, cipherstring: String) -> 
     Ok(())
 }
 
-async fn load_db(state: &crate::state::State) -> anyhow::Result<rbw::db::Db> {
+async fn load_db(state: &crate::agent::state::State) -> anyhow::Result<rbw::db::Db> {
     let email = state.email()?;
     rbw::db::Db::load_async(&state.server_name(), email)
         .await
         .map_err(anyhow::Error::new)
 }
 
-async fn save_db(state: &crate::state::State, db: &rbw::db::Db) -> anyhow::Result<()> {
+async fn save_db(state: &crate::agent::state::State, db: &rbw::db::Db) -> anyhow::Result<()> {
     let email = state.email()?;
     db.save_async(&state.server_name(), email)
         .await
         .map_err(anyhow::Error::new)
 }
 
-pub async fn subscribe_to_notifications(state: &crate::state::State) -> anyhow::Result<()> {
+pub async fn subscribe_to_notifications(state: &crate::agent::state::State) -> anyhow::Result<()> {
     if state.notifications_handler().await.is_connected() {
         return Ok(());
     }
@@ -694,7 +695,7 @@ pub async fn subscribe_to_notifications(state: &crate::state::State) -> anyhow::
         .map_or_else(|| Ok(()), |err| Err(anyhow::anyhow!(err.to_string())))
 }
 
-pub async fn get_ssh_public_keys(state: crate::state::State) -> anyhow::Result<Vec<String>> {
+pub async fn get_ssh_public_keys(state: crate::agent::state::State) -> anyhow::Result<Vec<String>> {
     let environment = {
         let le = state.last_environment().await;
         state.set_timeout().await;
@@ -730,7 +731,7 @@ pub async fn get_ssh_public_keys(state: crate::state::State) -> anyhow::Result<V
 }
 
 pub async fn find_ssh_private_key(
-    state: crate::state::State,
+    state: crate::agent::state::State,
     request_public_key: ssh_agent_lib::ssh_key::PublicKey,
 ) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
     let environment = {

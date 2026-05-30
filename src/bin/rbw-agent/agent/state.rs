@@ -56,8 +56,8 @@ impl State {
             sync_deadline = Some(Instant::now() + sync_timeout_duration);
         }
 
-        let state = crate::state::State {
-            inner: Arc::new(crate::state::InnerState {
+        let state = Self {
+            inner: Arc::new(InnerState {
                 priv_key: RwLock::new(None),
                 org_keys: RwLock::new(None),
                 notifications_handler: RwLock::new(notifications_handler),

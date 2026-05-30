@@ -1,14 +1,11 @@
 use anyhow::Context as _;
 use tokio::signal::unix::{signal, SignalKind};
 
-mod actions;
 mod agent;
 mod daemon;
 mod debugger;
 mod notifications;
 mod sock;
-mod ssh_agent;
-mod state;
 
 async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::Result<()> {
     let listener = crate::sock::listen()?;
@@ -19,10 +16,10 @@ async fn async_main(startup_ack: Option<crate::daemon::StartupAck>) -> anyhow::R
 
     let config = rbw::config::Config::load()?;
 
-    let state = crate::state::State::new(config);
+    let state = crate::agent::state::State::new(config);
     let agent = crate::agent::Agent::new(state.clone());
 
-    let ssh_agent = crate::ssh_agent::SshAgent::new(state);
+    let ssh_agent = crate::agent::ssh_agent::SshAgent::new(state);
 
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
