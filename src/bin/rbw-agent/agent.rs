@@ -1,6 +1,6 @@
 use anyhow::Context as _;
 use tokio::{
-    net::UnixListener,
+    net::{UnixListener, UnixStream},
     time::{sleep_until, Instant},
 };
 
@@ -18,6 +18,44 @@ impl Agent {
             Some(d) => sleep_until(d).await,
             None => std::future::pending().await,
         }
+    }
+
+    async fn on_notification(&self, message: crate::notifications::Message) {
+        match message {
+            crate::notifications::Message::Logout => {
+                log::debug!("Received Logout Message via notification channel");
+                self.state.clear().await;
+            }
+            crate::notifications::Message::Sync => {
+                log::debug!("Received Sync Message via notification channel");
+                self.state.set_sync_timeout().await;
+
+                if let Err(e) = crate::actions::sync(None, &self.state).await {
+                    eprintln!("failed to sync: {e:#}");
+                }
+            }
+            crate::notifications::Message::Disconnected => {
+                log::warn!("Notifications websocket disconnected");
+            }
+        }
+    }
+
+    async fn on_connection(&self, stream: UnixStream) {
+        let mut sock = crate::sock::Sock::new(stream);
+
+        let state = self.state.clone();
+
+        // TODO: Check if does it make sense to handle this in another task
+        tokio::spawn(async move {
+            let res = handle_request(&mut sock, state.clone()).await;
+            if let Err(e) = res {
+                sock.send(&rbw::protocol::Response::Error {
+                    error: format!("{e:#}"),
+                })
+                .await
+                .expect("failed to send error response to client");
+            }
+        });
     }
 
     pub async fn run(self, listener: UnixListener) -> anyhow::Result<()> {
@@ -38,48 +76,17 @@ impl Agent {
 
             tokio::select! {
                 message = nchannel.recv() => {
-                    match message? {
-                        crate::notifications::Message::Logout => {
-                            log::debug!("Received Logout Message via notification channel");
-                            self.state.clear().await;
-                        },
-                        crate::notifications::Message::Sync => {
-                            log::debug!("Received Sync Message via notification channel");
-                            self.state.set_sync_timeout().await;
-
-                            if let Err(e) = crate::actions::sync(None, &self.state).await {
-                                eprintln!("failed to sync: {e:#}");
-                            }
-                        },
-                        crate::notifications::Message::Disconnected => {
-                            log::warn!("Notifications websocket disconnected");
-                        },
-                    }
-
+                    let message = message?;
+                    self.on_notification(message).await;
                 },
                 // TODO: The client does like a hundred connections to do basic things. Maybe it
                 // makes sense to create more comprehensive opcodes.
                 res = listener.accept() => {
-
                     log::debug!("Received a connection.");
 
                     let res = res.context("failed to accept incoming connection")?;
 
-                    let mut sock = crate::sock::Sock::new(res.0);
-
-                    let state = self.state.clone();
-
-                    // TODO: Check if does it make sense to handle this in another task
-                    tokio::spawn(async move {
-                        let res = handle_request(&mut sock, state.clone()).await;
-                        if let Err(e) = res {
-                            sock.send(&rbw::protocol::Response::Error {
-                                error: format!("{e:#}"),
-                            })
-                            .await
-                            .expect("failed to send error response to client");
-                        }
-                    });
+                    self.on_connection(res.0).await;
                 },
                 _ = Self::sleep_until_deadline(lock_deadline) => {
                     self.state.clear().await;
@@ -89,13 +96,11 @@ impl Agent {
 
                     self.state.set_sync_timeout().await;
 
-                    //tokio::spawn(async move {
-                        // this could fail if we aren't logged in, but we
-                        // don't care about that
-                        if let Err(e) = crate::actions::sync(None, &self.state).await {
-                            eprintln!("failed to sync: {e:#}");
-                        }
-                    //});
+                    // this could fail if we aren't logged in, but we
+                    // don't care about that
+                    if let Err(e) = crate::actions::sync(None, &self.state).await {
+                        eprintln!("failed to sync: {e:#}");
+                    }
 
                 }
             }
@@ -107,15 +112,16 @@ async fn handle_request(
     sock: &mut crate::sock::Sock,
     state: crate::state::State,
 ) -> anyhow::Result<()> {
-    let req = sock.recv().await?;
-    let req = match req {
+    let req = match sock.recv().await? {
         Ok(msg) => msg,
         Err(error) => {
             sock.send(&rbw::protocol::Response::Error { error }).await?;
             return Ok(());
         }
     };
+
     let (action, environment) = req.into_parts();
+
     let set_timeout = match &action {
         rbw::protocol::Action::Register => {
             crate::actions::register(sock, state.clone(), &environment).await?;
