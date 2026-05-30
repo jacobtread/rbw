@@ -415,15 +415,6 @@ impl Agent {
     }
 }
 
-pub async fn version(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
-    sock.send(&rbw::protocol::Response::Version {
-        version: rbw::protocol::VERSION,
-    })
-    .await?;
-
-    Ok(())
-}
-
 async fn two_factor(
     pinentry: &str,
     environment: &rbw::protocol::Environment,

@@ -179,7 +179,10 @@ impl Agent {
             // TODO: It's better to handle the closing more gracefully
             rbw::protocol::Action::Quit => std::process::exit(0),
             rbw::protocol::Action::Version => {
-                actions::version(sock).await?;
+                sock.send(&rbw::protocol::Response::Version {
+                    version: rbw::protocol::VERSION,
+                })
+                .await?;
                 false
             }
         };
