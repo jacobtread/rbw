@@ -69,11 +69,10 @@ impl NotificationsHandler {
         }
     }
 
-    pub async fn connect(&mut self, url: String) -> Result<(), Box<dyn std::error::Error>> {
-        if self.is_connected() {
-            self.disconnect().await?;
-        }
-
+    async fn subscribe_ws(
+        &mut self,
+        url: String,
+    ) -> Result<(oneshot::Sender<()>, JoinHandle<()>), Box<dyn std::error::Error + 'static>> {
         let url = url::Url::parse(url.as_str())?;
         let (mut ws_stream, _response) = tokio_tungstenite::connect_async(url).await?;
 
@@ -84,8 +83,8 @@ impl NotificationsHandler {
             .await?;
 
         let (disconnect_tx, mut disconnect_rx) = tokio::sync::oneshot::channel::<()>();
-        let broadcast = self.broadcast.clone();
 
+        let broadcast = self.broadcast.clone();
         let read_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -110,6 +109,16 @@ impl NotificationsHandler {
             let _ = ws_stream.close(None).await;
             let _ = broadcast.send(Message::Disconnected);
         });
+
+        Ok((disconnect_tx, read_task))
+    }
+
+    pub async fn connect(&mut self, url: String) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_connected() {
+            self.disconnect().await?;
+        }
+
+        let (disconnect_tx, read_task) = self.subscribe_ws(url).await?;
 
         self.disconnect_tx = Some(disconnect_tx);
         self.read_handle = Some(read_task);
