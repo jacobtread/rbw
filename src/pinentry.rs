@@ -85,7 +85,7 @@ pub async fn getpin(
     ncommands += 1;
     drop(stdin);
 
-    let mut buf = crate::locked::Vec::new();
+    let mut buf = crate::locked::LockedVec::new();
     buf.zero();
     // unwrap is safe because we specified stdout as piped in the command opts
     // above

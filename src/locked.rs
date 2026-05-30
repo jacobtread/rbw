@@ -4,12 +4,12 @@ const LEN: usize = 4096;
 
 static REGION_LOCK_WORKS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
-pub struct Vec {
+pub struct LockedVec {
     data: Box<arrayvec::ArrayVec<u8, LEN>>,
     _lock: Option<region::LockGuard>,
 }
 
-impl Default for Vec {
+impl Default for LockedVec {
     fn default() -> Self {
         let data = Box::new(arrayvec::ArrayVec::<_, LEN>::new());
         let lock = match REGION_LOCK_WORKS.get() {
@@ -32,7 +32,7 @@ impl Default for Vec {
     }
 }
 
-impl Vec {
+impl LockedVec {
     pub fn new() -> Self {
         Self::default()
     }
@@ -59,14 +59,14 @@ impl Vec {
     }
 }
 
-impl Drop for Vec {
+impl Drop for LockedVec {
     fn drop(&mut self) {
         self.zero();
         self.data.as_mut().zeroize();
     }
 }
 
-impl Clone for Vec {
+impl Clone for LockedVec {
     fn clone(&self) -> Self {
         let mut new_vec = Self::new();
         new_vec.extend(self.data().iter().copied());
@@ -76,11 +76,11 @@ impl Clone for Vec {
 
 #[derive(Clone)]
 pub struct Password {
-    password: Vec,
+    password: LockedVec,
 }
 
 impl Password {
-    pub fn new(password: Vec) -> Self {
+    pub fn new(password: LockedVec) -> Self {
         Self { password }
     }
 
@@ -91,11 +91,11 @@ impl Password {
 
 #[derive(Clone)]
 pub struct Keys {
-    keys: Vec,
+    keys: LockedVec,
 }
 
 impl Keys {
-    pub fn new(keys: Vec) -> Self {
+    pub fn new(keys: LockedVec) -> Self {
         Self { keys }
     }
 
@@ -110,11 +110,11 @@ impl Keys {
 
 #[derive(Clone)]
 pub struct PasswordHash {
-    hash: Vec,
+    hash: LockedVec,
 }
 
 impl PasswordHash {
-    pub fn new(hash: Vec) -> Self {
+    pub fn new(hash: LockedVec) -> Self {
         Self { hash }
     }
 
@@ -125,11 +125,11 @@ impl PasswordHash {
 
 #[derive(Clone)]
 pub struct PrivateKey {
-    private_key: Vec,
+    private_key: LockedVec,
 }
 
 impl PrivateKey {
-    pub fn new(private_key: Vec) -> Self {
+    pub fn new(private_key: LockedVec) -> Self {
         Self { private_key }
     }
 

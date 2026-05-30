@@ -136,14 +136,14 @@ impl CipherString {
     pub fn decrypt_locked_symmetric(
         &self,
         keys: &crate::locked::Keys,
-    ) -> Result<crate::locked::Vec> {
+    ) -> Result<crate::locked::LockedVec> {
         if let Self::Symmetric {
             iv,
             ciphertext,
             mac,
         } = self
         {
-            let mut res = crate::locked::Vec::new();
+            let mut res = crate::locked::LockedVec::new();
             res.extend(ciphertext.iter().copied());
             let cipher = decrypt_common_symmetric(keys, iv, ciphertext, mac.as_deref())?;
             cipher
@@ -160,7 +160,7 @@ impl CipherString {
     pub fn decrypt_locked_asymmetric(
         &self,
         private_key: &crate::locked::PrivateKey,
-    ) -> Result<crate::locked::Vec> {
+    ) -> Result<crate::locked::LockedVec> {
         if let Self::Asymmetric { ciphertext } = self {
             let privkey_data = private_key.private_key();
             let privkey_data = pkcs7_unpad(privkey_data).ok_or(Error::Padding)?;
@@ -173,7 +173,7 @@ impl CipherString {
             // XXX it'd be great if the rsa crate would let us decrypt
             // into a preallocated buffer directly to avoid the
             // intermediate vec that needs to be manually zeroized, etc
-            let mut res = crate::locked::Vec::new();
+            let mut res = crate::locked::LockedVec::new();
             res.extend(bytes.iter().copied());
             bytes.zeroize();
 

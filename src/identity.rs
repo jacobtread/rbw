@@ -19,7 +19,7 @@ impl Identity {
         let iterations = std::num::NonZeroU32::new(crypto_params.iterations)
             .ok_or(Error::Pbkdf2ZeroIterations)?;
 
-        let mut keys = crate::locked::Vec::new();
+        let mut keys = crate::locked::LockedVec::new();
         keys.extend(std::iter::repeat_n(0, 64));
 
         let enc_key = &mut keys.data_mut()[0..32];
@@ -61,7 +61,7 @@ impl Identity {
             }
         }
 
-        let mut hash = crate::locked::Vec::new();
+        let mut hash = crate::locked::LockedVec::new();
         hash.extend(std::iter::repeat_n(0, 32));
         pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(
             enc_key,
