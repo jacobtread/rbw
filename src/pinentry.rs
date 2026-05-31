@@ -4,8 +4,8 @@ use std::{
 };
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt as _},
-    process::{Child, ChildStdout, Command},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt as _},
+    process::{Child, ChildStdin, ChildStdout, Command},
 };
 
 use crate::{
@@ -13,17 +13,74 @@ use crate::{
     locked::LockedVec,
 };
 
-struct Pinentry {
-    child: Child,
-    stdout: ChildStdout,
+struct Pinentry<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
+    child: Option<Child>,
+    reader: R,
+    writer: W,
 }
 
-impl Pinentry {
+impl Pinentry<ChildStdout, ChildStdin> {
+    async fn spawn(
+        binary: &str,
+        environment: &crate::protocol::Environment,
+        grab: bool,
+    ) -> Result<Self> {
+        let mut cmd = Command::new(binary);
+
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+
+        let env_vars = environment.env_vars();
+
+        cmd.args(Self::calc_args(environment, grab));
+
+        for env_var in &*crate::protocol::ENVIRONMENT_VARIABLES_OS {
+            if let Some(val) = env_vars.get(env_var.as_os_str()) {
+                cmd.env(env_var, val);
+            } else {
+                cmd.env_remove(env_var);
+            }
+        }
+
+        cmd.envs(env_vars);
+
+        let mut child = cmd.spawn().map_err(|source| Error::Spawn { source })?;
+
+        let Some(stdin) = child.stdin.take() else {
+            return Err(Error::PinentryReadOutput {
+                source: std::io::Error::other("stdin unavailable"),
+            });
+        };
+
+        let Some(stdout) = child.stdout.take() else {
+            return Err(Error::PinentryReadOutput {
+                source: std::io::Error::other("stdout unavailable"),
+            });
+        };
+
+        let mut p = Self {
+            child: Some(child),
+            reader: stdout,
+            writer: stdin,
+        };
+
+        let line = p.read_line().await?;
+
+        if line.as_str()?.starts_with("OK") {
+            Ok(p)
+        } else {
+            Err(Error::PinentryErrorMessage {
+                error: line.as_str()?.to_string(),
+            })
+        }
+    }
+}
+
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Pinentry<R, W> {
     async fn read_line(&mut self) -> Result<LockedVec> {
         let mut v = LockedVec::new();
 
         loop {
-            let b = self.stdout.read_u8().await?;
+            let b = self.reader.read_u8().await?;
 
             if b == b'\n' {
                 break;
@@ -58,57 +115,8 @@ impl Pinentry {
         args
     }
 
-    async fn spawn(
-        binary: &str,
-        environment: &crate::protocol::Environment,
-        grab: bool,
-    ) -> Result<Self> {
-        let mut cmd = Command::new(binary);
-
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
-
-        let env_vars = environment.env_vars();
-
-        cmd.args(Self::calc_args(environment, grab));
-
-        for env_var in &*crate::protocol::ENVIRONMENT_VARIABLES_OS {
-            if let Some(val) = env_vars.get(env_var.as_os_str()) {
-                cmd.env(env_var, val);
-            } else {
-                cmd.env_remove(env_var);
-            }
-        }
-
-        cmd.envs(env_vars);
-
-        let mut child = cmd.spawn().map_err(|source| Error::Spawn { source })?;
-
-        let Some(stdout) = child.stdout.take() else {
-            return Err(Error::PinentryReadOutput {
-                source: std::io::Error::other("stdout unavailable"),
-            });
-        };
-
-        let mut p = Self { child, stdout };
-        let line = p.read_line().await?;
-
-        if line.as_str()?.starts_with("OK") {
-            Ok(p)
-        } else {
-            Err(Error::PinentryErrorMessage {
-                error: line.as_str()?.to_string(),
-            })
-        }
-    }
-
     async fn command(&mut self, command: &str) -> Result<LockedVec> {
-        let Some(stdin) = &mut self.child.stdin else {
-            return Err(Error::WriteStdin {
-                source: std::io::Error::other("stdin unavailable"),
-            });
-        };
-
-        stdin
+        self.writer
             .write_all(&format!("{command}\n").as_bytes())
             .await
             .map_err(|source| Error::WriteStdin { source })?;
@@ -158,11 +166,15 @@ impl Pinentry {
         }
     }
 
-    async fn wait(&mut self) -> Result<()> {
-        self.child
-            .wait()
-            .await
-            .map_err(|source| Error::PinentryWait { source })?;
+    async fn wait(mut self) -> Result<()> {
+        if let Some(mut child) = self.child.take() {
+            drop(self);
+
+            child
+                .wait()
+                .await
+                .map_err(|source| Error::PinentryWait { source })?;
+        }
 
         Ok(())
     }

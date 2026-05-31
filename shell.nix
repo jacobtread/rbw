@@ -10,5 +10,6 @@ pkgs.mkShell {
     rust-analyzer
     rustfmt
     clippy
+    pinentry-all
   ];
 }
