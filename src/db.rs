@@ -6,7 +6,6 @@ use crate::{
 use std::{
     collections::HashMap,
     fmt::Display,
-    io::{Read as _, Write as _},
 };
 
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -887,23 +886,6 @@ impl Db {
         Self::default()
     }
 
-    pub fn load(server: &str, email: &str) -> Result<Self> {
-        let file = crate::dirs::db_file(server, email)?;
-        let mut fh = std::fs::File::open(&file).map_err(|source| Error::LoadDb {
-            source,
-            file: file.clone(),
-        })?;
-        let mut json = String::new();
-        fh.read_to_string(&mut json)
-            .map_err(|source| Error::LoadDb {
-                source,
-                file: file.clone(),
-            })?;
-        let slf: Self =
-            serde_json::from_str(&json).map_err(|source| Error::LoadDbJson { source, file })?;
-        Ok(slf)
-    }
-
     pub async fn load_async(server: &str, email: &str) -> Result<Self> {
         let file = crate::dirs::db_file(server, email)?;
         let mut fh = tokio::fs::File::open(&file)
@@ -968,31 +950,6 @@ impl Db {
             crypto_params: self.get_crypto_parameters()?,
             protected_key,
         })
-    }
-
-    // XXX need to make this atomic
-    pub fn save(&self, server: &str, email: &str) -> Result<()> {
-        let file = crate::dirs::db_file(server, email)?;
-        // unwrap is safe here because Self::filename is explicitly
-        // constructed as a filename in a directory
-        std::fs::create_dir_all(file.parent().unwrap()).map_err(|source| Error::SaveDb {
-            source,
-            file: file.clone(),
-        })?;
-        let mut fh = std::fs::File::create(&file).map_err(|source| Error::SaveDb {
-            source,
-            file: file.clone(),
-        })?;
-        fh.write_all(
-            serde_json::to_string(self)
-                .map_err(|source| Error::SaveDbJson {
-                    source,
-                    file: file.clone(),
-                })?
-                .as_bytes(),
-        )
-        .map_err(|source| Error::SaveDb { source, file })?;
-        Ok(())
     }
 
     // XXX need to make this atomic

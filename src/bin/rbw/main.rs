@@ -352,7 +352,8 @@ fn calc_pwgen_type(
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let opt = Opt::parse();
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
@@ -378,7 +379,7 @@ fn main() {
         Opt::Unlock => commands::unlock(),
         Opt::Unlocked => commands::unlocked(),
         Opt::Sync => commands::sync(),
-        Opt::List { fields, raw } => commands::list(&fields, raw),
+        Opt::List { fields, raw } => commands::list(&fields, raw).await,
         Opt::Get {
             find_args,
             field,
@@ -387,50 +388,59 @@ fn main() {
             #[cfg(feature = "clipboard")]
             clipboard,
             list_fields,
-        } => commands::get(
-            find_args,
-            field.as_deref(),
-            full,
-            raw,
-            #[cfg(feature = "clipboard")]
-            clipboard,
-            #[cfg(not(feature = "clipboard"))]
-            false,
-            list_fields,
-        ),
+        } => {
+            commands::get(
+                find_args,
+                field.as_deref(),
+                full,
+                raw,
+                #[cfg(feature = "clipboard")]
+                clipboard,
+                #[cfg(not(feature = "clipboard"))]
+                false,
+                list_fields,
+            )
+            .await
+        }
         Opt::Search {
             term,
             fields,
             folder,
             raw,
-        } => commands::search(&term, &fields, folder.as_deref(), raw),
+        } => commands::search(&term, &fields, folder.as_deref(), raw).await,
         Opt::Code {
             find_args,
             #[cfg(feature = "clipboard")]
             clipboard,
-        } => commands::code(
-            find_args,
-            #[cfg(feature = "clipboard")]
-            clipboard,
-            #[cfg(not(feature = "clipboard"))]
-            false,
-        ),
+        } => {
+            commands::code(
+                find_args,
+                #[cfg(feature = "clipboard")]
+                clipboard,
+                #[cfg(not(feature = "clipboard"))]
+                false,
+            )
+            .await
+        }
         Opt::Add {
             name,
             user,
             uri,
             folder,
-        } => commands::add(
-            &name,
-            user.as_deref(),
-            &uri.iter()
-                // XXX not sure what the ui for specifying the match type
-                // should be
-                .map(|uri| (uri.clone(), None))
-                .collect::<Vec<_>>(),
-            folder.as_deref(),
-            None,
-        ),
+        } => {
+            commands::add(
+                &name,
+                user.as_deref(),
+                &uri.iter()
+                    // XXX not sure what the ui for specifying the match type
+                    // should be
+                    .map(|uri| (uri.clone(), None))
+                    .collect::<Vec<_>>(),
+                folder.as_deref(),
+                None,
+            )
+            .await
+        }
         Opt::Generate {
             len,
             name,
@@ -454,12 +464,13 @@ fn main() {
                 len,
                 calc_pwgen_type(no_symbols, only_numbers, nonconfusables, diceware),
             )
+            .await
         }
-        Opt::Edit { find_args } => commands::edit(find_args),
-        Opt::Remove { find_args } => commands::remove(find_args),
-        Opt::History { find_args } => commands::history(find_args),
+        Opt::Edit { find_args } => commands::edit(find_args).await,
+        Opt::Remove { find_args } => commands::remove(find_args).await,
+        Opt::History { find_args } => commands::history(find_args).await,
         Opt::Lock => commands::lock(),
-        Opt::Purge => commands::purge(),
+        Opt::Purge => commands::purge().await,
         Opt::StopAgent => commands::stop_agent(),
         Opt::GenCompletions { shell } => {
             gen_completions(shell);

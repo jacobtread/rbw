@@ -568,7 +568,7 @@ pub fn display_entry_short(entry: &rbw::db::Entry<Decrypted>, desc: &str) -> boo
     true
 }
 
-pub fn get(
+pub async fn get(
     FindArgs {
         needle,
         user,
@@ -583,7 +583,7 @@ pub fn get(
 ) -> anyhow::Result<()> {
     unlock()?;
 
-    let db = load_db()?;
+    let db = load_db().await?;
     let mut dec = RemoteDecrypter {};
 
     let desc = format!(
@@ -688,7 +688,7 @@ fn print_entry_list(
     Ok(())
 }
 
-pub fn search(
+pub async fn search(
     term: &str,
     fields: &[String],
     folder: Option<&str>,
@@ -705,7 +705,7 @@ pub fn search(
 
     unlock()?;
 
-    let db = load_db()?;
+    let db = load_db().await?;
 
     let mut entries: Vec<SearchEntry> = db
         .entries
@@ -724,11 +724,11 @@ pub fn search(
     print_entry_list(&entries, &fields, raw)
 }
 
-pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
-    search("", fields, None, raw)
+pub async fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
+    search("", fields, None, raw).await
 }
 
-pub fn code(
+pub async fn code(
     FindArgs {
         needle,
         user,
@@ -739,7 +739,7 @@ pub fn code(
 ) -> anyhow::Result<()> {
     unlock()?;
 
-    let db = load_db()?;
+    let db = load_db().await?;
     let mut dec = RemoteDecrypter {};
 
     let desc = format!(
@@ -773,7 +773,7 @@ pub fn code(
     Ok(())
 }
 
-fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<String> {
+async fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<String> {
     let enc: &mut dyn Encrypter<()> = &mut RemoteEncrypter {}; // fat ptr trick
     let dec: &mut dyn Decrypter<()> = &mut RemoteDecrypter {};
 
@@ -782,7 +782,7 @@ fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<S
         db.refresh_token.as_ref().unwrap(),
     )?;
 
-    update_token(db, new_access_token)?;
+    update_token(db, new_access_token).await?;
 
     let folders: Vec<(String, String)> = folders
         .into_iter()
@@ -802,7 +802,7 @@ fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<S
             &enc.encrypt_field(None, folder)?,
         )?;
 
-        update_token(db, new_access_token)?;
+        update_token(db, new_access_token).await?;
 
         id
     };
@@ -830,9 +830,9 @@ fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
     (password, notes)
 }
 
-fn update_token(db: &mut rbw::db::Db, new_token: Option<String>) -> anyhow::Result<()> {
+async fn update_token(db: &mut rbw::db::Db, new_token: Option<String>) -> anyhow::Result<()> {
     if db.update_access_token(new_token) {
-        save_db(db)?;
+        save_db(db).await?;
     }
 
     Ok(())
@@ -849,7 +849,7 @@ const HELP_NOTES: &str = r"
 # Lines with leading # will be ignored.
 ";
 
-pub fn add(
+pub async fn add(
     name: &str,
     username: Option<&str>,
     uris: &[(String, Option<rbw::api::UriMatchType>)],
@@ -860,7 +860,7 @@ pub fn add(
 
     unlock()?;
 
-    let mut db = load_db()?;
+    let mut db = load_db().await?;
     // unwrap is safe here because the call to unlock above is guaranteed to
     // populate these or error
 
@@ -895,7 +895,7 @@ pub fn add(
         .collect::<anyhow::Result<_>>()?;
 
     let folder_id = match folder {
-        Some(folder) => Some(find_or_create_folder(&mut db, folder)?),
+        Some(folder) => Some(find_or_create_folder(&mut db, folder).await?),
         None => None,
     };
 
@@ -913,12 +913,12 @@ pub fn add(
         folder_id.as_deref(),
     )?;
 
-    update_token(&mut db, new_token)?;
+    update_token(&mut db, new_token).await?;
 
     crate::actions::sync()
 }
 
-pub fn generate(
+pub async fn generate(
     name: Option<&str>,
     username: Option<&str>,
     uris: &[(String, Option<rbw::api::UriMatchType>)],
@@ -930,12 +930,12 @@ pub fn generate(
     println!("{password}");
 
     match name {
-        Some(name) => add(name, username, uris, folder, Some(&password)),
+        Some(name) => add(name, username, uris, folder, Some(&password)).await,
         None => Ok(()),
     }
 }
 
-pub fn edit(
+pub async fn edit(
     FindArgs {
         needle,
         user,
@@ -945,7 +945,7 @@ pub fn edit(
 ) -> anyhow::Result<()> {
     unlock()?;
 
-    let mut db = load_db()?;
+    let mut db = load_db().await?;
 
     let mut enc = RemoteEncrypter {};
     let mut dec = RemoteDecrypter {};
@@ -1001,12 +1001,12 @@ pub fn edit(
         &entry,
     )?;
 
-    update_token(&mut db, new_token)?;
+    update_token(&mut db, new_token).await?;
 
     crate::actions::sync()
 }
 
-pub fn remove(
+pub async fn remove(
     FindArgs {
         needle,
         user,
@@ -1016,7 +1016,7 @@ pub fn remove(
 ) -> anyhow::Result<()> {
     unlock()?;
 
-    let mut db = load_db()?;
+    let mut db = load_db().await?;
 
     let desc = format!(
         "{}{}",
@@ -1033,12 +1033,12 @@ pub fn remove(
         &entry.id,
     )?;
 
-    update_token(&mut db, new_access_token)?;
+    update_token(&mut db, new_access_token).await?;
 
     crate::actions::sync()
 }
 
-pub fn history(
+pub async fn history(
     FindArgs {
         needle: name,
         user,
@@ -1048,7 +1048,7 @@ pub fn history(
 ) -> anyhow::Result<()> {
     unlock()?;
 
-    let db = load_db()?;
+    let db = load_db().await?;
     let mut dec = RemoteDecrypter {};
 
     let desc = format!(
@@ -1072,10 +1072,10 @@ pub fn lock() -> anyhow::Result<()> {
     crate::actions::lock()
 }
 
-pub fn purge() -> anyhow::Result<()> {
+pub async fn purge() -> anyhow::Result<()> {
     stop_agent()?;
 
-    remove_db()
+    remove_db().await
 }
 
 pub fn stop_agent() -> anyhow::Result<()> {
@@ -1145,29 +1145,38 @@ fn version_or_quit() -> anyhow::Result<u32> {
     })
 }
 
-fn with_config<T>(f: impl FnOnce(&str, &str) -> anyhow::Result<T>) -> anyhow::Result<T> {
-    let config = rbw::config::Config::load()?;
+async fn load_db() -> anyhow::Result<rbw::db::Db> {
+    let config = rbw::config::Config::load_async().await?;
+
     let Some(email) = &config.email else {
         anyhow::bail!("failed to find email address in config");
     };
 
-    f(&config.server_name(), email)
+    rbw::db::Db::load_async(&config.server_name(), email)
+        .await
+        .map_err(anyhow::Error::new)
 }
 
-fn load_db() -> anyhow::Result<rbw::db::Db> {
-    with_config(|server_name, email| {
-        rbw::db::Db::load(server_name, email).map_err(anyhow::Error::new)
-    })
+async fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {
+    let config = rbw::config::Config::load_async().await?;
+
+    let Some(email) = &config.email else {
+        anyhow::bail!("failed to find email address in config");
+    };
+
+    db.save_async(&config.server_name(), email)
+        .await
+        .map_err(anyhow::Error::new)
 }
 
-fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {
-    with_config(|server_name, email| db.save(server_name, email).map_err(anyhow::Error::new))
-}
+async fn remove_db() -> anyhow::Result<()> {
+    let config = rbw::config::Config::load_async().await?;
 
-fn remove_db() -> anyhow::Result<()> {
-    with_config(|server_name, email| {
-        rbw::db::Db::remove(server_name, email).map_err(anyhow::Error::new)
-    })
+    let Some(email) = &config.email else {
+        anyhow::bail!("failed to find email address in config");
+    };
+
+    rbw::db::Db::remove(&config.server_name(), email).map_err(anyhow::Error::new)
 }
 
 fn decode_totp_secret(secret: &str) -> anyhow::Result<Vec<u8>> {
