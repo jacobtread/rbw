@@ -1,8 +1,130 @@
-use crate::prelude::*;
+use std::{convert::TryFrom as _, ffi::OsString, process::Stdio};
 
-use std::convert::TryFrom as _;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt as _},
+    process::{Child, ChildStdout, Command},
+};
 
-use tokio::{io::AsyncWriteExt as _, process::Child};
+use crate::{
+    error::{Error, Result},
+    locked::LockedVec,
+};
+
+struct Pinentry {
+    child: Child,
+    stdout: ChildStdout,
+}
+
+impl Pinentry {
+    async fn read_line(&mut self) -> Result<LockedVec> {
+        let mut v = LockedVec::new();
+        while let Ok(b) = self.stdout.read_u8().await {
+            if b == b'\n' {
+                break;
+            }
+            v.push(b);
+        }
+
+        Ok(v)
+    }
+
+    async fn spawn(
+        binary: &str,
+        environment: &crate::protocol::Environment,
+        grab: bool,
+    ) -> Result<Self> {
+        let mut cmd = Command::new(binary);
+
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+
+        let mut args = vec!["--timeout".into(), "0".into()];
+
+        if let Some(tty) = environment.tty() {
+            args.extend(["--ttyname".into(), tty.into()]);
+        }
+
+        let env_vars = environment.env_vars();
+
+        // Not all pinentry appear to respect the --display flag, so we also keep the environment
+        // variable.
+        if let Some(display) = env_vars.get(OsString::from("DISPLAY").as_os_str()) {
+            args.extend(["--display".into(), display.clone()]);
+        }
+
+        if !grab {
+            args.push("--no-global-grab".into());
+        }
+
+        cmd.args(args);
+
+        for env_var in &*crate::protocol::ENVIRONMENT_VARIABLES_OS {
+            if let Some(val) = env_vars.get(env_var) {
+                cmd.env(env_var, val);
+            } else {
+                cmd.env_remove(env_var);
+            }
+        }
+
+        cmd.envs(env_vars);
+
+        let mut child = cmd.spawn().map_err(|source| Error::Spawn { source })?;
+        // unwrap is safe because we specified stdin as piped in the command opts
+        // above
+
+        let Some(stdout) = child.stdout.take() else {
+            return Err(Error::PinentryReadOutput {
+                source: std::io::Error::other("stdout unavailable"),
+            });
+        };
+
+        let mut p = Self { child, stdout };
+        let line = p.read_line().await?;
+
+        match &line.as_str()?[0..2] {
+            "OK" => Ok(p),
+            _ => Err(Error::PinentryErrorMessage {
+                error: line.as_str()?.to_string(),
+            }),
+        }
+    }
+
+    async fn command(&mut self, command: &str) -> Result<LockedVec> {
+        let Some(stdin) = &mut self.child.stdin else {
+            return Err(Error::WriteStdin {
+                source: std::io::Error::other("stdin unavailable"),
+            });
+        };
+
+        stdin
+            .write_all(&format!("{command}\n").as_bytes())
+            .await
+            .map_err(|source| Error::WriteStdin { source })?;
+
+        let line = self.read_line().await?;
+
+        match &line.as_str()?[0..2] {
+            "OK" => Ok(line),
+            "D " => match self.read_line().await?.as_str()? {
+                "OK" => Ok(line),
+                line => Err(Error::PinentryErrorMessage {
+                    error: line.to_string(),
+                }),
+            },
+            _ => Err(Error::PinentryErrorMessage {
+                error: line.as_str()?.to_string(),
+            }),
+        }
+    }
+
+    async fn wait(&mut self) -> Result<()> {
+        self.child
+            .wait()
+            .await
+            .map_err(|source| Error::PinentryWait { source })?;
+
+        Ok(())
+    }
+}
 
 fn spawn_pinentry(
     pinentry: &str,
@@ -52,51 +174,21 @@ pub async fn getpin(
     environment: &crate::protocol::Environment,
     grab: bool,
 ) -> Result<crate::locked::Password> {
-    let mut child = spawn_pinentry(pinentry, environment, grab)?;
-    let mut stdin = child.stdin.take().unwrap();
+    let mut pinentry = Pinentry::spawn(pinentry, environment, grab).await?;
 
-    let mut ncommands = 1;
-    stdin
-        .write_all(b"SETTITLE rbw\n")
-        .await
-        .map_err(|source| Error::WriteStdin { source })?;
-    ncommands += 1;
-    stdin
-        .write_all(format!("SETPROMPT {prompt}\n").as_bytes())
-        .await
-        .map_err(|source| Error::WriteStdin { source })?;
-    ncommands += 1;
-    stdin
-        .write_all(format!("SETDESC {desc}\n").as_bytes())
-        .await
-        .map_err(|source| Error::WriteStdin { source })?;
-    ncommands += 1;
+    pinentry.command("SETTITLE rbw").await?;
+    pinentry.command(&format!("SETPROMPT {prompt}")).await?;
+    pinentry.command(&format!("SETDESC {desc}")).await?;
+
     if let Some(err) = err {
-        stdin
-            .write_all(format!("SETERROR {err}\n").as_bytes())
-            .await
-            .map_err(|source| Error::WriteStdin { source })?;
-        ncommands += 1;
+        pinentry.command(&format!("SETERROR {err}")).await?;
     }
-    stdin
-        .write_all(b"GETPIN\n")
-        .await
-        .map_err(|source| Error::WriteStdin { source })?;
-    ncommands += 1;
-    drop(stdin);
 
-    let mut buf = crate::locked::LockedVec::new();
-    buf.alloc_all();
+    let buf = pinentry.command("GETPIN").await?;
 
-    // unwrap is safe because we specified stdout as piped in the command opts
-    // above
-    let len = read_password(ncommands, buf.data_mut(), child.stdout.as_mut().unwrap()).await?;
-    buf.truncate(len);
+    let buf = LockedVec::from_slice(&buf[2..]);
 
-    child
-        .wait()
-        .await
-        .map_err(|source| Error::PinentryWait { source })?;
+    pinentry.wait().await?;
 
     Ok(crate::locked::Password::new(buf))
 }

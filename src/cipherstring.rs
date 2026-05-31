@@ -147,7 +147,7 @@ impl CipherString {
             res.extend(ciphertext.iter().copied());
             let cipher = decrypt_common_symmetric(keys, iv, ciphertext, mac.as_deref())?;
             cipher
-                .decrypt_padded_mut::<block_padding::Pkcs7>(res.data_mut())
+                .decrypt_padded_mut::<block_padding::Pkcs7>(&mut res)
                 .map_err(|source| Error::Decrypt { source })?;
             Ok(res)
         } else {

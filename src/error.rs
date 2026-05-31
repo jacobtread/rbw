@@ -1,3 +1,5 @@
+use std::str::Utf8Error;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("email address not set")]
@@ -237,6 +239,15 @@ pub enum Error {
 
     #[error("invalid kdf type: {ty}")]
     InvalidKdfType { ty: String },
+
+    #[error("Utf8 conversion error: {source}")]
+    Utf8Error { source: Utf8Error }
+}
+
+impl From<Utf8Error> for Error {
+    fn from(value: Utf8Error) -> Self {
+        Self::Utf8Error { source: value }
+    }
 }
 
 impl From<std::io::Error> for Error {

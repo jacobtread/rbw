@@ -1,3 +1,5 @@
+use std::{ops::{Deref, DerefMut}, str::Utf8Error};
+
 use zeroize::Zeroize;
 
 const LEN: usize = 4096;
@@ -33,9 +35,33 @@ impl Default for LockedVec {
     }
 }
 
+impl Deref for LockedVec {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data.0[0..self.data.1]
+    }
+}
+
+impl DerefMut for LockedVec {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data.0[0..self.data.1]
+    }
+}
+
 impl LockedVec {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn from_slice(slice: &[u8]) -> Self {
+        let mut v = Self::new();
+        v.extend(slice.iter().copied());
+        v
+    }
+
+    pub fn as_str(&self) -> Result<&str, Utf8Error> {
+        str::from_utf8(self)
     }
 
     pub fn capacity(&self) -> usize {
@@ -44,15 +70,6 @@ impl LockedVec {
 
     pub fn len(&self) -> usize {
         self.data.1
-    }
-
-    pub fn data(&self) -> &[u8] {
-        &self.data.0[0..self.len()]
-    }
-
-    pub fn data_mut(&mut self) -> &mut [u8] {
-        let len = self.len();
-        &mut self.data.0[0..len]
     }
 
     pub fn push(&mut self, el: u8) {
@@ -92,7 +109,7 @@ impl Drop for LockedVec {
 impl Clone for LockedVec {
     fn clone(&self) -> Self {
         let mut new_vec = Self::new();
-        new_vec.extend(self.data().iter().copied());
+        new_vec.extend(self.iter().copied());
         new_vec
     }
 }
@@ -108,7 +125,7 @@ impl Password {
     }
 
     pub fn password(&self) -> &[u8] {
-        self.password.data()
+        &self.password
     }
 }
 
@@ -123,11 +140,11 @@ impl Keys {
     }
 
     pub fn enc_key(&self) -> &[u8] {
-        &self.keys.data()[0..32]
+        &self.keys[0..32]
     }
 
     pub fn mac_key(&self) -> &[u8] {
-        &self.keys.data()[32..64]
+        &self.keys[32..64]
     }
 }
 
@@ -142,7 +159,7 @@ impl PasswordHash {
     }
 
     pub fn hash(&self) -> &[u8] {
-        self.hash.data()
+        &self.hash
     }
 }
 
@@ -157,7 +174,7 @@ impl PrivateKey {
     }
 
     pub fn private_key(&self) -> &[u8] {
-        self.private_key.data()
+        &self.private_key
     }
 }
 

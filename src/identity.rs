@@ -22,7 +22,7 @@ impl Identity {
         let mut keys = crate::locked::LockedVec::new();
         keys.extend(std::iter::repeat_n(0, 64));
 
-        let enc_key = &mut keys.data_mut()[0..32];
+        let enc_key = &mut keys[0..32];
 
         match crypto_params.kdf {
             crate::api::KdfType::Pbkdf2 => {
@@ -63,18 +63,13 @@ impl Identity {
 
         let mut hash = crate::locked::LockedVec::new();
         hash.extend(std::iter::repeat_n(0, 32));
-        pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(
-            enc_key,
-            password.password(),
-            1,
-            hash.data_mut(),
-        )
-        .map_err(|_| Error::Pbkdf2)?;
+        pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(enc_key, password.password(), 1, &mut hash)
+            .map_err(|_| Error::Pbkdf2)?;
 
         let hkdf = hkdf::Hkdf::<sha2::Sha256>::from_prk(enc_key).map_err(|_| Error::HkdfExpand)?;
         hkdf.expand(b"enc", enc_key)
             .map_err(|_| Error::HkdfExpand)?;
-        let mac_key = &mut keys.data_mut()[32..64];
+        let mac_key = &mut keys[32..64];
         hkdf.expand(b"mac", mac_key)
             .map_err(|_| Error::HkdfExpand)?;
 
