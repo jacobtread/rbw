@@ -18,10 +18,15 @@ struct Pinentry {
 impl Pinentry {
     async fn read_line(&mut self) -> Result<LockedVec> {
         let mut v = LockedVec::new();
-        while let Ok(b) = self.stdout.read_u8().await {
+
+        loop {
+            let b = self.stdout.read_u8().await?;
+
             if b == b'\n' {
                 break;
             }
+
+            // NOTE: This panics if the line is > 4096 bytes
             v.push(b);
         }
 
@@ -80,11 +85,12 @@ impl Pinentry {
         let mut p = Self { child, stdout };
         let line = p.read_line().await?;
 
-        match &line.as_str()?[0..2] {
-            "OK" => Ok(p),
-            _ => Err(Error::PinentryErrorMessage {
+        if line.as_str()?.starts_with("OK") {
+            Ok(p)
+        } else {
+            Err(Error::PinentryErrorMessage {
                 error: line.as_str()?.to_string(),
-            }),
+            })
         }
     }
 
@@ -100,19 +106,48 @@ impl Pinentry {
             .await
             .map_err(|source| Error::WriteStdin { source })?;
 
-        let line = self.read_line().await?;
+        loop {
+            let mut line = self.read_line().await?;
 
-        match &line.as_str()?[0..2] {
-            "OK" => Ok(line),
-            "D " => match self.read_line().await?.as_str()? {
-                "OK" => Ok(line),
-                line => Err(Error::PinentryErrorMessage {
-                    error: line.to_string(),
-                }),
-            },
-            _ => Err(Error::PinentryErrorMessage {
-                error: line.as_str()?.to_string(),
-            }),
+            let line_str = line.as_str()?;
+
+            if line_str.starts_with("OK") {
+                return Ok(line);
+            } else if line_str.starts_with("ERR ") {
+                let err = &line_str[4..];
+                let mut split = err.splitn(2, ' ');
+                let code = split.next();
+                match code {
+                    Some("83886179") => {
+                        return Err(Error::PinentryCancelled);
+                    }
+                    _ => {
+                        return Err(Error::PinentryErrorMessage {
+                            error: err.to_string(),
+                        });
+                    }
+                }
+            } else if line_str.starts_with("S ") {
+                continue;
+            } else if line_str.starts_with("D ") {
+                match self.read_line().await?.as_str()? {
+                    "OK" => {
+                        let len = line.len();
+                        let len = percent_decode(&mut line[..len]);
+
+                        return Ok(LockedVec::from_slice(&line[2..len]));
+                    }
+                    line => {
+                        return Err(Error::PinentryErrorMessage {
+                            error: line.to_string(),
+                        });
+                    }
+                }
+            } else {
+                return Err(Error::PinentryErrorMessage {
+                    error: line.as_str()?.to_string(),
+                });
+            }
         }
     }
 
@@ -124,46 +159,6 @@ impl Pinentry {
 
         Ok(())
     }
-}
-
-fn spawn_pinentry(
-    pinentry: &str,
-    environment: &crate::protocol::Environment,
-    grab: bool,
-) -> Result<Child> {
-    let mut opts = tokio::process::Command::new(pinentry);
-    opts.stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped());
-    let mut args = vec!["--timeout".into(), "0".into()];
-    if let Some(tty) = environment.tty() {
-        args.extend(["--ttyname".into(), tty.into()]);
-    }
-
-    let env_vars = environment.env_vars();
-    // Not all pinentry appear to respect the --display flag, so we also keep the environment
-    // variable.
-    if let Some(display) = env_vars.get(std::ffi::OsString::from("DISPLAY").as_os_str()) {
-        args.extend(["--display".into(), display.clone()]);
-    }
-    if !grab {
-        args.push("--no-global-grab".into());
-    }
-    opts.args(args);
-
-    for env_var in &*crate::protocol::ENVIRONMENT_VARIABLES_OS {
-        if let Some(val) = env_vars.get(env_var) {
-            opts.env(env_var, val);
-        } else {
-            opts.env_remove(env_var);
-        }
-    }
-    opts.envs(env_vars);
-
-    let child = opts.spawn().map_err(|source| Error::Spawn { source })?;
-    // unwrap is safe because we specified stdin as piped in the command opts
-    // above
-
-    Ok(child)
 }
 
 pub async fn getpin(
@@ -186,8 +181,6 @@ pub async fn getpin(
 
     let buf = pinentry.command("GETPIN").await?;
 
-    let buf = LockedVec::from_slice(&buf[2..]);
-
     pinentry.wait().await?;
 
     Ok(crate::locked::Password::new(buf))
@@ -199,114 +192,16 @@ pub async fn confirm(
     environment: &crate::protocol::Environment,
     grab: bool,
 ) -> Result<bool> {
-    let mut child = spawn_pinentry(pinentry, environment, grab)?;
-    let mut stdin = child.stdin.take().unwrap();
+    let mut pinentry = Pinentry::spawn(pinentry, environment, grab).await?;
 
-    let mut ncommands = 1;
-    stdin
-        .write_all(b"SETTITLE rbw\n")
-        .await
-        .map_err(|source| Error::WriteStdin { source })?;
-    ncommands += 1;
-    stdin
-        .write_all(format!("SETDESC {desc}\n").as_bytes())
-        .await
-        .map_err(|source| Error::WriteStdin { source })?;
-    ncommands += 1;
-    stdin
-        .write_all(b"CONFIRM\n")
-        .await
-        .map_err(|source| Error::WriteStdin { source })?;
-    ncommands += 1;
-    drop(stdin);
+    pinentry.command("SETTITLE rbw").await?;
+    pinentry.command(&format!("SETDESC {desc}")).await?;
 
-    let mut buf = [0u8; 64];
-    read_password(ncommands, &mut buf, child.stdout.as_mut().unwrap()).await?;
+    pinentry.command("CONFIRM").await?;
 
-    child
-        .wait()
-        .await
-        .map_err(|source| Error::PinentryWait { source })?;
+    pinentry.wait().await?;
 
     Ok(true)
-}
-
-async fn read_password<R>(mut ncommands: u8, data: &mut [u8], mut r: R) -> Result<usize>
-where
-    R: tokio::io::AsyncRead + tokio::io::AsyncReadExt + Unpin + Send,
-{
-    let mut len = 0;
-    loop {
-        let nl = data.iter().take(len).position(|c| *c == b'\n');
-        if let Some(nl) = nl {
-            if data.starts_with(b"OK") {
-                if ncommands == 1 {
-                    len = 0;
-                    break;
-                }
-                data.copy_within((nl + 1).., 0);
-                len -= nl + 1;
-                ncommands -= 1;
-            } else if data.starts_with(b"D ") {
-                data.copy_within(2..nl, 0);
-                len = nl - 2;
-                break;
-            } else if data.starts_with(b"S ") {
-                data.copy_within((nl + 1).., 0);
-                len -= nl + 1;
-            } else if data.starts_with(b"ERR ") {
-                let line: Vec<u8> = data.iter().take(nl).copied().collect();
-                let line = String::from_utf8(line).unwrap();
-                let mut split = line.splitn(3, ' ');
-                let _ = split.next(); // ERR
-                let code = split.next();
-                match code {
-                    Some("83886179") => {
-                        return Err(Error::PinentryCancelled);
-                    }
-                    Some(code) => {
-                        if let Some(error) = split.next() {
-                            return Err(Error::PinentryErrorMessage {
-                                error: error.to_string(),
-                            });
-                        }
-                        return Err(Error::PinentryErrorMessage {
-                            error: format!("unknown error ({code})"),
-                        });
-                    }
-                    None => {
-                        return Err(Error::PinentryErrorMessage {
-                            error: "unknown error".to_string(),
-                        });
-                    }
-                }
-            } else {
-                return Err(Error::FailedToParsePinentry {
-                    out: String::from_utf8_lossy(data)
-                        .trim_end_matches('\0')
-                        .to_string(),
-                });
-            }
-        } else {
-            let bytes = r
-                .read(&mut data[len..])
-                .await
-                .map_err(|source| Error::PinentryReadOutput { source })?;
-            if bytes == 0 {
-                return Err(Error::PinentryReadOutput {
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::UnexpectedEof,
-                        "unexpected EOF",
-                    ),
-                });
-            }
-            len += bytes;
-        }
-    }
-
-    len = percent_decode(&mut data[..len]);
-
-    Ok(len)
 }
 
 // not using the percent-encoding crate because it doesn't provide a way to do
@@ -338,43 +233,4 @@ fn percent_decode(buf: &mut [u8]) -> usize {
     }
 
     write_idx
-}
-
-#[test]
-fn test_read_password() {
-    let good_inputs = &[
-        (0, &b"D super secret password\n"[..]),
-        (4, &b"OK\nOK\nOK\nD super secret password\nOK\n"[..]),
-        (12, &b"OK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nD super secret password\nOK\n"[..]),
-        (24, &b"OK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nD super secret password\nOK\n"[..]),
-    ];
-    for (ncommands, input) in good_inputs {
-        let mut buf = [0; 64];
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let len = read_password(*ncommands, &mut buf, &input[..])
-                .await
-                .unwrap();
-            assert_eq!(&buf[0..len], b"super secret password");
-        });
-    }
-
-    let match_inputs = &[
-        (&b"OK\nOK\nOK\nOK\n"[..], &b""[..]),
-        (&b"D foo%25bar\n"[..], &b"foo%bar"[..]),
-        (&b"D foo%0abar\n"[..], &b"foo\nbar"[..]),
-        (&b"D foo%0Abar\n"[..], &b"foo\nbar"[..]),
-        (&b"D foo%0Gbar\n"[..], &b"foo%0Gbar"[..]),
-        (&b"D foo%0\n"[..], &b"foo%0"[..]),
-        (&b"D foo%\n"[..], &b"foo%"[..]),
-        (&b"D %25foo\n"[..], &b"%foo"[..]),
-        (&b"D %25\n"[..], &b"%"[..]),
-    ];
-
-    for (input, output) in match_inputs {
-        let mut buf = [0; 64];
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let len = read_password(4, &mut buf, &input[..]).await.unwrap();
-            assert_eq!(&buf[0..len], &output[..]);
-        });
-    }
 }
