@@ -124,9 +124,8 @@ pub async fn sync(
         Vec<crate::db::Entry<Encrypted>>,
     ),
 )> {
-    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
-        let access_token = access_token.to_string();
-        Box::pin(async move { sync_once(&access_token).await })
+    with_exchange_refresh_token_async(access_token, refresh_token, |token| async move {
+        sync_once(&token).await
     })
     .await
 }
@@ -151,23 +150,8 @@ pub async fn add(
     notes: Option<&str>,
     folder_id: Option<&str>,
 ) -> Result<(Option<String>, ())> {
-    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
-        let access_token = access_token.to_string();
-        let name = name.to_string();
-        let data = data.clone();
-        let notes = notes.map(|s| s.to_string());
-        let folder_id = folder_id.map(|f| f.to_string());
-
-        Box::pin(async move {
-            add_once(
-                &access_token,
-                &name,
-                &data,
-                notes.as_deref(),
-                folder_id.as_deref(),
-            )
-            .await
-        })
+    with_exchange_refresh_token_async(access_token, refresh_token, |token| async move {
+        add_once(&token, name, data, notes, folder_id).await
     })
     .await
 }
@@ -186,22 +170,18 @@ async fn add_once(
     Ok(())
 }
 
+async fn edit_once(access_token: &str, entry: &crate::db::Entry<Encrypted>) -> Result<()> {
+    let (client, _) = api_client_async().await?;
+    client.edit(access_token, entry).await
+}
+
 pub async fn edit(
     access_token: &str,
     refresh_token: &str,
     entry: &Entry<Encrypted>,
 ) -> Result<(Option<String>, ())> {
-    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
-        let access_token = access_token.to_string();
-        // TODO: Super ugly clone
-        let entry = entry.clone();
-        Box::pin(async move {
-            api_client_async()
-                .await?
-                .0
-                .edit(&access_token, &entry)
-                .await
-        })
+    with_exchange_refresh_token_async(access_token, refresh_token, |token| async move {
+        edit_once(&token, entry).await
     })
     .await
 }
@@ -211,10 +191,8 @@ pub async fn remove(
     refresh_token: &str,
     id: &str,
 ) -> Result<(Option<String>, ())> {
-    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
-        let access_token = access_token.to_string();
-        let id = id.to_string();
-        Box::pin(async move { remove_once(&access_token, &id).await })
+    with_exchange_refresh_token_async(access_token, refresh_token, |token| async move {
+        remove_once(&token, id).await
     })
     .await
 }
@@ -229,9 +207,8 @@ pub async fn list_folders(
     access_token: &str,
     refresh_token: &str,
 ) -> Result<(Option<String>, Vec<(String, String)>)> {
-    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
-        let access_token = access_token.to_string();
-        Box::pin(async move { list_folders_once(&access_token).await })
+    with_exchange_refresh_token_async(access_token, refresh_token, |token| async move {
+        list_folders_once(&token).await
     })
     .await
 }
@@ -246,11 +223,8 @@ pub async fn create_folder(
     refresh_token: &str,
     name: &str,
 ) -> Result<(Option<String>, String)> {
-    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
-        let access_token = access_token.to_string();
-        let name = name.to_string();
-
-        Box::pin(async move { create_folder_once(&access_token, &name).await })
+    with_exchange_refresh_token_async(access_token, refresh_token, |token| async move {
+        create_folder_once(&token, name).await
     })
     .await
 }
@@ -260,22 +234,20 @@ async fn create_folder_once(access_token: &str, name: &str) -> Result<String> {
     client.create_folder(access_token, name).await
 }
 
-async fn with_exchange_refresh_token_async<F, T>(
+async fn with_exchange_refresh_token_async<F, Fut, T>(
     access_token: &str,
     refresh_token: &str,
-    f: F,
+    mut f: F,
 ) -> Result<(Option<String>, T)>
 where
-    F: Fn(&str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>
-        + Send
-        + Sync,
-    T: Send,
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
 {
-    match f(access_token).await {
+    match f(access_token.to_string()).await {
         Ok(t) => Ok((None, t)),
         Err(Error::RequestUnauthorized) => {
             let access_token = exchange_refresh_token_async(refresh_token).await?;
-            let t = f(&access_token).await?;
+            let t = f(access_token.clone()).await?;
             Ok((Some(access_token), t))
         }
         Err(e) => Err(e),
