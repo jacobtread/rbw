@@ -1,4 +1,7 @@
-use std::{ffi::OsString, process::Stdio};
+use std::{
+    ffi::{OsStr, OsString},
+    process::Stdio,
+};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt as _},
@@ -33,16 +36,8 @@ impl Pinentry {
         Ok(v)
     }
 
-    async fn spawn(
-        binary: &str,
-        environment: &crate::protocol::Environment,
-        grab: bool,
-    ) -> Result<Self> {
-        let mut cmd = Command::new(binary);
-
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
-
-        let mut args = vec!["--timeout".into(), "0".into()];
+    fn calc_args(environment: &crate::protocol::Environment, grab: bool) -> Vec<OsString> {
+        let mut args: Vec<OsString> = vec!["--timeout".into(), "0".into()];
 
         if let Some(tty) = environment.tty() {
             args.extend(["--ttyname".into(), tty.into()]);
@@ -52,18 +47,32 @@ impl Pinentry {
 
         // Not all pinentry appear to respect the --display flag, so we also keep the environment
         // variable.
-        if let Some(display) = env_vars.get(OsString::from("DISPLAY").as_os_str()) {
-            args.extend(["--display".into(), display.clone()]);
+        if let Some(display) = env_vars.get(OsStr::new("DISPLAY")) {
+            args.extend(["--display".into(), display.into()]);
         }
 
         if !grab {
             args.push("--no-global-grab".into());
         }
 
-        cmd.args(args);
+        args
+    }
+
+    async fn spawn(
+        binary: &str,
+        environment: &crate::protocol::Environment,
+        grab: bool,
+    ) -> Result<Self> {
+        let mut cmd = Command::new(binary);
+
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+
+        let env_vars = environment.env_vars();
+
+        cmd.args(Self::calc_args(environment, grab));
 
         for env_var in &*crate::protocol::ENVIRONMENT_VARIABLES_OS {
-            if let Some(val) = env_vars.get(env_var) {
+            if let Some(val) = env_vars.get(env_var.as_os_str()) {
                 cmd.env(env_var, val);
             } else {
                 cmd.env_remove(env_var);
@@ -73,8 +82,6 @@ impl Pinentry {
         cmd.envs(env_vars);
 
         let mut child = cmd.spawn().map_err(|source| Error::Spawn { source })?;
-        // unwrap is safe because we specified stdin as piped in the command opts
-        // above
 
         let Some(stdout) = child.stdout.take() else {
             return Err(Error::PinentryReadOutput {

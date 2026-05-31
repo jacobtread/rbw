@@ -1,4 +1,7 @@
-use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+use std::{
+    ffi::{OsStr, OsString},
+    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+};
 
 pub const VERSION: u32 = {
     const fn parse_component(s: &str) -> u32 {
@@ -72,12 +75,7 @@ pub const ENVIRONMENT_VARIABLES: &[&str] = &[
 ];
 
 pub static ENVIRONMENT_VARIABLES_OS: std::sync::LazyLock<Vec<std::ffi::OsString>> =
-    std::sync::LazyLock::new(|| {
-        ENVIRONMENT_VARIABLES
-            .iter()
-            .map(std::ffi::OsString::from)
-            .collect()
-    });
+    std::sync::LazyLock::new(|| ENVIRONMENT_VARIABLES.iter().map(OsString::from).collect());
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
 struct SerializableOsString(std::ffi::OsString);
@@ -144,11 +142,11 @@ impl Environment {
         self.tty.as_ref().map(|tty| tty.0.as_os_str())
     }
 
-    pub fn env_vars(&self) -> std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> {
+    pub fn env_vars<'a>(&'a self) -> std::collections::HashMap<&'a OsStr, &'a OsStr> {
         self.env_vars
             .iter()
-            .map(|(var, val)| (var.0.clone(), val.0.clone()))
-            .filter(|(var, _)| (*ENVIRONMENT_VARIABLES_OS).contains(var))
+            .map(|(var, val)| (var.0.as_os_str(), val.0.as_os_str()))
+            .filter(|(var, _)| (ENVIRONMENT_VARIABLES_OS).contains(&var.to_os_string()))
             .collect()
     }
 }
