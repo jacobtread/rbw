@@ -780,7 +780,8 @@ async fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Re
     let (new_access_token, folders) = rbw::actions::list_folders(
         db.access_token.as_ref().unwrap(),
         db.refresh_token.as_ref().unwrap(),
-    )?;
+    )
+    .await?;
 
     update_token(db, new_access_token).await?;
 
@@ -800,7 +801,8 @@ async fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Re
             db.access_token.as_ref().unwrap(),
             db.refresh_token.as_ref().unwrap(),
             &enc.encrypt_field(None, folder)?,
-        )?;
+        )
+        .await?;
 
         update_token(db, new_access_token).await?;
 
@@ -911,7 +913,8 @@ pub async fn add(
         },
         notes.as_deref(),
         folder_id.as_deref(),
-    )?;
+    )
+    .await?;
 
     update_token(&mut db, new_token).await?;
 
@@ -999,7 +1002,8 @@ pub async fn edit(
         db.access_token.as_ref().unwrap(),
         db.refresh_token.as_ref().unwrap(),
         &entry,
-    )?;
+    )
+    .await?;
 
     update_token(&mut db, new_token).await?;
 
@@ -1031,7 +1035,8 @@ pub async fn remove(
         db.access_token.as_ref().unwrap(),
         db.refresh_token.as_ref().unwrap(),
         &entry.id,
-    )?;
+    )
+    .await?;
 
     update_token(&mut db, new_access_token).await?;
 

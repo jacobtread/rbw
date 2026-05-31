@@ -34,6 +34,11 @@ enum ClientRequest<'a> {
     SendEmailLogin(&'a str, &'a str, &'a str),
     Sync(&'a str),
     ExchangeRefreshToken(&'a str),
+    Add(&'a str, CiphersPostReq<'a>),
+    Edit(&'a str, &'a str, CiphersPutReq<'a>),
+    Remove(&'a str, &'a str),
+    Folders(&'a str),
+    CreateFolder(&'a str, &'a str),
 }
 
 impl<'a> ClientRequest<'a> {
@@ -73,26 +78,6 @@ impl<'a> ClientRequest<'a> {
                     ("client_id", "cli"),
                     ("refresh_token", refresh_token),
                 ]),
-        };
-
-        Ok(rb.send().await?)
-    }
-}
-
-enum ClientBlockingRequest<'a> {
-    Add(&'a str, CiphersPostReq<'a>),
-    Edit(&'a str, &'a str, CiphersPutReq<'a>),
-    Remove(&'a str, &'a str),
-    Folders(&'a str),
-    CreateFolder(&'a str, &'a str),
-    ExchangeRefreshToken(&'a str),
-}
-
-impl<'a> ClientBlockingRequest<'a> {
-    fn req(self, client: &Client) -> Result<reqwest::blocking::Response> {
-        let http_client = reqwest::blocking::Client::new();
-
-        let rb = match self {
             Self::Add(access_token, r) => http_client
                 .post(client.api_url("/ciphers"))
                 .header("Authorization", format!("Bearer {access_token}"))
@@ -111,16 +96,9 @@ impl<'a> ClientBlockingRequest<'a> {
                 .post(client.api_url("/folders"))
                 .header("Authorization", format!("Bearer {access_token}"))
                 .json(&serde_json::json!({"name": name})),
-            Self::ExchangeRefreshToken(refresh_token) => http_client
-                .post(client.identity_url("/connect/token"))
-                .form(&[
-                    ("grant_type", "refresh_token"),
-                    ("client_id", "cli"),
-                    ("refresh_token", refresh_token),
-                ]),
         };
 
-        Ok(rb.send()?)
+        Ok(rb.send().await?)
     }
 }
 
@@ -529,7 +507,7 @@ impl Client {
         ))
     }
 
-    pub fn add(
+    pub async fn add(
         &self,
         access_token: &str,
         name: &str,
@@ -544,14 +522,15 @@ impl Client {
             data: EntryDataWire(data),
         };
 
-        ClientBlockingRequest::Add(access_token, req)
-            .req(self)?
+        ClientRequest::Add(access_token, req)
+            .req(self)
+            .await?
             .error_for_status()?;
 
         Ok(())
     }
 
-    pub fn edit(&self, access_token: &str, entry: &Entry<Encrypted>) -> Result<()> {
+    pub async fn edit(&self, access_token: &str, entry: &Entry<Encrypted>) -> Result<()> {
         let req = CiphersPutReq {
             folder_id: entry.folder_id.as_deref(),
             organization_id: entry.org_id.as_deref(),
@@ -570,27 +549,30 @@ impl Client {
                 .collect::<Vec<_>>(),
         };
 
-        ClientBlockingRequest::Edit(access_token, &entry.id, req)
-            .req(self)?
+        ClientRequest::Edit(access_token, &entry.id, req)
+            .req(self)
+            .await?
             .error_for_status()?;
 
         Ok(())
     }
 
-    pub fn remove(&self, access_token: &str, id: &str) -> Result<()> {
-        ClientBlockingRequest::Remove(access_token, id)
-            .req(self)?
+    pub async fn remove(&self, access_token: &str, id: &str) -> Result<()> {
+        ClientRequest::Remove(access_token, id)
+            .req(self)
+            .await?
             .error_for_status()?;
 
         Ok(())
     }
 
-    pub fn folders(&self, access_token: &str) -> Result<Vec<(String, String)>> {
-        let res = ClientBlockingRequest::Folders(access_token)
-            .req(self)?
+    pub async fn folders(&self, access_token: &str) -> Result<Vec<(String, String)>> {
+        let res = ClientRequest::Folders(access_token)
+            .req(self)
+            .await?
             .error_for_status()?;
 
-        let folders_res: FoldersRes = res.json_with_path()?;
+        let folders_res: FoldersRes = res.json_with_path().await?;
 
         Ok(folders_res
             .data
@@ -599,19 +581,22 @@ impl Client {
             .collect())
     }
 
-    pub fn create_folder(&self, access_token: &str, name: &str) -> Result<String> {
-        let res = ClientBlockingRequest::CreateFolder(access_token, name)
-            .req(self)?
+    pub async fn create_folder(&self, access_token: &str, name: &str) -> Result<String> {
+        let res = ClientRequest::CreateFolder(access_token, name)
+            .req(self)
+            .await?
             .error_for_status()?;
 
-        let folders_res: FoldersResData = res.json_with_path()?;
+        let folders_res: FoldersResData = res.json_with_path().await?;
 
         Ok(folders_res.id)
     }
 
-    pub fn exchange_refresh_token(&self, refresh_token: &str) -> Result<String> {
-        let res = ClientBlockingRequest::ExchangeRefreshToken(refresh_token).req(self)?;
-        let connect_res: ConnectRefreshTokenRes = res.json_with_path()?;
+    pub async fn exchange_refresh_token(&self, refresh_token: &str) -> Result<String> {
+        let res = ClientRequest::ExchangeRefreshToken(refresh_token)
+            .req(self)
+            .await?;
+        let connect_res: ConnectRefreshTokenRes = res.json_with_path().await?;
         Ok(connect_res.access_token)
     }
 

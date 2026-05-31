@@ -143,7 +143,7 @@ async fn sync_once(
     client.sync(access_token).await
 }
 
-pub fn add(
+pub async fn add(
     access_token: &str,
     refresh_token: &str,
     name: &str,
@@ -151,91 +151,113 @@ pub fn add(
     notes: Option<&str>,
     folder_id: Option<&str>,
 ) -> Result<(Option<String>, ())> {
-    with_exchange_refresh_token(access_token, refresh_token, |access_token| {
-        add_once(access_token, name, data, notes, folder_id)
+    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
+        let access_token = access_token.to_string();
+        let name = name.to_string();
+        let data = data.clone();
+        let notes = notes.map(|s| s.to_string());
+        let folder_id = folder_id.map(|f| f.to_string());
+
+        Box::pin(async move {
+            add_once(
+                &access_token,
+                &name,
+                &data,
+                notes.as_deref(),
+                folder_id.as_deref(),
+            )
+            .await
+        })
     })
+    .await
 }
 
-fn add_once(
+async fn add_once(
     access_token: &str,
     name: &str,
     data: &crate::db::EntryData,
     notes: Option<&str>,
     folder_id: Option<&str>,
 ) -> Result<()> {
-    let (client, _) = api_client()?;
-    client.add(access_token, name, data, notes, folder_id)?;
+    let (client, _) = api_client_async().await?;
+    client
+        .add(access_token, name, data, notes, folder_id)
+        .await?;
     Ok(())
 }
 
-pub fn edit(
+pub async fn edit(
     access_token: &str,
     refresh_token: &str,
     entry: &Entry<Encrypted>,
 ) -> Result<(Option<String>, ())> {
-    with_exchange_refresh_token(access_token, refresh_token, |access_token| {
-        api_client()?.0.edit(access_token, entry)
+    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
+        let access_token = access_token.to_string();
+        // TODO: Super ugly clone
+        let entry = entry.clone();
+        Box::pin(async move {
+            api_client_async()
+                .await?
+                .0
+                .edit(&access_token, &entry)
+                .await
+        })
     })
+    .await
 }
 
-pub fn remove(access_token: &str, refresh_token: &str, id: &str) -> Result<(Option<String>, ())> {
-    with_exchange_refresh_token(access_token, refresh_token, |access_token| {
-        remove_once(access_token, id)
+pub async fn remove(
+    access_token: &str,
+    refresh_token: &str,
+    id: &str,
+) -> Result<(Option<String>, ())> {
+    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
+        let access_token = access_token.to_string();
+        let id = id.to_string();
+        Box::pin(async move { remove_once(&access_token, &id).await })
     })
+    .await
 }
 
-fn remove_once(access_token: &str, id: &str) -> Result<()> {
-    let (client, _) = api_client()?;
-    client.remove(access_token, id)?;
+async fn remove_once(access_token: &str, id: &str) -> Result<()> {
+    let (client, _) = api_client_async().await?;
+    client.remove(access_token, id).await?;
     Ok(())
 }
 
-pub fn list_folders(
+pub async fn list_folders(
     access_token: &str,
     refresh_token: &str,
 ) -> Result<(Option<String>, Vec<(String, String)>)> {
-    with_exchange_refresh_token(access_token, refresh_token, |access_token| {
-        list_folders_once(access_token)
+    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
+        let access_token = access_token.to_string();
+        Box::pin(async move { list_folders_once(&access_token).await })
     })
+    .await
 }
 
-fn list_folders_once(access_token: &str) -> Result<Vec<(String, String)>> {
-    let (client, _) = api_client()?;
-    client.folders(access_token)
+async fn list_folders_once(access_token: &str) -> Result<Vec<(String, String)>> {
+    let (client, _) = api_client_async().await?;
+    client.folders(access_token).await
 }
 
-pub fn create_folder(
+pub async fn create_folder(
     access_token: &str,
     refresh_token: &str,
     name: &str,
 ) -> Result<(Option<String>, String)> {
-    with_exchange_refresh_token(access_token, refresh_token, |access_token| {
-        create_folder_once(access_token, name)
+    with_exchange_refresh_token_async(access_token, refresh_token, |access_token| {
+        let access_token = access_token.to_string();
+        let name = name.to_string();
+
+        Box::pin(async move { create_folder_once(&access_token, &name).await })
     })
+    .await
 }
 
-fn create_folder_once(access_token: &str, name: &str) -> Result<String> {
-    let (client, _) = api_client()?;
-    client.create_folder(access_token, name)
-}
-
-fn with_exchange_refresh_token<F, T>(
-    access_token: &str,
-    refresh_token: &str,
-    f: F,
-) -> Result<(Option<String>, T)>
-where
-    F: Fn(&str) -> Result<T>,
-{
-    match f(access_token) {
-        Ok(t) => Ok((None, t)),
-        Err(Error::RequestUnauthorized) => {
-            let access_token = exchange_refresh_token(refresh_token)?;
-            let t = f(&access_token)?;
-            Ok((Some(access_token), t))
-        }
-        Err(e) => Err(e),
-    }
+async fn create_folder_once(access_token: &str, name: &str) -> Result<String> {
+    let (client, _) = api_client_async().await?;
+    client.create_folder(access_token, name).await
 }
 
 async fn with_exchange_refresh_token_async<F, T>(
@@ -260,25 +282,9 @@ where
     }
 }
 
-fn exchange_refresh_token(refresh_token: &str) -> Result<String> {
-    let (client, _) = api_client()?;
-    client.exchange_refresh_token(refresh_token)
-}
-
 async fn exchange_refresh_token_async(refresh_token: &str) -> Result<String> {
-    let (client, _) = api_client()?;
+    let (client, _) = api_client_async().await?;
     client.exchange_refresh_token_async(refresh_token).await
-}
-
-fn api_client() -> Result<(crate::api::client::Client, crate::config::Config)> {
-    let config = crate::config::Config::load()?;
-    let client = crate::api::client::Client::new(
-        &config.base_url(),
-        &config.identity_url(),
-        &config.ui_url(),
-        config.client_cert_path(),
-    );
-    Ok((client, config))
 }
 
 async fn api_client_async() -> Result<(crate::api::client::Client, crate::config::Config)> {
