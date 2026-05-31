@@ -204,33 +204,149 @@ pub async fn confirm(
     Ok(true)
 }
 
+fn hex_digit(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        _ => None,
+    }
+}
+
 // not using the percent-encoding crate because it doesn't provide a way to do
 // this in-place, and we want the password to always live within the locked
 // vec. should really move something like this into the percent-encoding crate
 // at some point.
 fn percent_decode(buf: &mut [u8]) -> usize {
-    let mut read_idx = 0;
-    let mut write_idx = 0;
+    let mut ri = 0;
+    let mut wi = 0;
     let len = buf.len();
 
-    while read_idx < len {
-        let mut c = buf[read_idx];
+    while ri < len {
+        let mut c = buf[ri];
 
-        if c == b'%' && read_idx + 2 < len {
-            if let Some(h) = char::from(buf[read_idx + 1]).to_digit(16) {
-                if let Some(l) = char::from(buf[read_idx + 2]).to_digit(16) {
-                    // h and l were parsed from a single hex digit, so they
-                    // must be in the range 0-15, so these unwraps are safe
-                    c = u8::try_from(h).unwrap() * 0x10 + u8::try_from(l).unwrap();
-                    read_idx += 2;
+        if c == b'%' && ri + 2 < len {
+            if let Some(h) = hex_digit(buf[ri + 1]) {
+                if let Some(l) = hex_digit(buf[ri + 2]) {
+                    c = h * 0x10 + l;
+                    ri += 2;
                 }
             }
         }
 
-        buf[write_idx] = c;
-        read_idx += 1;
-        write_idx += 1;
+        buf[wi] = c;
+
+        ri += 1;
+        wi += 1;
     }
 
-    write_idx
+    wi
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_digit_valid() {
+        assert_eq!(hex_digit(b'0'), Some(0));
+        assert_eq!(hex_digit(b'9'), Some(9));
+        assert_eq!(hex_digit(b'A'), Some(10));
+        assert_eq!(hex_digit(b'F'), Some(15));
+        assert_eq!(hex_digit(b'a'), Some(10));
+        assert_eq!(hex_digit(b'f'), Some(15));
+    }
+
+    #[test]
+    fn hex_digit_invalid() {
+        assert_eq!(hex_digit(b'g'), None);
+        assert_eq!(hex_digit(b'G'), None);
+        assert_eq!(hex_digit(b'/'), None);
+        assert_eq!(hex_digit(b':'), None);
+        assert_eq!(hex_digit(b' '), None);
+        assert_eq!(hex_digit(b'%'), None);
+    }
+
+    #[test]
+    fn percent_decode_empty() {
+        let mut buf = [];
+        assert_eq!(percent_decode(&mut buf), 0);
+    }
+
+    #[test]
+    fn percent_decode_no_encoding() {
+        let mut buf = *b"hello";
+        assert_eq!(percent_decode(&mut buf), 5);
+        assert_eq!(&buf[..5], b"hello");
+    }
+
+    #[test]
+    fn percent_decode_simple() {
+        let mut buf = *b"%20";
+        assert_eq!(percent_decode(&mut buf), 1);
+        assert_eq!(&buf[..1], b" ");
+    }
+
+    #[test]
+    fn percent_decode_uppercase() {
+        let mut buf = *b"%4A";
+        assert_eq!(percent_decode(&mut buf), 1);
+        assert_eq!(&buf[..1], b"J");
+    }
+
+    #[test]
+    fn percent_decode_lowercase() {
+        let mut buf = *b"%4a";
+        assert_eq!(percent_decode(&mut buf), 1);
+        assert_eq!(&buf[..1], b"J");
+    }
+
+    #[test]
+    fn percent_decode_mixed() {
+        let mut buf = *b"a%20b";
+        assert_eq!(percent_decode(&mut buf), 3);
+        assert_eq!(&buf[..3], b"a b");
+    }
+
+    #[test]
+    fn percent_decode_multiple() {
+        let mut buf = *b"%20%21";
+        assert_eq!(percent_decode(&mut buf), 2);
+        assert_eq!(&buf[..2], b" !");
+    }
+
+    #[test]
+    fn percent_decode_truncated_percent() {
+        let mut buf = *b"%";
+        assert_eq!(percent_decode(&mut buf), 1);
+        assert_eq!(&buf[..1], b"%");
+    }
+
+    #[test]
+    fn percent_decode_truncated_pair() {
+        let mut buf = *b"%2";
+        assert_eq!(percent_decode(&mut buf), 2);
+        assert_eq!(&buf[..2], b"%2");
+    }
+
+    #[test]
+    fn percent_decode_invalid_hex() {
+        let mut buf = *b"%ZZ";
+        assert_eq!(percent_decode(&mut buf), 3);
+        assert_eq!(&buf[..3], b"%ZZ");
+    }
+
+    #[test]
+    fn percent_decode_invalid_second_digit() {
+        let mut buf = *b"%0G";
+        assert_eq!(percent_decode(&mut buf), 3);
+        assert_eq!(&buf[..3], b"%0G");
+    }
+
+    #[test]
+    fn percent_decode_invalid_first_digit() {
+        let mut buf = *b"%G0";
+        assert_eq!(percent_decode(&mut buf), 3);
+        assert_eq!(&buf[..3], b"%G0");
+    }
 }
