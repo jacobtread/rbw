@@ -19,6 +19,23 @@ struct Pinentry<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     writer: W,
 }
 
+async fn secure_read_line<R: AsyncRead + Unpin>(reader: &mut R) -> Result<LockedVec> {
+    let mut v = LockedVec::new();
+
+    loop {
+        let b = reader.read_u8().await?;
+
+        if b == b'\n' {
+            break;
+        }
+
+        // NOTE: This panics if the line is > 4096 bytes
+        v.push(b);
+    }
+
+    Ok(v)
+}
+
 impl Pinentry<ChildStdout, ChildStdin> {
     async fn spawn(
         binary: &str,
@@ -63,7 +80,7 @@ impl Pinentry<ChildStdout, ChildStdin> {
             writer: stdin,
         };
 
-        let line = p.read_line().await?;
+        let line = secure_read_line(&mut p.reader).await?;
 
         if line.as_str()?.starts_with("OK") {
             Ok(p)
@@ -76,23 +93,6 @@ impl Pinentry<ChildStdout, ChildStdin> {
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Pinentry<R, W> {
-    async fn read_line(&mut self) -> Result<LockedVec> {
-        let mut v = LockedVec::new();
-
-        loop {
-            let b = self.reader.read_u8().await?;
-
-            if b == b'\n' {
-                break;
-            }
-
-            // NOTE: This panics if the line is > 4096 bytes
-            v.push(b);
-        }
-
-        Ok(v)
-    }
-
     fn calc_args(environment: &crate::protocol::Environment, grab: bool) -> Vec<OsString> {
         let mut args: Vec<OsString> = vec!["--timeout".into(), "0".into()];
 
@@ -122,7 +122,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Pinentry<R, W> {
             .map_err(|source| Error::WriteStdin { source })?;
 
         loop {
-            let mut line = self.read_line().await?;
+            let mut line = secure_read_line(&mut self.reader).await?;
 
             let line_str = line.as_str()?;
 
@@ -145,7 +145,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Pinentry<R, W> {
             } else if line_str.starts_with("S ") {
                 continue;
             } else if line_str.starts_with("D ") {
-                match self.read_line().await?.as_str()? {
+                match secure_read_line(&mut self.reader).await?.as_str()? {
                     "OK" => {
                         let len = line.len();
                         let len = percent_decode(&mut line[..len]);
@@ -264,6 +264,8 @@ fn percent_decode(buf: &mut [u8]) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -367,5 +369,11 @@ mod tests {
         let mut buf = *b"%G0";
         assert_eq!(percent_decode(&mut buf), 3);
         assert_eq!(&buf[..3], b"%G0");
+    }
+
+    #[tokio::test]
+    async fn test_secure_read_line() {
+        let x = secure_read_line(&mut Cursor::new("ciao\n")).await.unwrap();
+        assert_eq!(x.as_str().unwrap(), "ciao");
     }
 }
