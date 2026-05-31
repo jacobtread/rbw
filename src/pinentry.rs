@@ -46,7 +46,7 @@ impl Pinentry<ChildStdout, ChildStdin> {
         let mut child = cmd.spawn().map_err(|source| Error::Spawn { source })?;
 
         let Some(stdin) = child.stdin.take() else {
-            return Err(Error::PinentryReadOutput {
+            return Err(Error::WriteStdin {
                 source: std::io::Error::other("stdin unavailable"),
             });
         };
