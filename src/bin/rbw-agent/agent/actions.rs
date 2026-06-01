@@ -198,15 +198,9 @@ impl Agent {
         err: &Option<String>,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<rbw::locked::Password> {
-        self.getpin(
-            "Master Password",
-            desc,
-            err,
-            environment,
-            true,
-        )
-        .await
-        .context("failed to read password from pinentry")
+        self.getpin("Master Password", desc, err, environment, true)
+            .await
+            .context("failed to read password from pinentry")
     }
 
     pub async fn login(
@@ -449,11 +443,8 @@ impl Agent {
 
     async fn unlock_state(&self, environment: &rbw::protocol::Environment) -> anyhow::Result<()> {
         if self.state.needs_unlock().await {
-            let (db, email) = {
-                let db = load_db(&self.state).await?;
-                let email = self.state.email()?.to_string();
-                (db, email)
-            };
+            let db = load_db(&self.state).await?;
+            let email = self.state.email()?.to_string();
 
             let crypto_params = db.get_crypto_parameters()?;
 
