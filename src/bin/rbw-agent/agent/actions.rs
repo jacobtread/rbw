@@ -345,27 +345,9 @@ impl Agent {
 
         self.sync(None).await?;
 
-        let db = self.state.inner.db.read().await;
-
-        let (_, protected_private_key, protected_org_keys) = db
-            .some_protected_keys()
-            .ok_or(anyhow::anyhow!("Cannot access protected keys in Db"))?;
-
-        let res = rbw::actions::unlock(
-            &self.state.email()?,
-            &password,
-            &creds.crypto_params,
-            &creds.protected_key,
-            &protected_private_key,
-            &protected_org_keys,
-        );
-
-        match res {
-            Ok((keys, org_keys)) => {
-                self.state.set_keys(keys, org_keys).await;
-            }
-            Err(e) => return Err(e).context("failed to unlock database"),
-        }
+        self.try_unlock(&password)
+            .await
+            .context("failed to unlock database")?;
 
         Ok(())
     }
@@ -477,6 +459,27 @@ impl Agent {
         Ok(())
     }
 
+    async fn try_unlock(&self, password: &rbw::locked::Password) -> anyhow::Result<()> {
+        let db = self.state.inner.db.read().await;
+
+        let (protected_key, protected_private_key, protected_org_keys) =
+            db.some_protected_keys()
+                .ok_or(anyhow::anyhow!("Cannot get protected keys from Db"))?;
+
+        let (keys, org_keys) = rbw::actions::unlock(
+            &self.state.email()?,
+            password,
+            &db.get_crypto_parameters()?,
+            &protected_key,
+            &protected_private_key,
+            &protected_org_keys,
+        )?;
+
+        self.state.set_keys(keys, org_keys).await;
+
+        Ok(())
+    }
+
     async fn unlock_state(&self, environment: &rbw::protocol::Environment) -> anyhow::Result<()> {
         if self.state.needs_unlock().await {
             let mut err_msg = None;
@@ -491,28 +494,16 @@ impl Agent {
                     )
                     .await?;
 
-                let db = self.state.inner.db.read().await;
-
-                let (protected_key, protected_private_key, protected_org_keys) = db
-                    .some_protected_keys()
-                    .ok_or(anyhow::anyhow!("Cannot get protected keys from Db"))?;
-
-                match rbw::actions::unlock(
-                    &self.state.email()?,
-                    &password,
-                    &db.get_crypto_parameters()?,
-                    &protected_key,
-                    &protected_private_key,
-                    &protected_org_keys,
-                ) {
-                    Ok((keys, org_keys)) => {
-                        self.state.set_keys(keys, org_keys).await;
+                match self.try_unlock(&password).await {
+                    Ok(()) => {
                         break;
                     }
-                    Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                        err_msg = Some(message);
-                    }
-                    Err(e) => return Err(e).context("failed to unlock database"),
+                    Err(e) => match e.downcast_ref::<rbw::error::Error>() {
+                        Some(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                            err_msg = Some(message.clone())
+                        }
+                        _ => return Err(e).context("failed to unlock database"),
+                    },
                 }
             }
         }
@@ -550,27 +541,16 @@ impl Agent {
                     )
                     .await?;
 
-                let db = self.state.inner.db.read().await;
-
-                let (protected_key, protected_private_key, protected_org_keys) = db
-                    .some_protected_keys()
-                    .ok_or(anyhow::anyhow!("Cannot get protected keys from Db"))?;
-
-                match rbw::actions::unlock(
-                    &self.state.email()?,
-                    &password,
-                    &db.get_crypto_parameters()?,
-                    &protected_key,
-                    &protected_private_key,
-                    &protected_org_keys,
-                ) {
-                    Ok(_) => {
+                match self.try_unlock(&password).await {
+                    Ok(()) => {
                         break;
                     }
-                    Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                        err_msg = Some(message);
-                    }
-                    Err(e) => return Err(e).context("failed to unlock database"),
+                    Err(e) => match e.downcast_ref::<rbw::error::Error>() {
+                        Some(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                            err_msg = Some(message.clone())
+                        }
+                        _ => return Err(e).context("failed to unlock database"),
+                    },
                 }
             }
         }
