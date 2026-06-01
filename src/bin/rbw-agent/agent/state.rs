@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use rbw::db::Db;
 use sha2::Digest as _;
 
 use tokio::{
@@ -22,6 +23,7 @@ pub struct InnerState {
     pub master_password_reprompt: RwLock<std::collections::HashSet<[u8; 32]>>,
     master_password_reprompt_initialized: AtomicBool,
     config: rbw::config::Config,
+    pub db: RwLock<Db>,
 
     // this is stored here specifically for the use of the ssh agent, because
     // requests made to the ssh agent don't include an environment, and so we
@@ -45,7 +47,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(config: rbw::config::Config) -> Self {
+    pub async fn new(config: rbw::config::Config) -> Self {
         let notifications_handler = crate::notifications::NotificationsHandler::new();
 
         // TODO: ugly
@@ -55,6 +57,13 @@ impl State {
         if sync_timeout_duration > std::time::Duration::ZERO {
             sync_deadline = Some(Instant::now() + sync_timeout_duration);
         }
+
+        let db = match &config.email {
+            Some(email) => Db::load_async(&config.server_name(), email)
+                .await
+                .unwrap_or_else(|_| Db::new()),
+            None => Db::new(),
+        };
 
         let state = Self {
             inner: Arc::new(InnerState {
@@ -66,6 +75,7 @@ impl State {
                 master_password_reprompt: RwLock::new(std::collections::HashSet::new()),
                 master_password_reprompt_initialized: AtomicBool::new(false),
                 config,
+                db: RwLock::new(db),
                 last_environment: RwLock::new(rbw::protocol::Environment::default()),
 
                 #[cfg(feature = "clipboard")]
@@ -183,6 +193,13 @@ impl State {
                     .await
                     .insert(hasher.finalize().into());
             }
+        }
+    }
+
+    pub async fn initialize_mpr(&self) {
+        if !self.master_password_reprompt_initialized() {
+            self.set_master_password_reprompt(&self.inner.db.read().await.entries)
+                .await;
         }
     }
 

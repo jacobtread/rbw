@@ -3,10 +3,7 @@ use crate::{
     prelude::*,
 };
 
-use std::{
-    collections::HashMap,
-    fmt::Display,
-};
+use std::{collections::HashMap, fmt::Display};
 
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -875,7 +872,7 @@ pub struct Db {
 
     pub protected_key: Option<String>,
     pub protected_private_key: Option<String>,
-    pub protected_org_keys: std::collections::HashMap<String, String>,
+    pub protected_org_keys: HashMap<String, String>,
 
     // TODO: This could be a HashMap?
     pub entries: Vec<Entry<Encrypted>>,
@@ -999,5 +996,22 @@ impl Db {
             || self.refresh_token.is_none()
             || self.crypto_params.is_none()
             || self.protected_key.is_none()
+    }
+
+    pub fn protected_keys(&self) -> (&Option<String>, &Option<String>, &HashMap<String, String>) {
+        (
+            &self.protected_key,
+            &self.protected_private_key,
+            &self.protected_org_keys,
+        )
+    }
+
+    pub fn some_protected_keys(&self) -> Option<(&String, &String, &HashMap<String, String>)> {
+        let keys = self.protected_keys();
+
+        match keys {
+            (Some(key), Some(priv_key), org_keys) => Some((key, priv_key, org_keys)),
+            _ => None,
+        }
     }
 }

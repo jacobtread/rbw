@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use rbw::actions::SessionParameters;
+use rbw::{actions::SessionParameters, db::Db};
 use sha2::Digest as _;
 
 use crate::agent::Agent;
@@ -75,11 +75,7 @@ impl Agent {
         sock: &mut crate::sock::Sock,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<()> {
-        let db = load_db(&self.state)
-            .await
-            .unwrap_or_else(|_| rbw::db::Db::new());
-
-        if !db.needs_login() {
+        if !self.state.inner.db.read().await.needs_login() {
             return respond_ack(sock).await;
         }
 
@@ -131,10 +127,11 @@ impl Agent {
     async fn two_factor(
         &self,
         environment: &rbw::protocol::Environment,
-        email: &str,
         password: rbw::locked::Password,
         provider: rbw::api::TwoFactorProviderType,
     ) -> anyhow::Result<SessionParameters> {
+        let email = self.state.email()?;
+
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -160,12 +157,10 @@ impl Agent {
 
     async fn two_factor_required(
         &self,
-        email: &str,
         password: rbw::locked::Password,
         providers: Vec<rbw::api::TwoFactorProviderType>,
         sso_email_2fa_session_token: Option<String>,
         environment: &rbw::protocol::Environment,
-        db: &mut rbw::db::Db,
     ) -> anyhow::Result<()> {
         let supported_types = [
             rbw::api::TwoFactorProviderType::Authenticator,
@@ -179,6 +174,8 @@ impl Agent {
             ));
         };
 
+        let email = self.state.email()?;
+
         if provider == rbw::api::TwoFactorProviderType::Email {
             if let Some(token) = sso_email_2fa_session_token {
                 rbw::actions::send_two_factor_email(email, &token).await?;
@@ -186,10 +183,10 @@ impl Agent {
         }
 
         let creds = self
-            .two_factor(environment, email, password.clone(), provider)
+            .two_factor(environment, password.clone(), provider)
             .await?;
 
-        self.login_success(creds, password, db, email).await
+        self.login_success(creds, password).await
     }
 
     async fn get_password(
@@ -208,11 +205,7 @@ impl Agent {
         sock: &mut crate::sock::Sock,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<()> {
-        let mut db = load_db(&self.state)
-            .await
-            .unwrap_or_else(|_| rbw::db::Db::new());
-
-        if !db.needs_login() {
+        if !self.state.inner.db.read().await.needs_login() {
             return respond_ack(sock).await;
         }
 
@@ -232,7 +225,7 @@ impl Agent {
 
             match rbw::actions::login(&email, password.clone(), None, None).await {
                 Ok(creds) => {
-                    self.login_success(creds, password, &mut db, &email).await?;
+                    self.login_success(creds, password).await?;
 
                     break;
                 }
@@ -241,12 +234,10 @@ impl Agent {
                     sso_email_2fa_session_token,
                 }) => {
                     self.two_factor_required(
-                        &email,
                         password,
                         providers,
                         sso_email_2fa_session_token,
                         environment,
-                        &mut db,
                     )
                     .await?;
 
@@ -295,7 +286,8 @@ impl Agent {
     }
 
     pub async fn sync(&self, sock: Option<&mut crate::sock::Sock>) -> anyhow::Result<()> {
-        let mut db = load_db(&self.state).await?;
+        // Sync is the only one that reads an updated copy of the db from disk
+        let db = Db::load_async(&self.state.server_name(), &self.state.email()?).await?;
 
         let Some(access_token) = &db.access_token else {
             anyhow::bail!("failed to find access token in db");
@@ -312,6 +304,10 @@ impl Agent {
 
         self.state.set_master_password_reprompt(&entries).await;
 
+        // And then update the local cached copy of the db
+
+        let mut db = self.state.inner.db.write().await;
+
         db.update_access_token(access_token);
 
         db.protected_key = Some(protected_key);
@@ -319,7 +315,8 @@ impl Agent {
         db.protected_org_keys = protected_org_keys;
         db.entries = entries;
 
-        save_db(&self.state, &db).await?;
+        db.save_async(&self.state.server_name(), self.state.email()?)
+            .await?;
 
         if let Err(e) = self.subscribe_to_notifications().await {
             eprintln!("failed to subscribe to notifications: {e}");
@@ -336,30 +333,31 @@ impl Agent {
         &self,
         creds: SessionParameters,
         password: rbw::locked::Password,
-        db: &mut rbw::db::Db,
-        email: &str,
     ) -> anyhow::Result<()> {
-        db.apply_session_parameters(&creds);
+        {
+            let mut db = self.state.inner.db.write().await;
 
-        save_db(&self.state, db).await?;
+            db.apply_session_parameters(&creds);
+
+            db.save_async(&self.state.server_name(), self.state.email()?)
+                .await?;
+        }
 
         self.sync(None).await?;
 
-        let db = load_db(&self.state).await?;
+        let db = self.state.inner.db.read().await;
 
-        let Some(protected_private_key) = db.protected_private_key else {
-            return Err(anyhow::anyhow!(
-                "failed to find protected private key in db"
-            ));
-        };
+        let (_, protected_private_key, protected_org_keys) = db
+            .some_protected_keys()
+            .ok_or(anyhow::anyhow!("Cannot access protected keys in Db"))?;
 
         let res = rbw::actions::unlock(
-            email,
+            &self.state.email()?,
             &password,
             &creds.crypto_params,
             &creds.protected_key,
             &protected_private_key,
-            &db.protected_org_keys,
+            &protected_org_keys,
         );
 
         match res {
@@ -379,10 +377,7 @@ impl Agent {
         entry_key: Option<&str>,
         org_id: Option<&str>,
     ) -> anyhow::Result<String> {
-        if !self.state.master_password_reprompt_initialized() {
-            let db = load_db(&self.state).await?;
-            self.state.set_master_password_reprompt(&db.entries).await;
-        }
+        self.state.initialize_mpr().await;
 
         let Some(keys) = self.state.key(org_id).await else {
             return Err(anyhow::anyhow!(
@@ -484,21 +479,6 @@ impl Agent {
 
     async fn unlock_state(&self, environment: &rbw::protocol::Environment) -> anyhow::Result<()> {
         if self.state.needs_unlock().await {
-            let db = load_db(&self.state).await?;
-            let email = self.state.email()?.to_string();
-
-            let crypto_params = db.get_crypto_parameters()?;
-
-            let Some(protected_key) = db.protected_key else {
-                return Err(anyhow::anyhow!("failed to find protected key in db"));
-            };
-
-            let Some(protected_private_key) = db.protected_private_key else {
-                return Err(anyhow::anyhow!(
-                    "failed to find protected private key in db"
-                ));
-            };
-
             let mut err_msg = None;
             for i in 1_u8..=3 {
                 let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -511,13 +491,19 @@ impl Agent {
                     )
                     .await?;
 
+                let db = self.state.inner.db.read().await;
+
+                let (protected_key, protected_private_key, protected_org_keys) = db
+                    .some_protected_keys()
+                    .ok_or(anyhow::anyhow!("Cannot get protected keys from Db"))?;
+
                 match rbw::actions::unlock(
-                    &email,
+                    &self.state.email()?,
                     &password,
-                    &crypto_params,
+                    &db.get_crypto_parameters()?,
                     &protected_key,
                     &protected_private_key,
-                    &db.protected_org_keys,
+                    &protected_org_keys,
                 ) {
                     Ok((keys, org_keys)) => {
                         self.state.set_keys(keys, org_keys).await;
@@ -551,20 +537,6 @@ impl Agent {
             .await
             .contains(&master_password_reprompt)
         {
-            let db = load_db(&self.state).await?;
-
-            let crypto_params = db.get_crypto_parameters()?;
-
-            let Some(protected_key) = db.protected_key else {
-                return Err(anyhow::anyhow!("failed to find protected key in db"));
-            };
-
-            let Some(protected_private_key) = db.protected_private_key else {
-                return Err(anyhow::anyhow!(
-                    "failed to find protected private key in db"
-                ));
-            };
-
             let mut err_msg = None;
             for i in 1_u8..=3 {
                 let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -578,13 +550,19 @@ impl Agent {
                     )
                     .await?;
 
+                let db = self.state.inner.db.read().await;
+
+                let (protected_key, protected_private_key, protected_org_keys) = db
+                    .some_protected_keys()
+                    .ok_or(anyhow::anyhow!("Cannot get protected keys from Db"))?;
+
                 match rbw::actions::unlock(
                     &self.state.email()?,
                     &password,
-                    &crypto_params,
+                    &db.get_crypto_parameters()?,
                     &protected_key,
                     &protected_private_key,
-                    &db.protected_org_keys,
+                    &protected_org_keys,
                 ) {
                     Ok(_) => {
                         break;
@@ -609,11 +587,11 @@ impl Agent {
 
         self.unlock_state(&environment).await?;
 
-        let db = load_db(&self.state).await?;
-
         let mut pubkeys = Vec::new();
 
-        for entry in db.entries {
+        let db = self.state.inner.db.read().await;
+
+        for entry in &db.entries {
             if let rbw::db::EntryData::SshKey {
                 public_key: Some(encrypted),
                 ..
@@ -649,7 +627,7 @@ impl Agent {
 
         let request_bytes = request_public_key.to_bytes();
 
-        let db = load_db(&self.state).await?;
+        let db = self.state.inner.db.read().await;
 
         // Collect all ssh keys that are Some()
         let keys: Vec<(&String, &String, &Option<String>, &Option<String>)> = db
@@ -695,18 +673,18 @@ impl Agent {
             return Ok(());
         }
 
-        let (email, server_name, notifications_url) = {
-            let email = self.state.email()?.to_string();
-            let server_name = self.state.server_name();
-            let notifications_url = self.state.notifications_url();
-            (email, server_name, notifications_url)
-        };
+        let notifications_url = self.state.notifications_url();
 
-        let db = rbw::db::Db::load_async(&server_name, &email).await?;
-        let access_token = db.access_token.context("Error getting access token")?;
+        let db = self.state.inner.db.read().await;
+
+        let Some(access_token) = &db.access_token else {
+            anyhow::bail!("Error getting access token");
+        };
 
         let websocket_url = format!("{}/hub?access_token={}", notifications_url, access_token)
             .replace("https://", "wss://");
+
+        drop(db);
 
         let mut nh = self.state.notifications_handler_mut().await;
 
@@ -737,18 +715,4 @@ async fn respond_ack(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
     sock.send(&rbw::protocol::Response::Ack).await?;
 
     Ok(())
-}
-
-async fn load_db(state: &crate::agent::state::State) -> anyhow::Result<rbw::db::Db> {
-    let email = state.email()?;
-    rbw::db::Db::load_async(&state.server_name(), email)
-        .await
-        .map_err(anyhow::Error::new)
-}
-
-async fn save_db(state: &crate::agent::state::State, db: &rbw::db::Db) -> anyhow::Result<()> {
-    let email = state.email()?;
-    db.save_async(&state.server_name(), email)
-        .await
-        .map_err(anyhow::Error::new)
 }
