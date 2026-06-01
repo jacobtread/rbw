@@ -372,6 +372,42 @@ impl Agent {
         Ok(())
     }
 
+    async fn decrypt_cipher(
+        &self,
+        environment: &rbw::protocol::Environment,
+        cipherstring: &str,
+        entry_key: Option<&str>,
+        org_id: Option<&str>,
+    ) -> anyhow::Result<String> {
+        if !self.state.master_password_reprompt_initialized() {
+            let db = load_db(&self.state).await?;
+            self.state.set_master_password_reprompt(&db.entries).await;
+        }
+
+        let Some(keys) = self.state.key(org_id).await else {
+            return Err(anyhow::anyhow!(
+                "failed to find decryption keys in in-memory state"
+            ));
+        };
+
+        let entry_key = decrypt_entry_key(entry_key, keys.as_ref())?;
+
+        self.maybe_reprompt_password(environment, cipherstring)
+            .await?;
+
+        let cipherstring = rbw::cipherstring::CipherString::new(cipherstring)
+            .context("failed to parse encrypted secret")?;
+
+        let plaintext = String::from_utf8(
+            cipherstring
+                .decrypt_symmetric(keys.as_ref(), entry_key.as_ref())
+                .context("failed to decrypt encrypted secret")?,
+        )
+        .context("failed to parse decrypted secret")?;
+
+        Ok(plaintext)
+    }
+
     pub async fn decrypt(
         &self,
         sock: &mut crate::sock::Sock,
@@ -557,42 +593,6 @@ impl Agent {
         }
 
         Ok(())
-    }
-
-    async fn decrypt_cipher(
-        &self,
-        environment: &rbw::protocol::Environment,
-        cipherstring: &str,
-        entry_key: Option<&str>,
-        org_id: Option<&str>,
-    ) -> anyhow::Result<String> {
-        if !self.state.master_password_reprompt_initialized() {
-            let db = load_db(&self.state).await?;
-            self.state.set_master_password_reprompt(&db.entries).await;
-        }
-
-        let Some(keys) = self.state.key(org_id).await else {
-            return Err(anyhow::anyhow!(
-                "failed to find decryption keys in in-memory state"
-            ));
-        };
-
-        let entry_key = decrypt_entry_key(entry_key, keys.as_ref())?;
-
-        self.maybe_reprompt_password(environment, cipherstring)
-            .await?;
-
-        let cipherstring = rbw::cipherstring::CipherString::new(cipherstring)
-            .context("failed to parse encrypted secret")?;
-
-        let plaintext = String::from_utf8(
-            cipherstring
-                .decrypt_symmetric(keys.as_ref(), entry_key.as_ref())
-                .context("failed to decrypt encrypted secret")?,
-        )
-        .context("failed to parse decrypted secret")?;
-
-        Ok(plaintext)
     }
 
     pub async fn get_ssh_public_keys(&self) -> anyhow::Result<Vec<String>> {
