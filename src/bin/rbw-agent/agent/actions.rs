@@ -419,7 +419,9 @@ impl Agent {
         let plaintext = self
             .decrypt_cipher(environment, cipherstring, entry_key, org_id)
             .await?;
-        respond_decrypt(sock, plaintext).await?;
+
+        sock.send(&rbw::protocol::Response::Decrypt { plaintext })
+            .await?;
 
         Ok(())
     }
@@ -440,7 +442,10 @@ impl Agent {
             rbw::cipherstring::CipherString::encrypt_symmetric(keys.as_ref(), plaintext.as_bytes())
                 .context("failed to encrypt plaintext secret")?;
 
-        respond_encrypt(sock, cipherstring.to_string()).await?;
+        sock.send(&rbw::protocol::Response::Encrypt {
+            cipherstring: cipherstring.to_string(),
+        })
+        .await?;
 
         Ok(())
     }
@@ -646,50 +651,39 @@ impl Agent {
 
         let db = load_db(&self.state).await?;
 
-        for entry in db.entries {
-            let rbw::db::EntryData::SshKey {
-                private_key,
-                public_key,
-                ..
-            } = &entry.data
-            else {
-                continue;
-            };
+        // Collect all ssh keys that are Some()
+        let keys: Vec<(&String, &String, &Option<String>, &Option<String>)> = db
+            .entries
+            .iter()
+            .filter_map(|e| match &e.data {
+                rbw::db::EntryData::SshKey {
+                    private_key,
+                    public_key,
+                    ..
+                } => match (public_key, private_key) {
+                    (Some(public), Some(private)) => Some((public, private, &e.key, &e.org_id)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
 
-            let Some(public_key_enc) = public_key else {
-                continue;
-            };
-
-            let public_key_plaintext = self
-                .decrypt_cipher(
-                    &environment,
-                    public_key_enc,
-                    entry.key.as_deref(),
-                    entry.org_id.as_deref(),
-                )
+        for (public, private, key, org_id) in keys {
+            let pub_plain = self
+                .decrypt_cipher(&environment, public, key.as_deref(), org_id.as_deref())
                 .await?;
 
-            let public_key_bytes =
-                ssh_agent_lib::ssh_key::PublicKey::from_openssh(&public_key_plaintext)?.to_bytes();
+            let pub_bytes = ssh_agent_lib::ssh_key::PublicKey::from_openssh(&pub_plain)?.to_bytes();
 
-            if public_key_bytes != request_bytes {
+            if pub_bytes != request_bytes {
                 continue;
             }
 
-            let private_key_enc = private_key
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("Matching entry has no private key"))?;
-
-            let private_key_plaintext = self
-                .decrypt_cipher(
-                    &environment,
-                    private_key_enc,
-                    entry.key.as_deref(),
-                    entry.org_id.as_deref(),
-                )
+            let priv_plain = self
+                .decrypt_cipher(&environment, private, key.as_deref(), org_id.as_deref())
                 .await?;
 
-            return ssh_agent_lib::ssh_key::PrivateKey::from_openssh(private_key_plaintext)
+            return ssh_agent_lib::ssh_key::PrivateKey::from_openssh(priv_plain)
                 .map_err(anyhow::Error::new);
         }
 
@@ -741,20 +735,6 @@ fn decrypt_entry_key(
 
 async fn respond_ack(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
     sock.send(&rbw::protocol::Response::Ack).await?;
-
-    Ok(())
-}
-
-async fn respond_decrypt(sock: &mut crate::sock::Sock, plaintext: String) -> anyhow::Result<()> {
-    sock.send(&rbw::protocol::Response::Decrypt { plaintext })
-        .await?;
-
-    Ok(())
-}
-
-async fn respond_encrypt(sock: &mut crate::sock::Sock, cipherstring: String) -> anyhow::Result<()> {
-    sock.send(&rbw::protocol::Response::Encrypt { cipherstring })
-        .await?;
 
     Ok(())
 }
