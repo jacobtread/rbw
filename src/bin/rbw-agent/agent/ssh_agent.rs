@@ -53,6 +53,13 @@ impl ssh_agent_lib::agent::Session for SshAgent {
     ) -> Result<ssh_agent_lib::ssh_key::Signature, ssh_agent_lib::error::AgentError> {
         let pubkey = ssh_agent_lib::ssh_key::PublicKey::new(request.pubkey, "");
 
+        log::debug!(
+            "Received SSH signature request for {}",
+            pubkey
+                .to_openssh()
+                .map_err(|e| ssh_agent_lib::error::AgentError::other(e))?
+        );
+
         let private_key = self
             .agent
             .find_ssh_private_key(pubkey)
