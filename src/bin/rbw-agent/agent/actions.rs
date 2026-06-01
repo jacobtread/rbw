@@ -24,38 +24,35 @@ impl Agent {
         .await?)
     }
 
-    async fn get_client_id(
+    async fn get_client_id_secret(
         &self,
         host: &str,
         err: &Option<String>,
         environment: &rbw::protocol::Environment,
-    ) -> anyhow::Result<rbw::locked::Password> {
-        self.getpin(
-            "API key client__id",
-            &format!("Log in to {host}"),
-            err,
-            environment,
-            false,
-        )
-        .await
-        .context("failed to read client_id from pinentry")
-    }
+    ) -> anyhow::Result<(rbw::locked::Password, rbw::locked::Password)> {
+        let id = self
+            .getpin(
+                "API key client__id",
+                &format!("Log in to {host}"),
+                err,
+                environment,
+                false,
+            )
+            .await
+            .context("failed to read client_id from pinentry")?;
 
-    async fn get_client_secret(
-        &self,
-        host: &str,
-        err: &Option<String>,
-        environment: &rbw::protocol::Environment,
-    ) -> anyhow::Result<rbw::locked::Password> {
-        self.getpin(
-            "API key client__secret",
-            &format!("Log in to {host}"),
-            err,
-            environment,
-            false,
-        )
-        .await
-        .context("failed to read client_secret from pinentry")
+        let secret = self
+            .getpin(
+                "API key client__secret",
+                &format!("Log in to {host}"),
+                err,
+                environment,
+                false,
+            )
+            .await
+            .context("failed to read client_secret from pinentry")?;
+
+        Ok((id, secret))
     }
 
     fn get_host(&self) -> anyhow::Result<String> {
@@ -86,8 +83,8 @@ impl Agent {
         let mut err_msg = None;
         for i in 1_u8..=3 {
             let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-            let client_id = self.get_client_id(&host, &err, environment).await?;
-            let client_secret = self.get_client_secret(&host, &err, environment).await?;
+            let (client_id, client_secret) =
+                self.get_client_id_secret(&host, &err, environment).await?;
 
             let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
 
