@@ -11,9 +11,9 @@ use tokio::sync::mpsc::{channel, Sender};
 use crate::{
     actions::CryptoParameters,
     api::{
-        CiphersPostReq, CiphersPutReq, ConnectErrorRes, ConnectRefreshTokenRes, ConnectTokenAuth,
-        ConnectTokenReq, ConnectTokenRes, FoldersRes, FoldersResData, PreloginRes,
-        SyncRes, TwoFactorProviderType,
+        entry_data_type, CiphersPostReq, CiphersPutReq, ConnectErrorRes, ConnectRefreshTokenRes,
+        ConnectTokenAuth, ConnectTokenReq, ConnectTokenRes, FoldersRes, FoldersResData,
+        PreloginRes, SyncRes, TwoFactorProviderType,
     },
     db::{Encrypted, Entry, EntryData},
     error::{Error, Result},
@@ -34,8 +34,8 @@ enum ClientRequest<'a> {
     SendEmailLogin(&'a str, &'a str, &'a str),
     Sync(&'a str),
     ExchangeRefreshToken(&'a str),
-    Add(&'a str, CiphersPostReq<'a>),
-    Edit(&'a str, &'a str, CiphersPutReq<'a>),
+    Add(&'a str, CiphersPostReq),
+    Edit(&'a str, &'a str, CiphersPutReq),
     Remove(&'a str, &'a str),
     Folders(&'a str),
     CreateFolder(&'a str, &'a str),
@@ -511,16 +511,6 @@ impl Client {
         ))
     }
 
-    fn entry_data_type(data: &EntryData) -> u32 {
-        match data {
-            EntryData::Login { .. } => 1,
-            EntryData::Card { .. } => 3,
-            EntryData::Identity { .. } => 4,
-            EntryData::SecureNote => 2,
-            EntryData::SshKey { .. } => unreachable!(), // TODO: Fix me
-        }
-    }
-
     pub async fn add(
         &self,
         access_token: &str,
@@ -530,10 +520,10 @@ impl Client {
         folder_id: Option<&str>,
     ) -> Result<()> {
         let req = CiphersPostReq {
-            ty: Self::entry_data_type(data),
-            folder_id: folder_id,
-            name: name,
-            notes: notes,
+            ty: entry_data_type(data),
+            folder_id: folder_id.map(|f| f.to_string()),
+            name: name.to_string(),
+            notes: notes.map(|n| n.to_string()),
             data: data.clone().into(),
         };
 
@@ -546,24 +536,7 @@ impl Client {
     }
 
     pub async fn edit(&self, access_token: &str, entry: &Entry<Encrypted>) -> Result<()> {
-        let req = CiphersPutReq {
-            ty: Self::entry_data_type(&entry.data),
-            folder_id: entry.folder_id.as_deref(),
-            organization_id: entry.org_id.as_deref(),
-            name: &entry.name,
-            notes: entry.notes.as_deref(),
-            data: entry.data.clone().into(),
-            fields: &entry
-                .fields
-                .iter()
-                .map(|field| field.clone().into())
-                .collect::<Vec<_>>(),
-            password_history: &entry
-                .history
-                .iter()
-                .map(|entry| entry.clone().into())
-                .collect::<Vec<_>>(),
-        };
+        let req: CiphersPutReq = entry.clone().into();
 
         ClientRequest::Edit(access_token, &entry.id, req)
             .req(self)

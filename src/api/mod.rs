@@ -5,7 +5,7 @@
 use std::{fmt::Display, str::FromStr};
 
 use crate::{
-    db::{Encrypted, EntryData},
+    db::{Encrypted, Entry, EntryData},
     prelude::*,
 };
 
@@ -658,15 +658,15 @@ impl TryFrom<EntryData> for CipherSecureNote {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherData {
-    #[serde(alias = "login")]
+    #[serde(alias = "Login")]
     login: Option<CipherLogin>,
-    #[serde(alias = "card")]
+    #[serde(alias = "Card")]
     card: Option<CipherCard>,
-    #[serde(alias = "identity")]
+    #[serde(alias = "Identity")]
     identity: Option<CipherIdentity>,
-    #[serde(rename = "secureNote", alias = "secureNote")]
+    #[serde(rename = "secureNote")]
     secure_note: Option<CipherSecureNote>,
-    #[serde(alias = "sshKey")]
+    #[serde(alias = "SshKey", alias = "sshKey")]
     ssh_key: Option<CipherSshKey>,
 }
 
@@ -840,31 +840,57 @@ impl From<CipherHistoryEntry> for Option<crate::db::HistoryEntry> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 struct SyncResCipher {
-    #[serde(rename = "Id", alias = "id")]
+    #[serde(alias = "Id")]
     id: String,
-    #[serde(rename = "FolderId", alias = "folderId")]
+    #[serde(alias = "FolderId", alias = "folderId")]
     folder_id: Option<String>,
-    #[serde(rename = "OrganizationId", alias = "organizationId")]
+    #[serde(alias = "OrganizationId", alias = "organizationId")]
     organization_id: Option<String>,
-    #[serde(rename = "Name", alias = "name")]
+    #[serde(alias = "Name")]
     name: String,
     #[serde(flatten)]
     data: CipherData,
-    #[serde(rename = "Notes", alias = "notes")]
+    #[serde(alias = "Notes")]
     notes: Option<String>,
-    #[serde(rename = "PasswordHistory", alias = "passwordHistory")]
+    #[serde(alias = "PasswordHistory", alias = "passwordHistory")]
     password_history: Option<Vec<CipherHistoryEntry>>,
-    #[serde(rename = "Fields", alias = "fields")]
+    #[serde(alias = "Fields")]
     fields: Option<Vec<CipherDynamicField>>,
-    #[serde(rename = "DeletedDate", alias = "deletedDate")]
+    #[serde(alias = "DeletedDate", alias = "deletedDate")]
     deleted_date: Option<String>,
-    #[serde(rename = "Key", alias = "key")]
+    #[serde(alias = "Key")]
     key: Option<String>,
-    #[serde(rename = "Reprompt", alias = "reprompt")]
+    #[serde(alias = "Reprompt")]
     reprompt: CipherRepromptType,
 }
+
+// impl From<Entry<Encrypted>> for Cipher {
+//     fn from(value: Entry<Encrypted>) -> Self {
+//         Self {
+//             id: value.id,
+//             folder_id: value.folder_id,
+//             organization_id: value.org_id,
+//             name: value.name,
+//             data: value.data.into(),
+//             notes: value.notes,
+//             password_history: if value.history.is_empty() {
+//                 None
+//             } else {
+//                 Some(value.history.into_iter().map(|he| he.into()).collect())
+//             },
+//             fields: if value.fields.is_empty() {
+//                 None
+//             } else {
+//                 Some(value.fields.into_iter().map(|f| f.into()).collect())
+//             },
+//             deleted_date: None,
+//             key: value.key,
+//             reprompt: value.master_password_reprompt,
+//         }
+//     }
+// }
 
 impl SyncResCipher {
     fn into_entry(self, folders: &[SyncResFolder]) -> Result<crate::db::Entry<Encrypted>> {
@@ -943,33 +969,74 @@ struct SyncRes {
     folders: Vec<SyncResFolder>,
 }
 
+fn entry_data_type(data: &EntryData) -> u32 {
+    match data {
+        EntryData::Login { .. } => 1,
+        EntryData::Card { .. } => 3,
+        EntryData::Identity { .. } => 4,
+        EntryData::SecureNote => 2,
+        EntryData::SshKey { .. } => unreachable!(), // TODO: Fix me
+    }
+}
+
+fn _cipher_data_type(data: &CipherData) -> u32 {
+    if data.login.is_some() {
+        1
+    } else if data.card.is_some() {
+        3
+    } else if data.identity.is_some() {
+        4
+    } else if data.secure_note.is_some() {
+        2
+    } else if data.ssh_key.is_some() {
+        unreachable!()
+    } else {
+        unreachable!()
+    }
+}
+
 #[derive(Serialize, Debug)]
-struct CiphersPostReq<'a> {
+struct CiphersPostReq {
     #[serde(rename = "type")]
     ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
-    folder_id: Option<&'a str>,
-    name: &'a str,
-    notes: Option<&'a str>,
+    folder_id: Option<String>,
+    name: String,
+    notes: Option<String>,
     #[serde(flatten)]
     data: CipherData,
 }
 
 #[derive(Serialize, Debug)]
-struct CiphersPutReq<'a> {
+struct CiphersPutReq {
     #[serde(rename = "type")]
     ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
-    folder_id: Option<&'a str>,
+    folder_id: Option<String>,
     #[serde(rename = "organizationId")]
-    organization_id: Option<&'a str>,
-    name: &'a str,
-    notes: Option<&'a str>,
+    organization_id: Option<String>,
+    name: String,
+    notes: Option<String>,
     #[serde(flatten)]
     data: CipherData,
-    fields: &'a [CipherDynamicField],
+    fields: Vec<CipherDynamicField>,
     #[serde(rename = "passwordHistory")]
-    password_history: &'a [CipherHistoryEntry],
+    password_history: Vec<CipherHistoryEntry>,
+}
+
+impl From<Entry<Encrypted>> for CiphersPutReq {
+    fn from(value: Entry<Encrypted>) -> Self {
+        Self {
+            ty: entry_data_type(&value.data),
+            folder_id: value.folder_id,
+            organization_id: value.org_id,
+            name: value.name,
+            notes: value.notes,
+            data: value.data.into(),
+            fields: value.fields.into_iter().map(|f| f.into()).collect(),
+            password_history: value.history.into_iter().map(|he| he.into()).collect(),
+        }
+    }
 }
 
 #[derive(Deserialize, Debug)]
