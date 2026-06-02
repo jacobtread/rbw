@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
@@ -16,11 +16,11 @@ use crate::notifications::NotificationsHandler;
 
 pub struct InnerState {
     priv_key: RwLock<Option<Arc<rbw::locked::Keys>>>,
-    org_keys: RwLock<Option<std::collections::HashMap<String, Arc<rbw::locked::Keys>>>>,
+    org_keys: RwLock<Option<HashMap<String, Arc<rbw::locked::Keys>>>>,
     notifications_handler: RwLock<NotificationsHandler>,
     pub lock_deadline: Mutex<Option<Instant>>,
     pub sync_deadline: Mutex<Option<Instant>>,
-    pub master_password_reprompt: RwLock<std::collections::HashSet<[u8; 32]>>,
+    pub master_password_reprompt: RwLock<HashSet<[u8; 32]>>,
     master_password_reprompt_initialized: AtomicBool,
     config: rbw::config::Config,
     pub db: RwLock<Db>,
