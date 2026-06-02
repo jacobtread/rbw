@@ -12,7 +12,7 @@ use crate::{
     actions::CryptoParameters,
     api::{
         CiphersPostReq, CiphersPutReq, ConnectErrorRes, ConnectRefreshTokenRes, ConnectTokenAuth,
-        ConnectTokenReq, ConnectTokenRes, EntryDataWire, FoldersRes, FoldersResData, PreloginRes,
+        ConnectTokenReq, ConnectTokenRes, FoldersRes, FoldersResData, PreloginRes,
         SyncRes, TwoFactorProviderType,
     },
     db::{Encrypted, Entry, EntryData},
@@ -511,6 +511,16 @@ impl Client {
         ))
     }
 
+    fn entry_data_type(data: &EntryData) -> u32 {
+        match data {
+            EntryData::Login { .. } => 1,
+            EntryData::Card { .. } => 3,
+            EntryData::Identity { .. } => 4,
+            EntryData::SecureNote => 2,
+            EntryData::SshKey { .. } => unreachable!(), // TODO: Fix me
+        }
+    }
+
     pub async fn add(
         &self,
         access_token: &str,
@@ -520,10 +530,11 @@ impl Client {
         folder_id: Option<&str>,
     ) -> Result<()> {
         let req = CiphersPostReq {
+            ty: Self::entry_data_type(data),
             folder_id: folder_id,
             name: name,
             notes: notes,
-            data: EntryDataWire(data),
+            data: data.clone().into(),
         };
 
         ClientRequest::Add(access_token, req)
@@ -536,11 +547,12 @@ impl Client {
 
     pub async fn edit(&self, access_token: &str, entry: &Entry<Encrypted>) -> Result<()> {
         let req = CiphersPutReq {
+            ty: Self::entry_data_type(&entry.data),
             folder_id: entry.folder_id.as_deref(),
             organization_id: entry.org_id.as_deref(),
             name: &entry.name,
             notes: entry.notes.as_deref(),
-            data: EntryDataWire(&entry.data),
+            data: entry.data.clone().into(),
             fields: &entry
                 .fields
                 .iter()

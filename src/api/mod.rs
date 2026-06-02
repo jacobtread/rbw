@@ -658,15 +658,15 @@ impl TryFrom<EntryData> for CipherSecureNote {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct CipherData {
-    #[serde(rename = "Login", alias = "login")]
+    #[serde(alias = "login")]
     login: Option<CipherLogin>,
-    #[serde(rename = "Card", alias = "card")]
+    #[serde(alias = "card")]
     card: Option<CipherCard>,
-    #[serde(rename = "Identity", alias = "identity")]
+    #[serde(alias = "identity")]
     identity: Option<CipherIdentity>,
-    #[serde(rename = "SecureNote", alias = "secureNote")]
+    #[serde(rename = "secureNote", alias = "secureNote")]
     secure_note: Option<CipherSecureNote>,
-    #[serde(rename = "SshKey", alias = "sshKey")]
+    #[serde(alias = "sshKey")]
     ssh_key: Option<CipherSshKey>,
 }
 
@@ -945,18 +945,20 @@ struct SyncRes {
 
 #[derive(Serialize, Debug)]
 struct CiphersPostReq<'a> {
+    #[serde(rename = "type")]
+    ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
     folder_id: Option<&'a str>,
     name: &'a str,
     notes: Option<&'a str>,
     #[serde(flatten)]
-    data: EntryDataWire<'a>, // use lifetime parameter on the struct instead
+    data: CipherData,
 }
 
 #[derive(Serialize, Debug)]
 struct CiphersPutReq<'a> {
-    // #[serde(rename = "type")]
-    // ty: u32, // XXX what are the valid types?
+    #[serde(rename = "type")]
+    ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
     folder_id: Option<&'a str>,
     #[serde(rename = "organizationId")]
@@ -964,60 +966,10 @@ struct CiphersPutReq<'a> {
     name: &'a str,
     notes: Option<&'a str>,
     #[serde(flatten)]
-    data: EntryDataWire<'a>,
-    // login: Option<CipherLogin>,
-    // card: Option<CipherCard>,
-    // identity: Option<CipherIdentity>,
-    // fields: Vec<CipherField>,
-    // #[serde(rename = "secureNote")]
-    // secure_note: Option<CipherSecureNote>,
+    data: CipherData,
     fields: &'a [CipherDynamicField],
     #[serde(rename = "passwordHistory")]
     password_history: &'a [CipherHistoryEntry],
-}
-
-#[derive(Debug)]
-struct EntryDataWire<'a>(&'a EntryData);
-
-impl Serialize for EntryDataWire<'_> {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(None)?;
-        let data = self.0.clone();
-
-        match self.0 {
-            EntryData::Login { .. } => {
-                map.serialize_entry("type", &1u32)?;
-                map.serialize_entry("login", &TryInto::<CipherLogin>::try_into(data).unwrap())?;
-            }
-            EntryData::Card { .. } => {
-                map.serialize_entry("type", &3u32)?;
-                map.serialize_entry("card", &TryInto::<CipherCard>::try_into(data).unwrap())?;
-            }
-            EntryData::Identity { .. } => {
-                map.serialize_entry("type", &4u32)?;
-                map.serialize_entry(
-                    "identity",
-                    &TryInto::<CipherIdentity>::try_into(data).unwrap(),
-                )?;
-            }
-            EntryData::SecureNote => {
-                map.serialize_entry("type", &2u32)?;
-                map.serialize_entry(
-                    "secureNote",
-                    &TryInto::<CipherSecureNote>::try_into(data).unwrap(),
-                )?;
-            }
-            EntryData::SshKey { .. } => {
-                // TODO: Not entirely true now
-                return Err(serde::ser::Error::custom("SshKey not supported"));
-            }
-        }
-        map.end()
-    }
 }
 
 #[derive(Deserialize, Debug)]
