@@ -90,8 +90,6 @@ impl Agent {
                 // TODO: The client does like a hundred connections to do basic things. Maybe it
                 // makes sense to create more comprehensive opcodes.
                 res = listener.accept() => {
-                    log::debug!("Received a connection.");
-
                     let res = res.context("failed to accept incoming connection")?;
 
                     self.on_connection(res.0).await;
