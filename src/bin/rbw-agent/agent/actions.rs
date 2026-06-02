@@ -154,11 +154,11 @@ impl Agent {
 
     async fn two_factor_required(
         &self,
-        password: rbw::locked::Password,
+        password: &rbw::locked::Password,
         providers: Vec<rbw::api::TwoFactorProviderType>,
         sso_email_2fa_session_token: Option<String>,
         environment: &rbw::protocol::Environment,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<SessionParameters> {
         let supported_types = [
             rbw::api::TwoFactorProviderType::Authenticator,
             rbw::api::TwoFactorProviderType::Yubikey,
@@ -183,7 +183,7 @@ impl Agent {
             .two_factor(environment, password.clone(), provider)
             .await?;
 
-        self.login_success(creds, password).await
+        Ok(creds)
     }
 
     async fn get_password(
@@ -220,31 +220,43 @@ impl Agent {
                 .get_password(&format!("Log in to {host}"), &err, environment)
                 .await?;
 
-            match rbw::actions::login(&email, password.clone(), None, None).await {
-                Ok(creds) => {
-                    self.login_success(creds, password).await?;
-
-                    break;
-                }
+            let creds = match rbw::actions::login(&email, password.clone(), None, None).await {
+                Ok(creds) => creds,
                 Err(rbw::error::Error::TwoFactorRequired {
                     providers,
                     sso_email_2fa_session_token,
                 }) => {
                     self.two_factor_required(
-                        password,
+                        &password,
                         providers,
                         sso_email_2fa_session_token,
                         environment,
                     )
-                    .await?;
-
-                    break;
+                    .await?
                 }
                 Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
                     err_msg = Some(message);
+                    continue;
                 }
                 Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
+            };
+
+            {
+                let mut db = self.state.inner.db.write().await;
+
+                db.apply_session_parameters(&creds);
+
+                db.save_async(&self.state.server_name(), self.state.email()?)
+                    .await?;
             }
+
+            self.sync(None).await?;
+
+            self.try_unlock(&password)
+                .await
+                .context("failed to unlock database")?;
+
+            break;
         }
 
         respond_ack(sock).await?;
@@ -333,29 +345,6 @@ impl Agent {
         if let Some(sock) = sock {
             respond_ack(sock).await?;
         }
-
-        Ok(())
-    }
-
-    async fn login_success(
-        &self,
-        creds: SessionParameters,
-        password: rbw::locked::Password,
-    ) -> anyhow::Result<()> {
-        {
-            let mut db = self.state.inner.db.write().await;
-
-            db.apply_session_parameters(&creds);
-
-            db.save_async(&self.state.server_name(), self.state.email()?)
-                .await?;
-        }
-
-        self.sync(None).await?;
-
-        self.try_unlock(&password)
-            .await
-            .context("failed to unlock database")?;
 
         Ok(())
     }
