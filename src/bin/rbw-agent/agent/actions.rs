@@ -536,6 +536,14 @@ impl Agent {
             .await
             .contains(&master_password_reprompt)
         {
+            log::trace!(
+                "Requesting password reprompt for item {:#?}",
+                master_password_reprompt
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>()
+            );
+
             let mut err_msg = None;
             for i in 1_u8..=3 {
                 let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -551,13 +559,18 @@ impl Agent {
 
                 match self.try_unlock(&password).await {
                     Ok(()) => {
+                        log::trace!("Password correct, reprompt successful");
                         break;
                     }
                     Err(e) => match e.downcast_ref::<rbw::error::Error>() {
                         Some(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                            log::trace!("mpr incorrect password");
                             err_msg = Some(message.clone())
                         }
-                        _ => return Err(e).context("failed to unlock database"),
+                        _ => {
+                            log::trace!("mpr other error");
+                            return Err(e).context("failed to unlock database");
+                        }
                     },
                 }
             }
