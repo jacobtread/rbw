@@ -126,6 +126,12 @@ impl Agent {
 
         let (action, environment) = req.into_parts();
 
+        if !matches!(action, rbw::protocol::Action::Decrypt { .. })
+            && !matches!(action, rbw::protocol::Action::Encrypt { .. })
+        {
+            log::trace!("Start of action: {:?}", &action);
+        }
+
         let set_timeout = match &action {
             rbw::protocol::Action::Register => {
                 self.register(sock, &environment).await?;
@@ -186,6 +192,12 @@ impl Agent {
                 false
             }
         };
+
+        if !matches!(action, rbw::protocol::Action::Decrypt { .. })
+            && !matches!(action, rbw::protocol::Action::Encrypt { .. })
+        {
+            log::trace!("End of action: {:?}", &action);
+        }
 
         self.state.set_last_environment(environment).await;
 
