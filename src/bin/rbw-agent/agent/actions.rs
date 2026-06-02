@@ -285,6 +285,7 @@ impl Agent {
     pub async fn sync(&self, sock: Option<&mut crate::sock::Sock>) -> anyhow::Result<()> {
         // Sync is the only one that reads an updated copy of the db from disk
         let db = Db::load_async(&self.state.server_name(), &self.state.email()?).await?;
+        log::trace!("Read fresh db from disk");
 
         let Some(access_token) = &db.access_token else {
             anyhow::bail!("failed to find access token in db");
@@ -294,16 +295,24 @@ impl Agent {
             anyhow::bail!("failed to find refresh token in db");
         };
 
+        log::trace!("Obtained access and refresh tokens");
+
         let (access_token, (protected_key, protected_private_key, protected_org_keys, entries)) =
             rbw::actions::sync(access_token, refresh_token)
                 .await
                 .context("failed to sync database from server")?;
 
+        log::trace!("Sync operation finished");
+
         self.state.set_master_password_reprompt(&entries).await;
+
+        log::trace!("Set master password reprompt");
 
         // And then update the local cached copy of the db
 
         let mut db = self.state.inner.db.write().await;
+
+        log::trace!("Opened cached db for write operation");
 
         db.update_access_token(access_token);
 
@@ -314,6 +323,8 @@ impl Agent {
 
         db.save_async(&self.state.server_name(), self.state.email()?)
             .await?;
+
+        log::trace!("Updated disk db");
 
         if let Err(e) = self.subscribe_to_notifications().await {
             eprintln!("failed to subscribe to notifications: {e}");
