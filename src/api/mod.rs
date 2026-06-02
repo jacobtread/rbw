@@ -656,6 +656,81 @@ impl TryFrom<EntryData> for CipherSecureNote {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct CipherData {
+    #[serde(rename = "Login", alias = "login")]
+    login: Option<CipherLogin>,
+    #[serde(rename = "Card", alias = "card")]
+    card: Option<CipherCard>,
+    #[serde(rename = "Identity", alias = "identity")]
+    identity: Option<CipherIdentity>,
+    #[serde(rename = "SecureNote", alias = "secureNote")]
+    secure_note: Option<CipherSecureNote>,
+    #[serde(rename = "SshKey", alias = "sshKey")]
+    ssh_key: Option<CipherSshKey>,
+}
+
+impl From<EntryData> for CipherData {
+    fn from(value: EntryData) -> Self {
+        match value {
+            EntryData::Login { .. } => Self {
+                login: Some(value.try_into().unwrap()),
+                card: None,
+                identity: None,
+                secure_note: None,
+                ssh_key: None,
+            },
+            EntryData::Card { .. } => Self {
+                login: None,
+                card: Some(value.try_into().unwrap()),
+                identity: None,
+                secure_note: None,
+                ssh_key: None,
+            },
+            EntryData::Identity { .. } => Self {
+                login: None,
+                card: None,
+                identity: Some(value.try_into().unwrap()),
+                secure_note: None,
+                ssh_key: None,
+            },
+            EntryData::SecureNote => Self {
+                login: None,
+                card: None,
+                identity: None,
+                secure_note: Some(value.try_into().unwrap()),
+                ssh_key: None,
+            },
+            EntryData::SshKey { .. } => Self {
+                login: None,
+                card: None,
+                identity: None,
+                secure_note: None,
+                ssh_key: Some(value.try_into().unwrap()),
+            },
+        }
+    }
+}
+
+impl TryFrom<CipherData> for EntryData {
+    type Error = Error;
+    fn try_from(value: CipherData) -> std::result::Result<Self, Self::Error> {
+        if let Some(login) = value.login {
+            Ok(login.into())
+        } else if let Some(card) = value.card {
+            Ok(card.into())
+        } else if let Some(identity) = value.identity {
+            Ok(identity.into())
+        } else if let Some(secure_note) = value.secure_note {
+            Ok(secure_note.into())
+        } else if let Some(ssh_key) = value.ssh_key {
+            Ok(ssh_key.into())
+        } else {
+            Err(Error::EmptyCipherData)
+        }
+    }
+}
+
 #[derive(
     serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Debug, Clone, Copy, PartialEq, Eq,
 )]
@@ -775,16 +850,8 @@ struct SyncResCipher {
     organization_id: Option<String>,
     #[serde(rename = "Name", alias = "name")]
     name: String,
-    #[serde(rename = "Login", alias = "login")]
-    login: Option<CipherLogin>,
-    #[serde(rename = "Card", alias = "card")]
-    card: Option<CipherCard>,
-    #[serde(rename = "Identity", alias = "identity")]
-    identity: Option<CipherIdentity>,
-    #[serde(rename = "SecureNote", alias = "secureNote")]
-    secure_note: Option<CipherSecureNote>,
-    #[serde(rename = "SshKey", alias = "sshKey")]
-    ssh_key: Option<CipherSshKey>,
+    #[serde(flatten)]
+    data: CipherData,
     #[serde(rename = "Notes", alias = "notes")]
     notes: Option<String>,
     #[serde(rename = "PasswordHistory", alias = "passwordHistory")]
@@ -800,9 +867,9 @@ struct SyncResCipher {
 }
 
 impl SyncResCipher {
-    fn into_entry(self, folders: &[SyncResFolder]) -> Option<crate::db::Entry<Encrypted>> {
+    fn into_entry(self, folders: &[SyncResFolder]) -> Result<crate::db::Entry<Encrypted>> {
         if self.deleted_date.is_some() {
-            return None;
+            return Err(Error::DeletedEntry);
         }
 
         let history: Vec<crate::db::HistoryEntry> = self
@@ -819,31 +886,17 @@ impl SyncResCipher {
             (folder_name, Some(folder_id))
         });
 
-        let data = if let Some(login) = self.login {
-            login.into()
-        } else if let Some(card) = self.card {
-            card.into()
-        } else if let Some(identity) = self.identity {
-            identity.into()
-        } else if let Some(secure_note) = self.secure_note {
-            secure_note.into()
-        } else if let Some(ssh_key) = self.ssh_key {
-            ssh_key.into()
-        } else {
-            return None;
-        };
-
         let fields: Vec<crate::db::DynamicField> = self.fields.map_or_else(Vec::new, |fields| {
             fields.into_iter().map(Into::into).collect()
         });
 
-        Some(crate::db::Entry::<Encrypted> {
+        Ok(crate::db::Entry::<Encrypted> {
             id: self.id,
             org_id: self.organization_id,
             folder,
             folder_id: folder_id,
             name: self.name,
-            data,
+            data: self.data.try_into()?,
             fields,
             notes: self.notes,
             history,
@@ -902,6 +955,8 @@ struct CiphersPostReq<'a> {
 
 #[derive(Serialize, Debug)]
 struct CiphersPutReq<'a> {
+    // #[serde(rename = "type")]
+    // ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
     folder_id: Option<&'a str>,
     #[serde(rename = "organizationId")]
@@ -910,6 +965,12 @@ struct CiphersPutReq<'a> {
     notes: Option<&'a str>,
     #[serde(flatten)]
     data: EntryDataWire<'a>,
+    // login: Option<CipherLogin>,
+    // card: Option<CipherCard>,
+    // identity: Option<CipherIdentity>,
+    // fields: Vec<CipherField>,
+    // #[serde(rename = "secureNote")]
+    // secure_note: Option<CipherSecureNote>,
     fields: &'a [CipherDynamicField],
     #[serde(rename = "passwordHistory")]
     password_history: &'a [CipherHistoryEntry],

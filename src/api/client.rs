@@ -486,11 +486,15 @@ impl Client {
 
         let sync_res: SyncRes = res.json_with_path().await?;
 
-        let ciphers = sync_res
+        let ciphers: Vec<Entry<Encrypted>> = sync_res
             .ciphers
             .into_iter()
-            .filter_map(|cipher| cipher.into_entry(&sync_res.folders))
-            .collect();
+            .filter_map(|cipher| match cipher.into_entry(&sync_res.folders) {
+                Ok(e) => Some(Ok(e)),
+                Err(Error::DeletedEntry) => None, // If deleted entry, simply skip it
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let org_keys = sync_res
             .profile

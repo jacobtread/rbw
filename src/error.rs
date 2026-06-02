@@ -241,7 +241,13 @@ pub enum Error {
     InvalidKdfType { ty: String },
 
     #[error("Utf8 conversion error: {source}")]
-    Utf8Error { source: Utf8Error }
+    Utf8Error { source: Utf8Error },
+
+    #[error("the remote has sent an empty cipher data")]
+    EmptyCipherData,
+
+    #[error("the entry has been deleted")]
+    DeletedEntry
 }
 
 impl From<Utf8Error> for Error {
