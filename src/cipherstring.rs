@@ -111,78 +111,74 @@ impl CipherString {
         keys: &crate::locked::Keys,
         entry_key: Option<&crate::locked::Keys>,
     ) -> Result<Vec<u8>> {
-        if let Self::Symmetric {
+        let Self::Symmetric {
             iv,
             ciphertext,
             mac,
         } = self
-        {
-            let cipher = decrypt_common_symmetric(
-                entry_key.unwrap_or(keys),
-                iv,
-                ciphertext,
-                mac.as_deref(),
-            )?;
-            cipher
-                .decrypt_padded_vec_mut::<block_padding::Pkcs7>(ciphertext)
-                .map_err(|source| Error::Decrypt { source })
-        } else {
-            Err(Error::InvalidCipherString {
+        else {
+            return Err(Error::InvalidCipherString {
                 reason: "found an asymmetric cipherstring, expecting symmetric".to_string(),
-            })
-        }
+            });
+        };
+
+        let cipher =
+            decrypt_common_symmetric(entry_key.unwrap_or(keys), iv, ciphertext, mac.as_deref())?;
+        cipher
+            .decrypt_padded_vec_mut::<block_padding::Pkcs7>(ciphertext)
+            .map_err(|source| Error::Decrypt { source })
     }
 
     pub fn decrypt_locked_symmetric(
         &self,
         keys: &crate::locked::Keys,
     ) -> Result<crate::locked::LockedVec> {
-        if let Self::Symmetric {
+        let Self::Symmetric {
             iv,
             ciphertext,
             mac,
         } = self
-        {
-            let mut res = crate::locked::LockedVec::new();
-            res.extend(ciphertext.iter().copied());
-            let cipher = decrypt_common_symmetric(keys, iv, ciphertext, mac.as_deref())?;
-            cipher
-                .decrypt_padded_mut::<block_padding::Pkcs7>(&mut res)
-                .map_err(|source| Error::Decrypt { source })?;
-            Ok(res)
-        } else {
-            Err(Error::InvalidCipherString {
+        else {
+            return Err(Error::InvalidCipherString {
                 reason: "found an asymmetric cipherstring, expecting symmetric".to_string(),
-            })
-        }
+            });
+        };
+
+        let mut res = crate::locked::LockedVec::new();
+        res.extend(ciphertext.iter().copied());
+        let cipher = decrypt_common_symmetric(keys, iv, ciphertext, mac.as_deref())?;
+        cipher
+            .decrypt_padded_mut::<block_padding::Pkcs7>(&mut res)
+            .map_err(|source| Error::Decrypt { source })?;
+        Ok(res)
     }
 
     pub fn decrypt_locked_asymmetric(
         &self,
         private_key: &crate::locked::PrivateKey,
     ) -> Result<crate::locked::LockedVec> {
-        if let Self::Asymmetric { ciphertext } = self {
-            let privkey_data = private_key.private_key();
-            let privkey_data = pkcs7_unpad(privkey_data).ok_or(Error::Padding)?;
-            let pkey = rsa::RsaPrivateKey::from_pkcs8_der(privkey_data)
-                .map_err(|source| Error::RsaPkcs8 { source })?;
-            let mut bytes = pkey
-                .decrypt(rsa::Oaep::new::<sha1::Sha1>(), ciphertext)
-                .map_err(|source| Error::Rsa { source })?;
-
-            // XXX it'd be great if the rsa crate would let us decrypt
-            // into a preallocated buffer directly to avoid the
-            // intermediate vec that needs to be manually zeroized, etc
-            let mut res = crate::locked::LockedVec::new();
-            res.extend(bytes.iter().copied());
-            bytes.zeroize();
-
-            Ok(res)
-        } else {
-            Err(Error::InvalidCipherString {
+        let Self::Asymmetric { ciphertext } = self else {
+            return Err(Error::InvalidCipherString {
                 reason: "found a symmetric cipherstring, expecting asymmetric".to_string(),
-            })
-        }
+            });
+        };
+
+        let privkey_data = private_key.private_key();
+        let privkey_data = pkcs7_unpad(privkey_data).ok_or(Error::Padding)?;
+        let pkey = rsa::RsaPrivateKey::from_pkcs8_der(privkey_data)
+            .map_err(|source| Error::RsaPkcs8 { source })?;
+        let mut bytes = pkey
+            .decrypt(rsa::Oaep::new::<sha1::Sha1>(), ciphertext)
+            .map_err(|source| Error::Rsa { source })?;
+
+        // XXX it'd be great if the rsa crate would let us decrypt
+        // into a preallocated buffer directly to avoid the
+        // intermediate vec that needs to be manually zeroized, etc
+        let mut res = crate::locked::LockedVec::new();
+        res.extend(bytes.iter().copied());
+        bytes.zeroize();
+
+        Ok(res)
     }
 }
 
