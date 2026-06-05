@@ -31,6 +31,8 @@ impl ssh_agent_lib::agent::Session for SshAgent {
     async fn request_identities(
         &mut self,
     ) -> Result<Vec<ssh_agent_lib::proto::Identity>, ssh_agent_lib::error::AgentError> {
+        log::debug!("Received SSH identities request");
+
         self.agent
             .get_ssh_public_keys()
             .await
