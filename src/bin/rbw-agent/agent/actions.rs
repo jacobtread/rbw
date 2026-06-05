@@ -575,7 +575,7 @@ impl Agent {
         let environment = { self.state.last_environment().await.clone() };
 
         log::trace!("Resetting lock timeout due to get_ssh_public_keys");
-        self.state.set_timeout().await;
+        self.state.reset_lock_timeout().await;
 
         log::trace!("Trying to unlock state");
         self.unlock_state(&environment).await?;
@@ -618,7 +618,7 @@ impl Agent {
     ) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
         let environment = {
             let le = self.state.last_environment().await;
-            self.state.set_timeout().await;
+            self.state.reset_lock_timeout().await;
             le.clone()
         };
 

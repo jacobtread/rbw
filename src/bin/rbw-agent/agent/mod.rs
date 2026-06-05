@@ -112,8 +112,6 @@ impl Agent {
 
                 }
             }
-
-            log::trace!("End of run loop");
         }
     }
 
@@ -134,30 +132,24 @@ impl Agent {
             log::trace!("Start of action: {:?}", &action);
         }
 
-        let set_timeout = match &action {
+        match &action {
             rbw::protocol::Action::Register => {
                 self.register(sock, &environment).await?;
-                true
             }
             rbw::protocol::Action::Login => {
                 self.login(sock, &environment).await?;
-                true
             }
             rbw::protocol::Action::Unlock => {
                 self.unlock(sock, &environment).await?;
-                true
             }
             rbw::protocol::Action::CheckLock => {
                 self.check_lock(sock).await?;
-                false
             }
             rbw::protocol::Action::Lock => {
                 self.lock(sock).await?;
-                false
             }
             rbw::protocol::Action::Sync => {
                 self.sync(Some(sock)).await?;
-                false
             }
             // TODO: This alone does not do much, as it's a simple oracle open for everybody, to
             // decrypt stuff.
@@ -174,15 +166,12 @@ impl Agent {
                     org_id.as_deref(),
                 )
                 .await?;
-                true
             }
             rbw::protocol::Action::Encrypt { plaintext, org_id } => {
                 self.encrypt(sock, plaintext, org_id.as_deref()).await?;
-                true
             }
             rbw::protocol::Action::ClipboardStore { text } => {
                 self.clipboard_store(sock, text).await?;
-                true
             }
             // TODO: It's better to handle the closing more gracefully
             rbw::protocol::Action::Quit => std::process::exit(0),
@@ -191,9 +180,8 @@ impl Agent {
                     version: rbw::protocol::VERSION,
                 })
                 .await?;
-                false
             }
-        };
+        }
 
         if !matches!(action, rbw::protocol::Action::Decrypt { .. })
             && !matches!(action, rbw::protocol::Action::Encrypt { .. })
@@ -203,8 +191,15 @@ impl Agent {
 
         self.state.set_last_environment(environment).await;
 
-        if set_timeout {
-            self.state.set_timeout().await;
+        // Reset lock timeout on these request types
+        match &action {
+            rbw::protocol::Action::Register
+            | rbw::protocol::Action::Login
+            | rbw::protocol::Action::Unlock
+            | rbw::protocol::Action::Decrypt { .. }
+            | rbw::protocol::Action::Encrypt { .. }
+            | rbw::protocol::Action::ClipboardStore { .. } => self.state.reset_lock_timeout().await,
+            _ => {}
         }
 
         Ok(())

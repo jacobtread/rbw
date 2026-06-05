@@ -127,7 +127,7 @@ impl State {
         self.inner.priv_key.read().await.is_none() || self.inner.org_keys.read().await.is_none()
     }
 
-    pub async fn set_timeout(&self) {
+    pub async fn reset_lock_timeout(&self) {
         *self.inner.lock_deadline.lock().await =
             Some(Instant::now() + Duration::from_secs(self.inner.config.lock_timeout));
     }
