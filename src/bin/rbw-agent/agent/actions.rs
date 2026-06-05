@@ -1,5 +1,8 @@
 use anyhow::Context as _;
-use rbw::{actions::SessionParameters, db::Db};
+use rbw::{
+    actions::SessionParameters,
+    db::{Db, EntryData},
+};
 use sha2::Digest as _;
 
 use crate::agent::Agent;
@@ -569,35 +572,41 @@ impl Agent {
     }
 
     pub async fn get_ssh_public_keys(&self) -> anyhow::Result<Vec<String>> {
-        let environment = {
-            let le = self.state.last_environment().await;
-            self.state.set_timeout().await;
-            le.clone()
-        };
+        let environment = { self.state.last_environment().await.clone() };
 
+        log::trace!("Resetting lock timeout due to get_ssh_public_keys");
+        self.state.set_timeout().await;
+
+        log::trace!("Trying to unlock state");
         self.unlock_state(&environment).await?;
-
-        let mut pubkeys = Vec::new();
 
         let db = self.state.inner.db.read().await;
 
-        for entry in &db.entries {
-            if let rbw::db::EntryData::SshKey {
-                public_key: Some(encrypted),
-                ..
-            } = &entry.data
-            {
-                let plaintext = self
-                    .decrypt_cipher(
-                        &environment,
-                        encrypted,
-                        entry.key.as_deref(),
-                        entry.org_id.as_deref(),
-                    )
-                    .await?;
+        let enc_pubkeys: Vec<(String, Option<String>, Option<String>)> = db
+            .entries
+            .iter()
+            .filter_map(|e| {
+                if let EntryData::SshKey {
+                    public_key: Some(pubkey),
+                    ..
+                } = &e.data
+                {
+                    Some((pubkey.clone(), e.key.clone(), e.org_id.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-                pubkeys.push(plaintext);
-            }
+        drop(db);
+
+        let mut pubkeys = vec![];
+
+        for (e, entry_key, org_id) in enc_pubkeys {
+            let pubkey = self
+                .decrypt_cipher(&environment, &e, entry_key.as_deref(), org_id.as_deref())
+                .await?;
+            pubkeys.push(pubkey);
         }
 
         Ok(pubkeys)
