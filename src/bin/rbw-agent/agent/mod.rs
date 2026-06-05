@@ -95,11 +95,13 @@ impl Agent {
                     self.on_connection(res.0).await;
                 },
                 _ = Self::sleep_until_deadline(lock_deadline) => {
+                    log::trace!("Lock deadline reached. Locking the db");
                     self.state.clear().await;
                 },
                 _ = Self::sleep_until_deadline(sync_deadline) => {
                     //let state = self.state.clone();
 
+                    log::trace!("Sync deadline reached. Syncing the db");
                     self.state.set_sync_timeout().await;
 
                     // this could fail if we aren't logged in, but we
@@ -110,6 +112,8 @@ impl Agent {
 
                 }
             }
+
+            log::trace!("End of run loop");
         }
     }
 
