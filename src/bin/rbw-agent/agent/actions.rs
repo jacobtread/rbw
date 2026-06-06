@@ -17,7 +17,7 @@ impl Agent {
         grab: bool,
     ) -> anyhow::Result<rbw::locked::Password> {
         Ok(rbw::pinentry::getpin(
-            self.state.config_pinentry(),
+            self.config_pinentry(),
             prompt,
             desc,
             err.as_deref(),
@@ -59,7 +59,7 @@ impl Agent {
     }
 
     fn get_host(&self) -> anyhow::Result<String> {
-        let url_str = self.state.base_url();
+        let url_str = self.base_url();
         let url = reqwest::Url::parse(&url_str).context("failed to parse base url")?;
         let Some(host) = url.host_str() else {
             return Err(anyhow::anyhow!(
@@ -75,13 +75,13 @@ impl Agent {
         sock: &mut crate::sock::Sock,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<()> {
-        if !self.state.inner.db.read().await.needs_login() {
+        if !self.inner.db.read().await.needs_login() {
             return respond_ack(sock).await;
         }
 
         let host = self.get_host()?;
 
-        let email = self.state.email()?.to_string();
+        let email = self.email()?.to_string();
 
         let mut err_msg = None;
         for i in 1_u8..=3 {
@@ -130,7 +130,7 @@ impl Agent {
         password: rbw::locked::Password,
         provider: rbw::api::TwoFactorProviderType,
     ) -> anyhow::Result<SessionParameters> {
-        let email = self.state.email()?;
+        let email = self.email()?;
 
         let mut err_msg = None;
         for i in 1_u8..=3 {
@@ -174,7 +174,7 @@ impl Agent {
             ));
         };
 
-        let email = self.state.email()?;
+        let email = self.email()?;
 
         if provider == rbw::api::TwoFactorProviderType::Email {
             if let Some(token) = sso_email_2fa_session_token {
@@ -205,13 +205,13 @@ impl Agent {
         sock: &mut crate::sock::Sock,
         environment: &rbw::protocol::Environment,
     ) -> anyhow::Result<()> {
-        if !self.state.inner.db.read().await.needs_login() {
+        if !self.inner.db.read().await.needs_login() {
             return respond_ack(sock).await;
         }
 
         let host = self.get_host()?;
 
-        let email = self.state.email()?.to_string();
+        let email = self.email()?.to_string();
 
         let mut err_msg = None;
         for i in 1_u8..=3 {
@@ -245,12 +245,11 @@ impl Agent {
             };
 
             {
-                let mut db = self.state.inner.db.write().await;
+                let mut db = self.inner.db.write().await;
 
                 db.apply_session_parameters(&creds);
 
-                db.save_async(&self.state.server_name(), self.state.email()?)
-                    .await?;
+                db.save_async(&self.server_name(), self.email()?).await?;
             }
 
             self.sync(None).await?;
@@ -280,7 +279,7 @@ impl Agent {
     }
 
     pub async fn lock(&self, sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
-        self.state.clear().await;
+        self.clear().await;
 
         respond_ack(sock).await?;
 
@@ -288,7 +287,7 @@ impl Agent {
     }
 
     pub async fn check_lock(&self, sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
-        if self.state.needs_unlock().await {
+        if self.needs_unlock().await {
             return Err(anyhow::anyhow!("agent is locked"));
         }
 
@@ -299,7 +298,7 @@ impl Agent {
 
     pub async fn sync(&self, sock: Option<&mut crate::sock::Sock>) -> anyhow::Result<()> {
         // Sync is the only one that reads an updated copy of the db from disk
-        let db = Db::load_async(&self.state.server_name(), &self.state.email()?).await?;
+        let db = Db::load_async(&self.server_name(), &self.email()?).await?;
         log::trace!("Read fresh db from disk");
 
         let Some(access_token) = &db.access_token else {
@@ -319,13 +318,13 @@ impl Agent {
 
         log::trace!("Sync operation finished");
 
-        self.state.set_master_password_reprompt(&entries).await;
+        self.set_master_password_reprompt(&entries).await;
 
         log::trace!("Set master password reprompt");
 
         // And then update the local cached copy of the db
 
-        let mut db = self.state.inner.db.write().await;
+        let mut db = self.inner.db.write().await;
 
         log::trace!("Opened cached db for write operation");
 
@@ -336,8 +335,7 @@ impl Agent {
         db.protected_org_keys = protected_org_keys;
         db.entries = entries;
 
-        db.save_async(&self.state.server_name(), self.state.email()?)
-            .await?;
+        db.save_async(&self.server_name(), self.email()?).await?;
 
         log::trace!("Updated disk db");
 
@@ -359,9 +357,9 @@ impl Agent {
         entry_key: Option<&str>,
         org_id: Option<&str>,
     ) -> anyhow::Result<String> {
-        self.state.initialize_mpr().await;
+        self.initialize_mpr().await;
 
-        let Some(keys) = self.state.key(org_id).await else {
+        let Some(keys) = self.key(org_id).await else {
             return Err(anyhow::anyhow!(
                 "failed to find decryption keys in in-memory state"
             ));
@@ -409,7 +407,7 @@ impl Agent {
         plaintext: &str,
         org_id: Option<&str>,
     ) -> anyhow::Result<()> {
-        let Some(keys) = self.state.key(org_id).await else {
+        let Some(keys) = self.key(org_id).await else {
             return Err(anyhow::anyhow!(
                 "failed to find encryption keys in in-memory state"
             ));
@@ -433,7 +431,7 @@ impl Agent {
         sock: &mut crate::sock::Sock,
         text: &str,
     ) -> anyhow::Result<()> {
-        if let Some(clipboard) = &mut (*self.state.clipboard_mut().await) {
+        if let Some(clipboard) = &mut (*self.clipboard_mut().await) {
             clipboard
                 .set_text(text)
                 .map_err(|e| anyhow::anyhow!("couldn't store value to clipboard: {e}"))?;
@@ -460,14 +458,14 @@ impl Agent {
     }
 
     async fn try_unlock(&self, password: &rbw::locked::Password) -> anyhow::Result<()> {
-        let db = self.state.inner.db.read().await;
+        let db = self.inner.db.read().await;
 
         let (protected_key, protected_private_key, protected_org_keys) =
             db.some_protected_keys()
                 .ok_or(anyhow::anyhow!("Cannot get protected keys from Db"))?;
 
         let (keys, org_keys) = rbw::actions::unlock(
-            &self.state.email()?,
+            &self.email()?,
             password,
             &db.get_crypto_parameters()?,
             &protected_key,
@@ -475,13 +473,13 @@ impl Agent {
             &protected_org_keys,
         )?;
 
-        self.state.set_keys(keys, org_keys).await;
+        self.set_keys(keys, org_keys).await;
 
         Ok(())
     }
 
     async fn unlock_state(&self, environment: &rbw::protocol::Environment) -> anyhow::Result<()> {
-        if self.state.needs_unlock().await {
+        if self.needs_unlock().await {
             let mut err_msg = None;
             for i in 1_u8..=3 {
                 let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
@@ -521,7 +519,6 @@ impl Agent {
         let master_password_reprompt: [u8; 32] = sha256.finalize().into();
 
         if self
-            .state
             .inner
             .master_password_reprompt
             .read()
@@ -572,15 +569,17 @@ impl Agent {
     }
 
     pub async fn get_ssh_public_keys(&self) -> anyhow::Result<Vec<String>> {
-        let environment = { self.state.last_environment().await.clone() };
+        let environment = { self.last_environment().await.clone() };
 
+        // BUG: this reset_lock_timeout call doesn't make agent::run() restart the loop, so re-lock
+        // never happens.
         log::trace!("Resetting lock timeout due to get_ssh_public_keys");
-        self.state.reset_lock_timeout().await;
+        self.reset_lock_timeout().await;
 
         log::trace!("Trying to unlock state");
         self.unlock_state(&environment).await?;
 
-        let db = self.state.inner.db.read().await;
+        let db = self.inner.db.read().await;
 
         let enc_pubkeys: Vec<(String, Option<String>, Option<String>)> = db
             .entries
@@ -617,8 +616,8 @@ impl Agent {
         request_public_key: ssh_agent_lib::ssh_key::PublicKey,
     ) -> anyhow::Result<ssh_agent_lib::ssh_key::PrivateKey> {
         let environment = {
-            let le = self.state.last_environment().await;
-            self.state.reset_lock_timeout().await;
+            let le = self.last_environment().await;
+            self.reset_lock_timeout().await;
             le.clone()
         };
 
@@ -626,7 +625,7 @@ impl Agent {
 
         let request_bytes = request_public_key.to_bytes();
 
-        let db = self.state.inner.db.read().await;
+        let db = self.inner.db.read().await;
 
         // Collect all ssh keys that are Some()
         let keys: Vec<(&String, &String, &Option<String>, &Option<String>)> = db
@@ -668,13 +667,13 @@ impl Agent {
     }
 
     pub async fn subscribe_to_notifications(&self) -> anyhow::Result<()> {
-        if self.state.notifications_handler().await.is_connected() {
+        if self.notifications_handler().await.is_connected() {
             return Ok(());
         }
 
-        let notifications_url = self.state.notifications_url();
+        let notifications_url = self.notifications_url();
 
-        let db = self.state.inner.db.read().await;
+        let db = self.inner.db.read().await;
 
         let Some(access_token) = &db.access_token else {
             anyhow::bail!("Error getting access token");
@@ -685,7 +684,7 @@ impl Agent {
 
         drop(db);
 
-        let mut nh = self.state.notifications_handler_mut().await;
+        let mut nh = self.notifications_handler_mut().await;
 
         nh.connect(websocket_url)
             .await

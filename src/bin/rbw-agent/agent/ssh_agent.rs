@@ -68,11 +68,11 @@ impl ssh_agent_lib::agent::Session for SshAgent {
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
 
-        if self.agent.state.confirm_ssh() {
+        if self.agent.confirm_ssh() {
             let confirmed = rbw::pinentry::confirm(
-                &self.agent.state.config_pinentry(),
+                &self.agent.config_pinentry(),
                 "Allow SSH key use?",
-                &self.agent.state.last_environment().await.clone(),
+                &self.agent.last_environment().await.clone(),
                 true,
             )
             .await
