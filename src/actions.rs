@@ -260,7 +260,7 @@ async fn exchange_refresh_token_async(refresh_token: &str) -> Result<String> {
 }
 
 async fn api_client_async() -> Result<(crate::api::client::Client, crate::config::Config)> {
-    let config = crate::config::Config::load_async().await?;
+    let config = crate::config::Config::load()?;
     let client = crate::api::client::Client::new(
         &config.base_url(),
         &config.identity_url(),

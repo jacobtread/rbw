@@ -1077,10 +1077,10 @@ pub fn lock() -> anyhow::Result<()> {
     crate::actions::lock()
 }
 
-pub async fn purge() -> anyhow::Result<()> {
+pub fn purge() -> anyhow::Result<()> {
     stop_agent()?;
 
-    remove_db().await
+    remove_db()
 }
 
 pub fn stop_agent() -> anyhow::Result<()> {
@@ -1151,7 +1151,7 @@ fn version_or_quit() -> anyhow::Result<u32> {
 }
 
 async fn load_db() -> anyhow::Result<rbw::db::Db> {
-    let config = rbw::config::Config::load_async().await?;
+    let config = rbw::config::Config::load()?;
 
     let Some(email) = &config.email else {
         anyhow::bail!("failed to find email address in config");
@@ -1163,7 +1163,7 @@ async fn load_db() -> anyhow::Result<rbw::db::Db> {
 }
 
 async fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {
-    let config = rbw::config::Config::load_async().await?;
+    let config = rbw::config::Config::load()?;
 
     let Some(email) = &config.email else {
         anyhow::bail!("failed to find email address in config");
@@ -1174,8 +1174,8 @@ async fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {
         .map_err(anyhow::Error::new)
 }
 
-async fn remove_db() -> anyhow::Result<()> {
-    let config = rbw::config::Config::load_async().await?;
+fn remove_db() -> anyhow::Result<()> {
+    let config = rbw::config::Config::load()?;
 
     let Some(email) = &config.email else {
         anyhow::bail!("failed to find email address in config");

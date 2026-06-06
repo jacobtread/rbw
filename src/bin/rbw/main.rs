@@ -470,7 +470,7 @@ async fn main() {
         Opt::Remove { find_args } => commands::remove(find_args).await,
         Opt::History { find_args } => commands::history(find_args).await,
         Opt::Lock => commands::lock(),
-        Opt::Purge => commands::purge().await,
+        Opt::Purge => commands::purge(),
         Opt::StopAgent => commands::stop_agent(),
         Opt::GenCompletions { shell } => {
             gen_completions(shell);

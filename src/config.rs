@@ -88,30 +88,6 @@ impl Config {
         Ok(slf)
     }
 
-    pub async fn load_async() -> Result<Self> {
-        let file = crate::dirs::config_file()?;
-        let mut fh = tokio::fs::File::open(&file)
-            .await
-            .map_err(|source| Error::LoadConfig {
-                source,
-                file: file.clone(),
-            })?;
-        let mut json = String::new();
-        fh.read_to_string(&mut json)
-            .await
-            .map_err(|source| Error::LoadConfig {
-                source,
-                file: file.clone(),
-            })?;
-        let mut slf: Self =
-            serde_json::from_str(&json).map_err(|source| Error::LoadConfigJson { source, file })?;
-        if slf.lock_timeout == 0 {
-            log::warn!("lock_timeout must be greater than 0");
-            slf.lock_timeout = default_lock_timeout();
-        }
-        Ok(slf)
-    }
-
     pub fn save(&self) -> Result<()> {
         let file = crate::dirs::config_file()?;
         // unwrap is safe here because Self::filename is explicitly
