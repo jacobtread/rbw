@@ -219,6 +219,9 @@ pub enum Error {
     #[error("failed to find crypto parameters in db")]
     UnavailableDbCryptoParameters,
 
+    #[error("failed to find {0} in db")]
+    UnavailableDbSessionParameters(&'static str),
+
     #[error("error spawning pinentry")]
     Spawn { source: tokio::io::Error },
 

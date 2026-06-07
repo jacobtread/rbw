@@ -928,17 +928,17 @@ impl Db {
     }
 
     // TODO: Return references if possible
-    pub fn get_session_parameters(&self) -> anyhow::Result<SessionParameters> {
+    pub fn get_session_parameters(&self) -> Result<SessionParameters> {
         let Some(access_token) = self.access_token.clone() else {
-            return Err(anyhow::anyhow!("failed to find access_token in db"));
+            return Err(Error::UnavailableDbSessionParameters("access_token"));
         };
 
         let Some(refresh_token) = self.refresh_token.clone() else {
-            return Err(anyhow::anyhow!("failed to find refresh_token in db"));
+            return Err(Error::UnavailableDbSessionParameters("refresh_token"));
         };
 
         let Some(protected_key) = self.protected_key.clone() else {
-            return Err(anyhow::anyhow!("failed to find protected key in db"));
+            return Err(Error::UnavailableDbSessionParameters("protected key"));
         };
 
         Ok(SessionParameters {
