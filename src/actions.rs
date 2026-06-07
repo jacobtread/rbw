@@ -30,7 +30,7 @@ pub struct SessionParameters {
 
 pub async fn login(
     email: &str,
-    password: crate::locked::Password,
+    password: &crate::locked::Password,
     two_factor_token: Option<&str>,
     two_factor_provider: Option<crate::api::TwoFactorProviderType>,
 ) -> Result<SessionParameters> {

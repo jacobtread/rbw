@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use anyhow::Context as _;
 use rbw::{
     actions::SessionParameters,
@@ -7,6 +9,44 @@ use rbw::{
 use sha2::Digest as _;
 
 use crate::agent::Agent;
+
+async fn with_retry<C, Fut, T>(c: C) -> anyhow::Result<T>
+where
+    C: Fn(Option<String>) -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
+{
+    let mut err_msg = None;
+
+    for i in 1..=3 {
+        let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+
+        match c(err).await {
+            Ok(r) => {
+                return Ok(r);
+            }
+            Err(e) => {
+                if let Some(e) = e.downcast_ref::<rbw::error::Error>() {
+                    match e {
+                        rbw::error::Error::IncorrectPassword { message } if i < 3 => {
+                            err_msg = Some(message.clone());
+                            continue;
+                        }
+                        // TODO: Move this back where it was if possible
+                        rbw::error::Error::TwoFactorRequired { .. } if i < 3 => {
+                            err_msg = Some("TOTP code is not a number".to_string());
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+
+                return Err(e);
+            }
+        }
+    }
+
+    unreachable!()
+}
 
 impl Agent {
     async fn getpin(
@@ -80,28 +120,20 @@ impl Agent {
             return respond_ack(sock).await;
         }
 
-        let host = self.get_host()?;
+        let host = &self.get_host()?;
 
-        let email = self.email()?.to_string();
+        let email = &self.email()?.to_string();
 
-        let mut err_msg = None;
-        for i in 1_u8..=3 {
-            let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
+        with_retry(|e| async move {
             let (client_id, client_secret) =
-                self.get_client_id_secret(&host, &err, environment).await?;
+                self.get_client_id_secret(&host, &e, environment).await?;
 
             let apikey = rbw::locked::ApiKey::new(client_id, client_secret);
 
-            match rbw::actions::register(&email, apikey).await {
-                Ok(()) => {
-                    break;
-                }
-                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                    err_msg = Some(message);
-                }
-                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
-            }
-        }
+            Ok(rbw::actions::register(&email, apikey).await?)
+        })
+        .await
+        .context("failed to log in to bitwarden instance")?;
 
         respond_ack(sock).await?;
 
@@ -128,32 +160,19 @@ impl Agent {
     async fn two_factor(
         &self,
         environment: &rbw::protocol::Environment,
-        password: rbw::locked::Password,
+        password: &rbw::locked::Password,
         provider: rbw::api::TwoFactorProviderType,
     ) -> anyhow::Result<SessionParameters> {
         let email = self.email()?;
 
-        let mut err_msg = None;
-        for i in 1_u8..=3 {
-            let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-
+        with_retry(|err| async move {
             let code = self.get_code(provider, &err, environment).await?;
             let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
 
-            match rbw::actions::login(email, password.clone(), Some(code), Some(provider)).await {
-                Ok(creds) => return Ok(creds),
-                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                    err_msg = Some(message);
-                }
-                // can get this if the user passes an empty string
-                Err(rbw::error::Error::TwoFactorRequired { .. }) if i < 3 => {
-                    err_msg = Some("TOTP code is not a number".to_string());
-                }
-                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
-            }
-        }
-
-        unreachable!()
+            Ok(rbw::actions::login(email, password, Some(code), Some(provider)).await?)
+        })
+        .await
+        .context("failed to log in to bitwarden instance")
     }
 
     async fn two_factor_required(
@@ -187,9 +206,7 @@ impl Agent {
 
         log::trace!("Performing 2FA login");
 
-        let creds = self
-            .two_factor(environment, password.clone(), provider)
-            .await?;
+        let creds = self.two_factor(environment, password, provider).await?;
 
         Ok(creds)
     }
@@ -214,65 +231,66 @@ impl Agent {
             return respond_ack(sock).await;
         }
 
-        let host = self.get_host()?;
+        let host = &self.get_host()?;
 
-        let email = self.email()?.to_string();
+        let email = &self.email()?.to_string();
 
-        let mut err_msg = None;
-        for i in 1_u8..=3 {
-            let err = err_msg
-                .as_deref()
-                .map(|msg| format!("{msg} (attempt {i}/3)"));
-
+        let (creds, password) = with_retry(|err| async move {
             let password = self
                 .get_password(&format!("Log in to {host}"), &err, environment)
                 .await?;
 
-            let creds = match rbw::actions::login(&email, password.clone(), None, None).await {
-                Ok(creds) => creds,
-                Err(rbw::error::Error::TwoFactorRequired {
+            let r = match rbw::actions::login(&email, &password, None, None).await {
+                Err(Error::TwoFactorRequired {
                     providers,
                     sso_email_2fa_session_token,
                 }) => {
                     log::trace!("Login requires 2FA, performing it.");
 
-                    self.two_factor_required(
-                        &password,
-                        providers,
-                        sso_email_2fa_session_token,
-                        environment,
-                    )
-                    .await?
+                    let ret = match self
+                        .two_factor_required(
+                            &password,
+                            providers,
+                            sso_email_2fa_session_token,
+                            environment,
+                        )
+                        .await
+                    {
+                        Ok(creds) => Ok((creds, password)),
+                        Err(e) => Err(anyhow::anyhow!("2FA verification failed: {e}")),
+                    }?;
+
+                    Ok(ret)
                 }
-                Err(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                    err_msg = Some(message);
-                    continue;
-                }
-                Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
+                Ok(creds) => Ok((creds, password)),
+                Err(e) => Err(e),
             };
 
-            log::debug!("Login successful. Applying session parameters..");
-            {
-                let mut db = self.inner.db.write().await;
+            Ok(r?)
+        })
+        .await
+        .context("failed to log in to bitwarden instance")?;
 
-                db.apply_session_parameters(&creds);
+        log::debug!("Login successful. Applying session parameters..");
 
-                db.save_async(&self.server_name(), self.email()?).await?;
-            }
+        {
+            let mut db = self.inner.db.write().await;
 
-            log::trace!("Session parameters set. Syncing..");
-            self.sync(None).await?;
+            db.apply_session_parameters(&creds);
 
-            log::trace!("Sync performed. Trying to unlock with the current password..");
-
-            self.try_unlock(&password)
-                .await
-                .context("failed to unlock database")?;
-
-            log::trace!("Login and unlock successful!");
-
-            break;
+            db.save_async(&self.server_name(), self.email()?).await?;
         }
+
+        log::trace!("Session parameters set. Syncing..");
+        self.sync(None).await?;
+
+        log::trace!("Sync performed. Trying to unlock with the current password..");
+
+        self.try_unlock(&password)
+            .await
+            .context("failed to unlock database")?;
+
+        log::trace!("Login and unlock successful!");
 
         respond_ack(sock).await?;
 
@@ -494,10 +512,7 @@ impl Agent {
 
     async fn unlock_state(&self, environment: &rbw::protocol::Environment) -> anyhow::Result<()> {
         if self.needs_unlock().await {
-            let mut err_msg = None;
-            for i in 1_u8..=3 {
-                let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-
+            with_retry(|err| async move {
                 let password = self
                     .get_password(
                         &format!("Unlock the local database for '{}'", rbw::dirs::profile()),
@@ -506,18 +521,10 @@ impl Agent {
                     )
                     .await?;
 
-                match self.try_unlock(&password).await {
-                    Ok(()) => {
-                        break;
-                    }
-                    Err(e) => match e {
-                        rbw::error::Error::IncorrectPassword { message } if i < 3 => {
-                            err_msg = Some(message)
-                        }
-                        _ => return Err(e).context("failed to unlock database"),
-                    },
-                }
-            }
+                Ok(self.try_unlock(&password).await?)
+            })
+            .await
+            .context("failed to unlock database")?;
         }
 
         Ok(())
@@ -547,11 +554,7 @@ impl Agent {
                     .collect::<String>()
             );
 
-            let mut err_msg = None;
-            for i in 1_u8..=3 {
-                let err = err_msg.map(|msg| format!("{msg} (attempt {i}/3)"));
-
-                // TODO: Remember somewhere that only GUI pinentry work, since this is a daemon.
+            with_retry(|err| async move {
                 let password = self
                     .get_password(
                         "Accessing this entry requires the master password",
@@ -560,23 +563,12 @@ impl Agent {
                     )
                     .await?;
 
-                match self.try_unlock(&password).await {
-                    Ok(()) => {
-                        log::trace!("Password correct, reprompt successful");
-                        break;
-                    }
-                    Err(e) => match e {
-                        rbw::error::Error::IncorrectPassword { message } if i < 3 => {
-                            log::trace!("mpr incorrect password");
-                            err_msg = Some(message)
-                        }
-                        _ => {
-                            log::trace!("mpr other error");
-                            return Err(e).context("failed to unlock database");
-                        }
-                    },
-                }
-            }
+                Ok(self.try_unlock(&password).await?)
+            })
+            .await
+            .context("failed to unlock database")?;
+
+            log::trace!("Password correct, reprompt successful");
         }
 
         Ok(())
