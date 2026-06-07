@@ -1,5 +1,36 @@
 # Changelog
 
+## [Unreleased]
+
+## Added
+
+* Added `confirm_ssh` configuration option. When set to `true`, the agent will
+  ask for pinentry confirmation before every SSH signature request.
+* Added Nix flake support (`flake.nix`, `flake.lock`, `shell.nix`).
+
+## Changed
+
+* The `rbw` client and agent are now fully async internally.
+* The local database is now cached in the agent's state, reducing disk reads.
+* Notifications were refactored to use `tokio::sync::broadcast` instead of a
+  manual vector of senders.
+* The `Field` enum was replaced by `rbw::db::FieldType`, which now supports a
+  `Custom(String)` variant. Unknown field names given to `rbw get --field` are
+  now treated as custom field lookups instead of returning an error.
+* Removed unused dependencies: `arrayvec`, `is-terminal`, `tokio-stream`.
+* `.rustfmt.toml`: removed `max_width = 78`, added `newline_style = "Unix"`.
+* Removed the extensive clippy lint configuration from `Cargo.toml`.
+* `dirs.rs` helpers now return `Result` instead of potentially panicking.
+* `timeout.rs` was removed in favor of a simple Instant based deadline
+  mechanism.
+
+## Fixed
+
+* Fixed broken protocol version calculation where minor and patch components
+  were incorrectly scaled by 1_000_000.
+* Various error types and messages have changed; backwards compatibility of
+  error text is not guaranteed.
+
 ## [1.15.0] - 2025-12-31
 
 ## Added
