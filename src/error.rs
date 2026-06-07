@@ -216,6 +216,9 @@ pub enum Error {
         file: std::path::PathBuf,
     },
 
+    #[error("failed to find crypto parameters in db")]
+    UnavailableDbCryptoParameters,
+
     #[error("error spawning pinentry")]
     Spawn { source: tokio::io::Error },
 
@@ -247,7 +250,7 @@ pub enum Error {
     EmptyCipherData,
 
     #[error("the entry has been deleted")]
-    DeletedEntry
+    DeletedEntry,
 }
 
 impl From<Utf8Error> for Error {

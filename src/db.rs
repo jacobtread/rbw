@@ -921,10 +921,10 @@ impl Db {
 
     // TODO: Return references if possible
     // NOTE: Previous error string were different. Not 100% compatible output.
-    pub fn get_crypto_parameters(&self) -> anyhow::Result<CryptoParameters> {
+    pub fn get_crypto_parameters(&self) -> Result<CryptoParameters> {
         self.crypto_params
             .clone()
-            .ok_or(anyhow::anyhow!("failed to find crypto parameters in db"))
+            .ok_or(Error::UnavailableDbCryptoParameters)
     }
 
     // TODO: Return references if possible
