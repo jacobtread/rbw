@@ -9,7 +9,7 @@ use rbw::db::Db;
 use sha2::Digest as _;
 use tokio::{
     net::{UnixListener, UnixStream},
-    sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{Mutex, Notify, RwLock, RwLockReadGuard, RwLockWriteGuard},
     time::{sleep_until, Instant},
 };
 
@@ -24,6 +24,7 @@ struct InnerAgent {
     notifications_handler: RwLock<NotificationsHandler>,
     pub lock_deadline: Mutex<Option<Instant>>,
     pub sync_deadline: Mutex<Option<Instant>>,
+    pub run_notify: Notify,
     pub master_password_reprompt: RwLock<HashSet<[u8; 32]>>,
     master_password_reprompt_initialized: AtomicBool,
     config: rbw::config::Config,
@@ -76,6 +77,7 @@ impl Agent {
                 notifications_handler: RwLock::new(notifications_handler),
                 lock_deadline: Mutex::new(None),
                 sync_deadline: Mutex::new(sync_deadline),
+                run_notify: Notify::new(),
                 master_password_reprompt: RwLock::new(std::collections::HashSet::new()),
                 master_password_reprompt_initialized: AtomicBool::new(false),
                 config,
@@ -134,6 +136,7 @@ impl Agent {
     pub async fn reset_lock_timeout(&self) {
         *self.inner.lock_deadline.lock().await =
             Some(Instant::now() + Duration::from_secs(self.inner.config.lock_timeout));
+        self.inner.run_notify.notify_one();
     }
 
     pub async fn notifications_handler(&self) -> RwLockReadGuard<'_, NotificationsHandler> {
@@ -370,6 +373,9 @@ impl Agent {
                     let res = res.context("failed to accept incoming connection")?;
 
                     self.on_connection(res.0).await;
+                },
+                _ = self.inner.run_notify.notified() => {
+                    log::trace!("Waking run loop to re-evaluate deadlines");
                 },
                 _ = Self::sleep_until_deadline(lock_deadline) => {
                     log::trace!("Lock deadline reached. Locking the db");

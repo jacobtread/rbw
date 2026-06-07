@@ -584,8 +584,6 @@ impl Agent {
     pub async fn get_ssh_public_keys(&self) -> anyhow::Result<Vec<String>> {
         let environment = { self.last_environment().await.clone() };
 
-        // BUG: this reset_lock_timeout call doesn't make agent::run() restart the loop, so re-lock
-        // never happens.
         log::trace!("Resetting lock timeout due to get_ssh_public_keys");
         self.reset_lock_timeout().await;
 
