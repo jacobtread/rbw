@@ -292,9 +292,10 @@ impl TryFrom<ConnectErrorRes> for Error {
         match value.error.as_str() {
             "invalid_grant" => match error_desc {
                 Some("invalid_username_or_password") => {
-                    if let Some(error_model) = value.error_model {
-                        let message = error_model.message;
-                        return Ok(Error::IncorrectPassword { message });
+                    if let Some(model) = value.error_model {
+                        return Ok(Error::IncorrectPassword {
+                            message: model.message,
+                        });
                     }
                 }
                 Some("Two factor required.") => {
@@ -317,8 +318,8 @@ impl TryFrom<ConnectErrorRes> for Error {
                 // bitwarden_rs returns an empty error and error_description for
                 // this case, for some reason
                 if error_desc.is_none() || error_desc == Some("") {
-                    if let Some(error_model) = value.error_model.as_ref() {
-                        let message = error_model.message.clone();
+                    if let Some(model) = value.error_model.as_ref() {
+                        let message = model.message.clone();
                         match message.as_str() {
                             "Username or password is incorrect. Try again"
                             | "TOTP code is not a number" => {
