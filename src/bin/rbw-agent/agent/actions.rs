@@ -404,6 +404,7 @@ impl Agent {
         let cipherstring = rbw::cipherstring::CipherString::new(cipherstring)
             .context("failed to parse encrypted secret")?;
 
+        // BUG: This is sensible memory and should be handled more carefully (locked)
         let plaintext = String::from_utf8(
             cipherstring
                 .decrypt_symmetric(keys.as_ref(), entry_key.as_ref())
