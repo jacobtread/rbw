@@ -292,16 +292,16 @@ impl TryFrom<ConnectErrorRes> for Error {
         match value.error.as_str() {
             "invalid_grant" => match error_desc {
                 Some("invalid_username_or_password") => {
-                    if let Some(error_model) = value.error_model.as_ref() {
-                        let message = error_model.message.as_str().to_string();
+                    if let Some(error_model) = value.error_model {
+                        let message = error_model.message;
                         return Ok(Error::IncorrectPassword { message });
                     }
                 }
                 Some("Two factor required.") => {
-                    if let Some(providers) = value.two_factor_providers.as_ref() {
+                    if let Some(providers) = value.two_factor_providers {
                         return Ok(Error::TwoFactorRequired {
-                            providers: providers.clone(),
-                            sso_email_2fa_session_token: value.sso_email_2fa_session_token.clone(),
+                            providers: providers,
+                            sso_email_2fa_session_token: value.sso_email_2fa_session_token,
                         });
                     }
                 }
