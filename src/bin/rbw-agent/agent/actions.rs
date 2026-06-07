@@ -2,6 +2,7 @@ use anyhow::Context as _;
 use rbw::{
     actions::SessionParameters,
     db::{Db, EntryData},
+    error::{Error, Result},
 };
 use sha2::Digest as _;
 
@@ -470,12 +471,12 @@ impl Agent {
         Ok(())
     }
 
-    async fn try_unlock(&self, password: &rbw::locked::Password) -> anyhow::Result<()> {
+    async fn try_unlock(&self, password: &rbw::locked::Password) -> Result<()> {
         let db = self.inner.db.read().await;
 
         let (protected_key, protected_private_key, protected_org_keys) =
             db.some_protected_keys()
-                .ok_or(anyhow::anyhow!("Cannot get protected keys from Db"))?;
+                .ok_or(Error::UnavailableDbProtectedKeys)?;
 
         let (keys, org_keys) = rbw::actions::unlock(
             &self.email()?,
@@ -509,9 +510,9 @@ impl Agent {
                     Ok(()) => {
                         break;
                     }
-                    Err(e) => match e.downcast_ref::<rbw::error::Error>() {
-                        Some(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
-                            err_msg = Some(message.clone())
+                    Err(e) => match e {
+                        rbw::error::Error::IncorrectPassword { message } if i < 3 => {
+                            err_msg = Some(message)
                         }
                         _ => return Err(e).context("failed to unlock database"),
                     },
@@ -564,10 +565,10 @@ impl Agent {
                         log::trace!("Password correct, reprompt successful");
                         break;
                     }
-                    Err(e) => match e.downcast_ref::<rbw::error::Error>() {
-                        Some(rbw::error::Error::IncorrectPassword { message }) if i < 3 => {
+                    Err(e) => match e {
+                        rbw::error::Error::IncorrectPassword { message } if i < 3 => {
                             log::trace!("mpr incorrect password");
-                            err_msg = Some(message.clone())
+                            err_msg = Some(message)
                         }
                         _ => {
                             log::trace!("mpr other error");

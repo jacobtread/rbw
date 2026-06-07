@@ -222,6 +222,9 @@ pub enum Error {
     #[error("failed to find {0} in db")]
     UnavailableDbSessionParameters(&'static str),
 
+    #[error("failed to find protected keys in db")]
+    UnavailableDbProtectedKeys,
+
     #[error("error spawning pinentry")]
     Spawn { source: tokio::io::Error },
 
