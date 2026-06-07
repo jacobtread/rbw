@@ -5,7 +5,10 @@ use std::{
 };
 
 use anyhow::Context as _;
-use rbw::db::Db;
+use rbw::{
+    db::Db,
+    error::{Error, Result},
+};
 use sha2::Digest as _;
 use tokio::{
     net::{UnixListener, UnixStream},
@@ -269,12 +272,12 @@ impl Agent {
         *self.inner.last_environment.write().await = environment;
     }
 
-    pub fn email(&self) -> anyhow::Result<&str> {
+    pub fn email(&self) -> Result<&str> {
         self.inner
             .config
             .email
             .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("failed to find email address in config"))
+            .ok_or_else(|| Error::ConfigMissingEmail)
     }
 
     pub fn base_url(&self) -> String {
