@@ -172,7 +172,6 @@ impl Agent {
             Ok(rbw::actions::login(email, password, Some(code), Some(provider)).await?)
         })
         .await
-        .context("failed to log in to bitwarden instance")
     }
 
     async fn two_factor_required(
