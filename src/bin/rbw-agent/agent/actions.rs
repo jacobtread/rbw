@@ -177,10 +177,14 @@ impl Agent {
         let email = self.email()?;
 
         if provider == rbw::api::TwoFactorProviderType::Email {
+            log::trace!("Two factor provider is email");
             if let Some(token) = sso_email_2fa_session_token {
+                log::trace!("Sending 2FA email");
                 rbw::actions::send_two_factor_email(email, &token).await?;
             }
         }
+
+        log::trace!("Performing 2FA login");
 
         let creds = self
             .two_factor(environment, password.clone(), provider)
@@ -229,6 +233,8 @@ impl Agent {
                     providers,
                     sso_email_2fa_session_token,
                 }) => {
+                    log::trace!("Login requires 2FA, performing it.");
+
                     self.two_factor_required(
                         &password,
                         providers,
@@ -244,6 +250,7 @@ impl Agent {
                 Err(e) => return Err(e).context("failed to log in to bitwarden instance"),
             };
 
+            log::debug!("Login successful. Applying session parameters..");
             {
                 let mut db = self.inner.db.write().await;
 
@@ -252,11 +259,16 @@ impl Agent {
                 db.save_async(&self.server_name(), self.email()?).await?;
             }
 
+            log::trace!("Session parameters set. Syncing..");
             self.sync(None).await?;
+
+            log::trace!("Sync performed. Trying to unlock with the current password..");
 
             self.try_unlock(&password)
                 .await
                 .context("failed to unlock database")?;
+
+            log::trace!("Login and unlock successful!");
 
             break;
         }
@@ -323,19 +335,20 @@ impl Agent {
         log::trace!("Set master password reprompt");
 
         // And then update the local cached copy of the db
+        {
+            let mut db = self.inner.db.write().await;
 
-        let mut db = self.inner.db.write().await;
+            log::trace!("Opened cached db for write operation");
 
-        log::trace!("Opened cached db for write operation");
+            db.update_access_token(access_token);
 
-        db.update_access_token(access_token);
+            db.protected_key = Some(protected_key);
+            db.protected_private_key = Some(protected_private_key);
+            db.protected_org_keys = protected_org_keys;
+            db.entries = entries;
 
-        db.protected_key = Some(protected_key);
-        db.protected_private_key = Some(protected_private_key);
-        db.protected_org_keys = protected_org_keys;
-        db.entries = entries;
-
-        db.save_async(&self.server_name(), self.email()?).await?;
+            db.save_async(&self.server_name(), self.email()?).await?;
+        }
 
         log::trace!("Updated disk db");
 
