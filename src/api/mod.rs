@@ -314,21 +314,19 @@ impl TryFrom<ConnectErrorRes> for Error {
             "invalid_client" => {
                 return Ok(Error::IncorrectApiKey);
             }
-            "" => {
+            "" if error_desc.is_none() || error_desc == Some("") => {
                 // bitwarden_rs returns an empty error and error_description for
                 // this case, for some reason
-                if error_desc.is_none() || error_desc == Some("") {
-                    if let Some(model) = value.error_model.as_ref() {
-                        let message = model.message.clone();
-                        match message.as_str() {
-                            "Username or password is incorrect. Try again"
-                            | "TOTP code is not a number" => {
+                if let Some(model) = value.error_model.as_ref() {
+                    let message = model.message.clone();
+                    match message.as_str() {
+                        "Username or password is incorrect. Try again"
+                        | "TOTP code is not a number" => {
+                            return Ok(Error::IncorrectPassword { message });
+                        }
+                        s => {
+                            if s.starts_with("Invalid TOTP code! Server time: ") {
                                 return Ok(Error::IncorrectPassword { message });
-                            }
-                            s => {
-                                if s.starts_with("Invalid TOTP code! Server time: ") {
-                                    return Ok(Error::IncorrectPassword { message });
-                                }
                             }
                         }
                     }
