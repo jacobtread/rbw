@@ -328,13 +328,13 @@ impl Client {
     ) -> Result<()> {
         let connect_req = ConnectTokenReq {
             auth: ConnectTokenAuth::ClientCredentials {
-                username: &email,
-                client_secret: str::from_utf8(apikey.client_secret()).unwrap(),
+                username: email,
+                client_secret: std::str::from_utf8(apikey.client_secret()).unwrap(),
             },
             grant_type: "client_credentials",
             scope: "api",
             // XXX unwraps here are not necessarily safe
-            client_id: str::from_utf8(apikey.client_id()).unwrap(),
+            client_id: std::str::from_utf8(apikey.client_id()).unwrap(),
             device_type: u32::from(DEVICE_TYPE),
             device_identifier: device_id,
             device_name: "rbw",
@@ -385,14 +385,14 @@ impl Client {
 
         let connect_req = ConnectTokenReq {
             auth,
-            grant_type: grant_type,
-            scope: scope,
+            grant_type,
+            scope,
             client_id: "cli",
             device_type: u32::from(DEVICE_TYPE),
             device_identifier: device_id,
             device_name: "rbw",
             device_push_token: "",
-            two_factor_token: two_factor_token,
+            two_factor_token,
             two_factor_provider: two_factor_provider.map(|ty| ty as u32),
         };
 

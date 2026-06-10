@@ -37,7 +37,7 @@ pub async fn login(
     let (client, config) = api_client_async().await?;
     let crypto_params = client.prelogin(email).await?;
 
-    let identity = crate::identity::Identity::new(email, &password, &crypto_params)?;
+    let identity = crate::identity::Identity::new(email, password, &crypto_params)?;
     let (access_token, refresh_token, protected_key) = client
         .login(
             email,

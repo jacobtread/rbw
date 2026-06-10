@@ -140,6 +140,7 @@ pub struct DynamicField {
     pub linked_id: Option<crate::api::LinkedIdType>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum EntryData {
     Login {
