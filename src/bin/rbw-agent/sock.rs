@@ -8,10 +8,7 @@ impl Sock {
         Self(s)
     }
 
-    pub async fn send(
-        &mut self,
-        res: &rbw::protocol::Response,
-    ) -> anyhow::Result<()> {
+    pub async fn send(&mut self, res: &rbw::protocol::Response) -> anyhow::Result<()> {
         if let rbw::protocol::Response::Error { error } = res {
             log::warn!("{error}");
         }
@@ -32,8 +29,7 @@ impl Sock {
 
     pub async fn recv(
         &mut self,
-    ) -> anyhow::Result<std::result::Result<rbw::protocol::Request, String>>
-    {
+    ) -> anyhow::Result<std::result::Result<rbw::protocol::Request, String>> {
         let Self(sock) = self;
         let mut buf = tokio::io::BufStream::new(sock);
         let mut line = String::new();
@@ -46,11 +42,10 @@ impl Sock {
 }
 
 pub fn listen() -> anyhow::Result<tokio::net::UnixListener> {
-    let path = rbw::dirs::socket_file();
+    let path = rbw::dirs::socket_file()?;
     // if the socket already doesn't exist, that's fine
     let _ = std::fs::remove_file(&path);
-    let sock = tokio::net::UnixListener::bind(&path)
-        .context("failed to listen on socket")?;
+    let sock = tokio::net::UnixListener::bind(&path).context("failed to listen on socket")?;
     log::debug!("listening on socket {}", path.to_string_lossy());
     Ok(sock)
 }

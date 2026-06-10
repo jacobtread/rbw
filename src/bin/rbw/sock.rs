@@ -9,14 +9,11 @@ impl Sock {
     // specific kinds of std::io::Results differently
     pub fn connect() -> std::io::Result<Self> {
         Ok(Self(std::os::unix::net::UnixStream::connect(
-            rbw::dirs::socket_file(),
+            rbw::dirs::socket_file().map_err(std::io::Error::other)?,
         )?))
     }
 
-    pub fn send(
-        &mut self,
-        msg: &rbw::protocol::Request,
-    ) -> anyhow::Result<()> {
+    pub fn send(&mut self, msg: &rbw::protocol::Request) -> anyhow::Result<()> {
         let Self(sock) = self;
         sock.write_all(
             serde_json::to_string(msg)
@@ -35,7 +32,6 @@ impl Sock {
         let mut line = String::new();
         buf.read_line(&mut line)
             .context("failed to read message from agent")?;
-        serde_json::from_str(&line)
-            .context("failed to parse message from agent")
+        serde_json::from_str(&line).context("failed to parse message from agent")
     }
 }

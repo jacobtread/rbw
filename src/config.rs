@@ -18,6 +18,7 @@ pub struct Config {
     pub sync_interval: u64,
     #[serde(default = "default_pinentry")]
     pub pinentry: String,
+    pub confirm_ssh: Option<bool>,
     pub client_cert_path: Option<std::path::PathBuf>,
     // backcompat, no longer generated in new configs
     #[serde(skip_serializing)]
@@ -36,6 +37,7 @@ impl Default for Config {
             lock_timeout: default_lock_timeout(),
             sync_interval: default_sync_interval(),
             pinentry: default_pinentry(),
+            confirm_ssh: None,
             client_cert_path: None,
             device_id: None,
         }
@@ -54,18 +56,22 @@ pub fn default_pinentry() -> String {
     "pinentry".to_string()
 }
 
+pub fn default_confirm_ssh() -> Option<bool> {
+    None
+}
+
+const BW_EU_URL: &str = "https://api.bitwarden.eu";
+
 impl Config {
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn load() -> Result<Self> {
-        let file = crate::dirs::config_file();
-        let mut fh = std::fs::File::open(&file).map_err(|source| {
-            Error::LoadConfig {
-                source,
-                file: file.clone(),
-            }
+        let file = crate::dirs::config_file()?;
+        let mut fh = std::fs::File::open(&file).map_err(|source| Error::LoadConfig {
+            source,
+            file: file.clone(),
         })?;
         let mut json = String::new();
         fh.read_to_string(&mut json)
@@ -73,33 +79,8 @@ impl Config {
                 source,
                 file: file.clone(),
             })?;
-        let mut slf: Self = serde_json::from_str(&json)
-            .map_err(|source| Error::LoadConfigJson { source, file })?;
-        if slf.lock_timeout == 0 {
-            log::warn!("lock_timeout must be greater than 0");
-            slf.lock_timeout = default_lock_timeout();
-        }
-        Ok(slf)
-    }
-
-    pub async fn load_async() -> Result<Self> {
-        let file = crate::dirs::config_file();
-        let mut fh =
-            tokio::fs::File::open(&file).await.map_err(|source| {
-                Error::LoadConfigAsync {
-                    source,
-                    file: file.clone(),
-                }
-            })?;
-        let mut json = String::new();
-        fh.read_to_string(&mut json).await.map_err(|source| {
-            Error::LoadConfigAsync {
-                source,
-                file: file.clone(),
-            }
-        })?;
-        let mut slf: Self = serde_json::from_str(&json)
-            .map_err(|source| Error::LoadConfigJson { source, file })?;
+        let mut slf: Self =
+            serde_json::from_str(&json).map_err(|source| Error::LoadConfigJson { source, file })?;
         if slf.lock_timeout == 0 {
             log::warn!("lock_timeout must be greater than 0");
             slf.lock_timeout = default_lock_timeout();
@@ -108,20 +89,16 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<()> {
-        let file = crate::dirs::config_file();
+        let file = crate::dirs::config_file()?;
         // unwrap is safe here because Self::filename is explicitly
         // constructed as a filename in a directory
-        std::fs::create_dir_all(file.parent().unwrap()).map_err(
-            |source| Error::SaveConfig {
-                source,
-                file: file.clone(),
-            },
-        )?;
-        let mut fh = std::fs::File::create(&file).map_err(|source| {
-            Error::SaveConfig {
-                source,
-                file: file.clone(),
-            }
+        std::fs::create_dir_all(file.parent().unwrap()).map_err(|source| Error::SaveConfig {
+            source,
+            file: file.clone(),
+        })?;
+        let mut fh = std::fs::File::create(&file).map_err(|source| Error::SaveConfig {
+            source,
+            file: file.clone(),
         })?;
         fh.write_all(
             serde_json::to_string(self)
@@ -143,64 +120,54 @@ impl Config {
         Ok(())
     }
 
-    pub fn base_url(&self) -> String {
-        self.base_url.clone().map_or_else(
-            || "https://api.bitwarden.com".to_string(),
-            |url| {
-                let clean_url = url.trim_end_matches('/');
-                if clean_url == "https://api.bitwarden.eu" {
-                    "https://api.bitwarden.eu".to_string()
+    fn resolve_url(&self, default: String, eu_default: String, suffix: &str) -> String {
+        match &self.base_url {
+            Some(url) => {
+                let url = url.trim_end_matches('/');
+                if url == BW_EU_URL {
+                    eu_default
                 } else {
-                    format!("{clean_url}/api")
+                    format!("{url}{suffix}")
                 }
-            },
+            }
+            None => default,
+        }
+    }
+
+    pub fn base_url(&self) -> String {
+        self.resolve_url(
+            "https://api.bitwarden.com".to_string(),
+            "https://api.bitwarden.eu".to_string(),
+            "/api",
         )
     }
 
     pub fn identity_url(&self) -> String {
         self.identity_url.clone().unwrap_or_else(|| {
-            self.base_url.clone().map_or_else(
-                || "https://identity.bitwarden.com".to_string(),
-                |url| {
-                    let clean_url = url.trim_end_matches('/');
-                    if clean_url == "https://api.bitwarden.eu" {
-                        "https://identity.bitwarden.eu".to_string()
-                    } else {
-                        format!("{clean_url}/identity")
-                    }
-                },
+            self.resolve_url(
+                "https://identity.bitwarden.com".to_string(),
+                "https://identity.bitwarden.eu".to_string(),
+                "/identity",
             )
         })
     }
 
     pub fn ui_url(&self) -> String {
         self.ui_url.clone().unwrap_or_else(|| {
-            self.base_url.clone().map_or_else(
-                || "https://vault.bitwarden.com".to_string(),
-                |url| {
-                    let clean_url = url.trim_end_matches('/');
-                    if clean_url == "https://api.bitwarden.eu" {
-                        "https://vault.bitwarden.eu".to_string()
-                    } else {
-                        clean_url.to_string()
-                    }
-                },
+            self.resolve_url(
+                "https://vault.bitwarden.com".to_string(),
+                "https://vault.bitwarden.eu".to_string(),
+                "",
             )
         })
     }
 
     pub fn notifications_url(&self) -> String {
         self.notifications_url.clone().unwrap_or_else(|| {
-            self.base_url.clone().map_or_else(
-                || "https://notifications.bitwarden.com".to_string(),
-                |url| {
-                    let clean_url = url.trim_end_matches('/');
-                    if clean_url == "https://api.bitwarden.eu" {
-                        "https://notifications.bitwarden.eu".to_string()
-                    } else {
-                        format!("{clean_url}/notifications")
-                    }
-                },
+            self.resolve_url(
+                "https://notifications.bitwarden.com".to_string(),
+                "https://notifications.bitwarden.eu".to_string(),
+                "/notifications",
             )
         })
     }
@@ -217,7 +184,7 @@ impl Config {
 }
 
 pub async fn device_id(config: &Config) -> Result<String> {
-    let file = crate::dirs::device_id_file();
+    let file = crate::dirs::device_id_file()?;
     if let Ok(mut fh) = tokio::fs::File::open(&file).await {
         let mut s = String::new();
         fh.read_to_string(&mut s)
@@ -232,18 +199,18 @@ pub async fn device_id(config: &Config) -> Result<String> {
             || uuid::Uuid::new_v4().hyphenated().to_string(),
             String::to_string,
         );
-        let mut fh = tokio::fs::File::create(&file).await.map_err(|e| {
-            Error::LoadDeviceId {
+        let mut fh = tokio::fs::File::create(&file)
+            .await
+            .map_err(|e| Error::LoadDeviceId {
                 source: e,
                 file: file.clone(),
-            }
-        })?;
-        fh.write_all(id.as_bytes()).await.map_err(|e| {
-            Error::LoadDeviceId {
+            })?;
+        fh.write_all(id.as_bytes())
+            .await
+            .map_err(|e| Error::LoadDeviceId {
                 source: e,
                 file: file.clone(),
-            }
-        })?;
+            })?;
         Ok(id)
     }
 }

@@ -21,15 +21,14 @@ pub fn daemonize(no_daemonize: bool) -> anyhow::Result<Option<StartupAck>> {
             .create(true)
             .truncate(false)
             .mode(0o666)
-            .open(rbw::dirs::pid_file())
+            .open(rbw::dirs::pid_file()?)
             .context("failed to open pid file")?;
         rustix::fs::flock(
             &pidfile,
             rustix::fs::FlockOperation::NonBlockingLockExclusive,
         )
         .context("failed to lock pid file")?;
-        writeln!(pidfile, "{}", std::process::id())
-            .context("failed to write pid file")?;
+        writeln!(pidfile, "{}", std::process::id()).context("failed to write pid file")?;
         // don't close the pidfile until the process exits, to ensure it
         // stays locked
         std::mem::forget(pidfile);
@@ -40,15 +39,15 @@ pub fn daemonize(no_daemonize: bool) -> anyhow::Result<Option<StartupAck>> {
     let stdout = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
-        .open(rbw::dirs::agent_stdout_file())?;
+        .open(rbw::dirs::agent_stdout_file()?)?;
     let stderr = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
-        .open(rbw::dirs::agent_stderr_file())?;
+        .open(rbw::dirs::agent_stderr_file()?)?;
 
     let (r, w) = rustix::pipe::pipe()?;
     let daemonize = daemonize::Daemonize::new()
-        .pid_file(rbw::dirs::pid_file())
+        .pid_file(rbw::dirs::pid_file()?)
         .stdout(stdout)
         .stderr(stderr);
     let res = match daemonize.execute() {

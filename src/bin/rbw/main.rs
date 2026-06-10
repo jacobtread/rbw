@@ -8,8 +8,8 @@ mod commands;
 mod sock;
 
 #[derive(Debug, clap::Args)]
-struct FindArgs {
-    #[arg(help = "Name, URI or UUID of the entry to display", value_parser = commands::parse_needle)]
+pub struct FindArgs {
+    #[arg(help = "Name, URI or UUID of the entry to display")]
     needle: commands::Needle,
     #[arg(help = "Username of the entry to display")]
     user: Option<String>,
@@ -131,11 +131,7 @@ enum Opt {
         name: String,
         #[arg(help = "Username for the password entry")]
         user: Option<String>,
-        #[arg(
-            long,
-            help = "URI for the password entry",
-            number_of_values = 1
-        )]
+        #[arg(long, help = "URI for the password entry", number_of_values = 1)]
         uri: Vec<String>,
         #[arg(long, help = "Folder for the password entry")]
         folder: Option<String>,
@@ -161,11 +157,7 @@ enum Opt {
         name: Option<String>,
         #[arg(help = "Username for the password entry")]
         user: Option<String>,
-        #[arg(
-            long,
-            help = "URI for the password entry",
-            number_of_values = 1
-        )]
+        #[arg(long, help = "URI for the password entry", number_of_values = 1)]
         uri: Vec<String>,
         #[arg(long, help = "Folder for the password entry")]
         folder: Option<String>,
@@ -307,23 +299,73 @@ impl Config {
     }
 }
 
-fn main() {
+fn generate_completion<G: clap_complete::Generator>(generator: G) {
+    clap_complete::generate(
+        generator,
+        &mut Opt::command(),
+        "rbw",
+        &mut std::io::stdout(),
+    );
+}
+
+fn gen_completions(shell: CompletionShell) {
+    match shell {
+        CompletionShell::Bash => {
+            generate_completion(clap_complete::Shell::Bash);
+            println!("{}", include_str!("completion/rbw.bash"));
+        }
+        CompletionShell::Fish => {
+            generate_completion(clap_complete::Shell::Fish);
+            println!("{}", include_str!("completion/rbw.fish"));
+        }
+        CompletionShell::Zsh => {
+            generate_completion(clap_complete::Shell::Zsh);
+            println!("{}", include_str!("completion/rbw.zsh"));
+        }
+        CompletionShell::Powershell => {
+            generate_completion(clap_complete::Shell::PowerShell);
+        }
+        CompletionShell::Elvish => {
+            generate_completion(clap_complete::Shell::Elvish);
+        }
+        CompletionShell::Nushell => {
+            generate_completion(clap_complete_nushell::Nushell);
+        }
+        CompletionShell::Fig => {
+            generate_completion(clap_complete_fig::Fig);
+        }
+    }
+}
+
+fn calc_pwgen_type(
+    no_symbols: bool,
+    only_numbers: bool,
+    nonconfusables: bool,
+    diceware: bool,
+) -> rbw::pwgen::Type {
+    match (no_symbols, only_numbers, nonconfusables, diceware) {
+        (true, ..) => rbw::pwgen::Type::NoSymbols,
+        (_, true, ..) => rbw::pwgen::Type::Numbers,
+        (_, _, true, _) => rbw::pwgen::Type::NonConfusables,
+        (.., true) => rbw::pwgen::Type::Diceware,
+        _ => rbw::pwgen::Type::AllChars,
+    }
+}
+
+#[tokio::main]
+async fn main() {
     let opt = Opt::parse();
 
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .format(|buf, record| {
-        if let Some((terminal_size::Width(w), _)) =
-            terminal_size::terminal_size()
-        {
-            let out = format!("{}: {}", record.level(), record.args());
-            writeln!(buf, "{}", textwrap::fill(&out, usize::from(w) - 1))
-        } else {
-            writeln!(buf, "{}: {}", record.level(), record.args())
-        }
-    })
-    .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            if let Some((terminal_size::Width(w), _)) = terminal_size::terminal_size() {
+                let out = format!("{}: {}", record.level(), record.args());
+                writeln!(buf, "{}", textwrap::fill(&out, usize::from(w) - 1))
+            } else {
+                writeln!(buf, "{}: {}", record.level(), record.args())
+            }
+        })
+        .init();
 
     let subcommand_name = opt.subcommand_name();
     let res = match opt {
@@ -337,7 +379,7 @@ fn main() {
         Opt::Unlock => commands::unlock(),
         Opt::Unlocked => commands::unlocked(),
         Opt::Sync => commands::sync(),
-        Opt::List { fields, raw } => commands::list(&fields, raw),
+        Opt::List { fields, raw } => commands::list(&fields, raw).await,
         Opt::Get {
             find_args,
             field,
@@ -346,55 +388,59 @@ fn main() {
             #[cfg(feature = "clipboard")]
             clipboard,
             list_fields,
-        } => commands::get(
-            find_args.needle.clone(),
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
-            field.as_deref(),
-            full,
-            raw,
-            #[cfg(feature = "clipboard")]
-            clipboard,
-            #[cfg(not(feature = "clipboard"))]
-            false,
-            find_args.ignorecase,
-            list_fields,
-        ),
+        } => {
+            commands::get(
+                find_args,
+                field.as_deref(),
+                full,
+                raw,
+                #[cfg(feature = "clipboard")]
+                clipboard,
+                #[cfg(not(feature = "clipboard"))]
+                false,
+                list_fields,
+            )
+            .await
+        }
         Opt::Search {
             term,
             fields,
             folder,
             raw,
-        } => commands::search(&term, &fields, folder.as_deref(), raw),
+        } => commands::search(&term, &fields, folder.as_deref(), raw).await,
         Opt::Code {
             find_args,
             #[cfg(feature = "clipboard")]
             clipboard,
-        } => commands::code(
-            find_args.needle,
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
-            #[cfg(feature = "clipboard")]
-            clipboard,
-            #[cfg(not(feature = "clipboard"))]
-            false,
-            find_args.ignorecase,
-        ),
+        } => {
+            commands::code(
+                find_args,
+                #[cfg(feature = "clipboard")]
+                clipboard,
+                #[cfg(not(feature = "clipboard"))]
+                false,
+            )
+            .await
+        }
         Opt::Add {
             name,
             user,
             uri,
             folder,
-        } => commands::add(
-            &name,
-            user.as_deref(),
-            &uri.iter()
-                // XXX not sure what the ui for specifying the match type
-                // should be
-                .map(|uri| (uri.clone(), None))
-                .collect::<Vec<_>>(),
-            folder.as_deref(),
-        ),
+        } => {
+            commands::add(
+                &name,
+                user.as_deref(),
+                &uri.iter()
+                    // XXX not sure what the ui for specifying the match type
+                    // should be
+                    .map(|uri| (uri.clone(), None))
+                    .collect::<Vec<_>>(),
+                folder.as_deref(),
+                None,
+            )
+            .await
+        }
         Opt::Generate {
             len,
             name,
@@ -406,17 +452,6 @@ fn main() {
             nonconfusables,
             diceware,
         } => {
-            let ty = if no_symbols {
-                rbw::pwgen::Type::NoSymbols
-            } else if only_numbers {
-                rbw::pwgen::Type::Numbers
-            } else if nonconfusables {
-                rbw::pwgen::Type::NonConfusables
-            } else if diceware {
-                rbw::pwgen::Type::Diceware
-            } else {
-                rbw::pwgen::Type::AllChars
-            };
             commands::generate(
                 name.as_deref(),
                 user.as_deref(),
@@ -427,92 +462,18 @@ fn main() {
                     .collect::<Vec<_>>(),
                 folder.as_deref(),
                 len,
-                ty,
+                calc_pwgen_type(no_symbols, only_numbers, nonconfusables, diceware),
             )
+            .await
         }
-        Opt::Edit { find_args } => commands::edit(
-            find_args.needle,
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
-            find_args.ignorecase,
-        ),
-        Opt::Remove { find_args } => commands::remove(
-            find_args.needle,
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
-            find_args.ignorecase,
-        ),
-        Opt::History { find_args } => commands::history(
-            find_args.needle,
-            find_args.user.as_deref(),
-            find_args.folder.as_deref(),
-            find_args.ignorecase,
-        ),
+        Opt::Edit { find_args } => commands::edit(find_args).await,
+        Opt::Remove { find_args } => commands::remove(find_args).await,
+        Opt::History { find_args } => commands::history(find_args).await,
         Opt::Lock => commands::lock(),
         Opt::Purge => commands::purge(),
         Opt::StopAgent => commands::stop_agent(),
         Opt::GenCompletions { shell } => {
-            match shell {
-                CompletionShell::Bash => {
-                    clap_complete::generate(
-                        clap_complete::Shell::Bash,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
-                    println!("{}", include_str!("completion/rbw.bash"));
-                }
-                CompletionShell::Fish => {
-                    clap_complete::generate(
-                        clap_complete::Shell::Fish,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
-                    println!("{}", include_str!("completion/rbw.fish"));
-                }
-                CompletionShell::Zsh => {
-                    clap_complete::generate(
-                        clap_complete::Shell::Zsh,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
-                    println!("{}", include_str!("completion/rbw.zsh"));
-                }
-                CompletionShell::Powershell => {
-                    clap_complete::generate(
-                        clap_complete::Shell::PowerShell,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
-                }
-                CompletionShell::Elvish => {
-                    clap_complete::generate(
-                        clap_complete::Shell::Elvish,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
-                }
-                CompletionShell::Nushell => {
-                    clap_complete::generate(
-                        clap_complete_nushell::Nushell,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
-                }
-                CompletionShell::Fig => {
-                    clap_complete::generate(
-                        clap_complete_fig::Fig,
-                        &mut Opt::command(),
-                        "rbw",
-                        &mut std::io::stdout(),
-                    );
-                }
-            }
+            gen_completions(shell);
             Ok(())
         }
     }

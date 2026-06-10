@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{actions::CryptoParameters, prelude::*};
 
 use sha1::Digest as _;
 
@@ -12,22 +12,19 @@ impl Identity {
     pub fn new(
         email: &str,
         password: &crate::locked::Password,
-        kdf: crate::api::KdfType,
-        iterations: u32,
-        memory: Option<u32>,
-        parallelism: Option<u32>,
+        crypto_params: &CryptoParameters,
     ) -> Result<Self> {
         let email = email.trim().to_lowercase();
 
-        let iterations = std::num::NonZeroU32::new(iterations)
+        let iterations = std::num::NonZeroU32::new(crypto_params.iterations)
             .ok_or(Error::Pbkdf2ZeroIterations)?;
 
-        let mut keys = crate::locked::Vec::new();
+        let mut keys = crate::locked::LockedVec::new();
         keys.extend(std::iter::repeat_n(0, 64));
 
-        let enc_key = &mut keys.data_mut()[0..32];
+        let enc_key = &mut keys[0..32];
 
-        match kdf {
+        match crypto_params.kdf {
             crate::api::KdfType::Pbkdf2 => {
                 pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(
                     password.password(),
@@ -47,9 +44,9 @@ impl Identity {
                     argon2::Algorithm::Argon2id,
                     argon2::Version::V0x13,
                     argon2::Params::new(
-                        memory.unwrap() * 1024,
+                        crypto_params.memory.unwrap() * 1024,
                         iterations.get(),
-                        parallelism.unwrap(),
+                        crypto_params.parallelism.unwrap(),
                         Some(32),
                     )
                     .unwrap(),
@@ -64,21 +61,15 @@ impl Identity {
             }
         }
 
-        let mut hash = crate::locked::Vec::new();
+        let mut hash = crate::locked::LockedVec::new();
         hash.extend(std::iter::repeat_n(0, 32));
-        pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(
-            enc_key,
-            password.password(),
-            1,
-            hash.data_mut(),
-        )
-        .map_err(|_| Error::Pbkdf2)?;
+        pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(enc_key, password.password(), 1, &mut hash)
+            .map_err(|_| Error::Pbkdf2)?;
 
-        let hkdf = hkdf::Hkdf::<sha2::Sha256>::from_prk(enc_key)
-            .map_err(|_| Error::HkdfExpand)?;
+        let hkdf = hkdf::Hkdf::<sha2::Sha256>::from_prk(enc_key).map_err(|_| Error::HkdfExpand)?;
         hkdf.expand(b"enc", enc_key)
             .map_err(|_| Error::HkdfExpand)?;
-        let mac_key = &mut keys.data_mut()[32..64];
+        let mac_key = &mut keys[32..64];
         hkdf.expand(b"mac", mac_key)
             .map_err(|_| Error::HkdfExpand)?;
 

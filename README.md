@@ -11,13 +11,49 @@ similar to the way that `ssh-agent` or `gpg-agent` work. This allows the client
 to be used in a much simpler way, with the background agent taking care of
 maintaining the necessary state.
 
+## Fork
+
+Since the original developer of this project has not been active in the last
+months, I took the project and heavily refactored it.
+
+There were all the signs of a project that grew over time without chance to
+receive some maintenance.
+
+Around 20%-30% of program's logic was duplicated. There was no clear separation
+of concerns, etc. Now it's not perfect of course but I will work towards making
+it easily auditable and maintainable.
+
+I don't blame the author as this is all free time and unpaid labor, and on top
+of that, he actually provided the community with a great tool.
+
+NOTE: This fork has not 100% error messages backwards compatibility. Some of
+them have changed.
+
+I couldn't do anything about it, as it was way easier to do things this way.
+However it should not impact any actual tool built on rbw, but beware, the bug
+is behind the corner!
+
+Oh and there also is my confirm ssh feature baked in the code, which is totally
+optional.
+
 ## Maintenance
 
-I consider `rbw` to be essentially feature-complete for me at this point. While
-I still use it on a daily basis, and will continue to fix regressions as they
-occur, I am unlikely to spend time implementing new features on my own. If you
-would like to see new functionality in `rbw`, I am more than happy to review
-and merge pull requests implementing those features.
+I DO NOT consider rbw to be essentially feature-complete, BUT in this first
+phase I will accept PRs that fix bugs or enhance code readability.
+
+The first big elephant in the room to address is the fact that the client
+should read no DB and therefore all search/get/etc. operations must be
+performed by the daemon, while the protocol must provide such "opcodes" to do
+it.
+
+## Before continuing
+
+The rest of this README is untouched from the original's, so if you install rbw
+from repositories, you will not install this version but the older one. Same
+for the listed tools.
+
+I am working to get this new version in the repositories, but it's not
+immediate.
 
 ## Installation
 
@@ -96,6 +132,8 @@ configuration options:
 * `pinentry`: The
   [pinentry](https://www.gnupg.org/related_software/pinentry/index.html)
   executable to use. Defaults to `pinentry`.
+* `confirm_ssh`: If set to `true` will ask for confirmation for SSH signature
+requests. If unset defaults to not asking.
 
 ### Profiles
 

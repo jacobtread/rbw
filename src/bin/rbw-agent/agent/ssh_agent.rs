@@ -1,26 +1,25 @@
 use signature::{RandomizedSigner as _, SignatureEncoding as _, Signer as _};
+use tokio::net::UnixListener;
 
 const SSH_AGENT_RSA_SHA2_256: u32 = 2;
 const SSH_AGENT_RSA_SHA2_512: u32 = 4;
 
 #[derive(Clone)]
 pub struct SshAgent {
-    state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    agent: crate::agent::Agent,
 }
 
 impl SshAgent {
-    pub fn new(
-        state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
-    ) -> Self {
-        Self { state }
+    pub fn new(agent: crate::agent::Agent) -> Self {
+        Self { agent }
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
-        let socket = rbw::dirs::ssh_agent_socket_file();
+        let socket = rbw::dirs::ssh_agent_socket_file()?;
 
         let _ = std::fs::remove_file(&socket); // Ignore error if it doesn't exist
 
-        let listener = tokio::net::UnixListener::bind(socket)?;
+        let listener = UnixListener::bind(socket)?;
         ssh_agent_lib::agent::listen(listener, self).await?;
 
         Ok(())
@@ -31,11 +30,11 @@ impl SshAgent {
 impl ssh_agent_lib::agent::Session for SshAgent {
     async fn request_identities(
         &mut self,
-    ) -> Result<
-        Vec<ssh_agent_lib::proto::Identity>,
-        ssh_agent_lib::error::AgentError,
-    > {
-        crate::actions::get_ssh_public_keys(self.state.clone())
+    ) -> Result<Vec<ssh_agent_lib::proto::Identity>, ssh_agent_lib::error::AgentError> {
+        log::debug!("Received SSH identities request");
+
+        self.agent
+            .get_ssh_public_keys()
             .await
             .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?
             .into_iter()
@@ -53,19 +52,38 @@ impl ssh_agent_lib::agent::Session for SshAgent {
     async fn sign(
         &mut self,
         request: ssh_agent_lib::proto::SignRequest,
-    ) -> Result<
-        ssh_agent_lib::ssh_key::Signature,
-        ssh_agent_lib::error::AgentError,
-    > {
-        let pubkey =
-            ssh_agent_lib::ssh_key::PublicKey::new(request.pubkey, "");
+    ) -> Result<ssh_agent_lib::ssh_key::Signature, ssh_agent_lib::error::AgentError> {
+        let pubkey = ssh_agent_lib::ssh_key::PublicKey::new(request.pubkey, "");
 
-        let private_key =
-            crate::actions::find_ssh_private_key(self.state.clone(), pubkey)
-                .await
-                .map_err(|e| {
-                    ssh_agent_lib::error::AgentError::Other(e.into())
-                })?;
+        log::debug!(
+            "Received SSH signature request for {}",
+            pubkey
+                .to_openssh()
+                .map_err(|e| ssh_agent_lib::error::AgentError::other(e))?
+        );
+
+        let private_key = self
+            .agent
+            .find_ssh_private_key(pubkey)
+            .await
+            .map_err(|e| ssh_agent_lib::error::AgentError::Other(e.into()))?;
+
+        if self.agent.confirm_ssh() {
+            let confirmed = rbw::pinentry::confirm(
+                &self.agent.config_pinentry(),
+                "Allow SSH key use?",
+                &self.agent.last_environment().await.clone(),
+                true,
+            )
+            .await
+            .map_err(|_| ssh_agent_lib::error::AgentError::Failure)?;
+
+            if !confirmed {
+                return Err(ssh_agent_lib::error::AgentError::Other(
+                    "User did not confirm".into(),
+                ));
+            }
+        }
 
         match private_key.key_data() {
             ssh_agent_lib::ssh_key::private::KeypairData::Ed25519(key) => key
@@ -81,31 +99,23 @@ impl ssh_agent_lib::agent::Session for SshAgent {
 
                 let mut rng = rand_8::rngs::OsRng;
 
-                let (algorithm, sig_bytes) = if request.flags
-                    & SSH_AGENT_RSA_SHA2_512
-                    != 0
-                {
-                    let signing_key =
-                        rsa::pkcs1v15::SigningKey::<sha2::Sha512>::new(
-                            rsa_key,
-                        );
+                let (algorithm, sig_bytes) = if request.flags & SSH_AGENT_RSA_SHA2_512 != 0 {
+                    let signing_key = rsa::pkcs1v15::SigningKey::<sha2::Sha512>::new(rsa_key);
                     let signature = signing_key
                         .try_sign_with_rng(&mut rng, &request.data)
                         .map_err(ssh_agent_lib::error::AgentError::other)?;
 
                     ("rsa-sha2-512", signature.to_bytes())
                 } else if request.flags & SSH_AGENT_RSA_SHA2_256 != 0 {
-                    let signing_key =
-                        rsa::pkcs1v15::SigningKey::<sha2::Sha256>::new(
-                            rsa_key,
-                        );
+                    let signing_key = rsa::pkcs1v15::SigningKey::<sha2::Sha256>::new(rsa_key);
                     let signature = signing_key
                         .try_sign_with_rng(&mut rng, &request.data)
                         .map_err(ssh_agent_lib::error::AgentError::other)?;
 
                     ("rsa-sha2-256", signature.to_bytes())
                 } else {
-                    let signing_key = rsa::pkcs1v15::SigningKey::<sha1::Sha1>::new_unprefixed(rsa_key);
+                    let signing_key =
+                        rsa::pkcs1v15::SigningKey::<sha1::Sha1>::new_unprefixed(rsa_key);
                     let signature = signing_key
                         .try_sign_with_rng(&mut rng, &request.data)
                         .map_err(ssh_agent_lib::error::AgentError::other)?;

@@ -2,8 +2,7 @@ use rand::seq::IteratorRandom as _;
 
 const SYMBOLS: &[u8] = b"!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 const NUMBERS: &[u8] = b"0123456789";
-const LETTERS: &[u8] =
-    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const NONCONFUSABLES: &[u8] = b"34678abcdefhjkmnpqrtuwxy";
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -48,10 +47,7 @@ pub fn pwgen(ty: Type, len: usize) -> String {
     };
 
     let mut pass = vec![];
-    pass.extend(
-        std::iter::repeat_with(|| alphabet.iter().choose(&mut rng).unwrap())
-            .take(len),
-    );
+    pass.extend(std::iter::repeat_with(|| alphabet.iter().choose(&mut rng).unwrap()).take(len));
     // unwrap is safe because the method of generating passwords guarantees
     // valid utf8
     String::from_utf8(pass).unwrap()

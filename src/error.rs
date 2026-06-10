@@ -1,3 +1,5 @@
+use std::str::Utf8Error;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("email address not set")]
@@ -21,8 +23,17 @@ pub enum Error {
     #[error("failed to create sso callback server: {err}")]
     CreateSSOCallbackServer { err: std::io::Error },
 
+    #[error("failed to encrypt remotely")]
+    EncryptRemote,
+
     #[error("failed to decrypt")]
     Decrypt { source: block_padding::UnpadError },
+
+    #[error("failed to decrypt remotely")]
+    DecryptRemote,
+
+    #[error("failed to find data directory")]
+    FailedToFindDataDirectory,
 
     #[error("failed to find free port in {range}")]
     FailedToFindFreePort { range: String },
@@ -101,12 +112,6 @@ pub enum Error {
     },
 
     #[error("failed to load config from {}", .file.display())]
-    LoadConfigAsync {
-        source: tokio::io::Error,
-        file: std::path::PathBuf,
-    },
-
-    #[error("failed to load config from {}", .file.display())]
     LoadConfigJson {
         source: serde_json::Error,
         file: std::path::PathBuf,
@@ -115,12 +120,6 @@ pub enum Error {
     #[error("failed to load db from {}", .file.display())]
     LoadDb {
         source: std::io::Error,
-        file: std::path::PathBuf,
-    },
-
-    #[error("failed to load db from {}", .file.display())]
-    LoadDbAsync {
-        source: tokio::io::Error,
         file: std::path::PathBuf,
     },
 
@@ -212,16 +211,19 @@ pub enum Error {
     },
 
     #[error("failed to save db to {}", .file.display())]
-    SaveDbAsync {
-        source: tokio::io::Error,
-        file: std::path::PathBuf,
-    },
-
-    #[error("failed to save db to {}", .file.display())]
     SaveDbJson {
         source: serde_json::Error,
         file: std::path::PathBuf,
     },
+
+    #[error("failed to find crypto parameters in db")]
+    UnavailableDbCryptoParameters,
+
+    #[error("failed to find {0} in db")]
+    UnavailableDbSessionParameters(&'static str),
+
+    #[error("failed to find protected keys in db")]
+    UnavailableDbProtectedKeys,
 
     #[error("error spawning pinentry")]
     Spawn { source: tokio::io::Error },
@@ -238,11 +240,49 @@ pub enum Error {
     #[error("unimplemented cipherstring type: {ty}")]
     UnimplementedCipherStringType { ty: String },
 
+    #[error("I/O Error: {source}")]
+    GenericIo { source: std::io::Error },
+
     #[error("error writing to pinentry stdin")]
     WriteStdin { source: tokio::io::Error },
 
     #[error("invalid kdf type: {ty}")]
     InvalidKdfType { ty: String },
+
+    #[error("Utf8 conversion error: {source}")]
+    Utf8Error { source: Utf8Error },
+
+    #[error("the remote has sent an empty cipher data")]
+    EmptyCipherData,
+
+    #[error("the entry has been deleted")]
+    DeletedEntry,
+}
+
+impl From<Utf8Error> for Error {
+    fn from(value: Utf8Error) -> Self {
+        Self::Utf8Error { source: value }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Self::GenericIo { source: value }
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Self {
+        match err.status() {
+            Some(status) => match status {
+                reqwest::StatusCode::UNAUTHORIZED => Self::RequestUnauthorized,
+                _ => Self::RequestFailed {
+                    status: status.as_u16(),
+                },
+            },
+            None => Self::Reqwest { source: err },
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

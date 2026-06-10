@@ -1,8 +1,6 @@
 use crate::prelude::*;
 
-use aes::cipher::{
-    BlockDecryptMut as _, BlockEncryptMut as _, KeyIvInit as _,
-};
+use aes::cipher::{BlockDecryptMut as _, BlockEncryptMut as _, KeyIvInit as _};
 use hmac::Mac as _;
 use pkcs8::DecodePrivateKey as _;
 use rand::RngCore as _;
@@ -45,10 +43,7 @@ impl CipherString {
                 let parts: Vec<&str> = contents.split('|').collect();
                 if parts.len() < 2 || parts.len() > 3 {
                     return Err(Error::InvalidCipherString {
-                        reason: format!(
-                            "type 2 cipherstring with {} parts",
-                            parts.len()
-                        ),
+                        reason: format!("type 2 cipherstring with {} parts", parts.len()),
                     });
                 }
 
@@ -56,14 +51,14 @@ impl CipherString {
                     .map_err(|source| Error::InvalidBase64 { source })?;
                 let ciphertext = crate::base64::decode(parts[1])
                     .map_err(|source| Error::InvalidBase64 { source })?;
-                let mac =
-                    if parts.len() > 2 {
-                        Some(crate::base64::decode(parts[2]).map_err(
-                            |source| Error::InvalidBase64 { source },
-                        )?)
-                    } else {
-                        None
-                    };
+                let mac = if parts.len() > 2 {
+                    Some(
+                        crate::base64::decode(parts[2])
+                            .map_err(|source| Error::InvalidBase64 { source })?,
+                    )
+                } else {
+                    None
+                };
 
                 Ok(Self::Symmetric {
                     iv,
@@ -85,30 +80,21 @@ impl CipherString {
                 if ty < 6 {
                     Err(Error::TooOldCipherStringType { ty: ty.to_string() })
                 } else {
-                    Err(Error::UnimplementedCipherStringType {
-                        ty: ty.to_string(),
-                    })
+                    Err(Error::UnimplementedCipherStringType { ty: ty.to_string() })
                 }
             }
         }
     }
 
-    pub fn encrypt_symmetric(
-        keys: &crate::locked::Keys,
-        plaintext: &[u8],
-    ) -> Result<Self> {
+    pub fn encrypt_symmetric(keys: &crate::locked::Keys, plaintext: &[u8]) -> Result<Self> {
         let iv = random_iv();
 
-        let cipher = cbc::Encryptor::<aes::Aes256>::new(
-            keys.enc_key().into(),
-            iv.as_slice().into(),
-        );
-        let ciphertext =
-            cipher.encrypt_padded_vec_mut::<block_padding::Pkcs7>(plaintext);
+        let cipher =
+            cbc::Encryptor::<aes::Aes256>::new(keys.enc_key().into(), iv.as_slice().into());
+        let ciphertext = cipher.encrypt_padded_vec_mut::<block_padding::Pkcs7>(plaintext);
 
-        let mut digest =
-            hmac::Hmac::<sha2::Sha256>::new_from_slice(keys.mac_key())
-                .map_err(|source| Error::CreateHmac { source })?;
+        let mut digest = hmac::Hmac::<sha2::Sha256>::new_from_slice(keys.mac_key())
+            .map_err(|source| Error::CreateHmac { source })?;
         digest.update(&iv);
         digest.update(&ciphertext);
         let mac = digest.finalize().into_bytes().as_slice().to_vec();
@@ -125,90 +111,74 @@ impl CipherString {
         keys: &crate::locked::Keys,
         entry_key: Option<&crate::locked::Keys>,
     ) -> Result<Vec<u8>> {
-        if let Self::Symmetric {
+        let Self::Symmetric {
             iv,
             ciphertext,
             mac,
         } = self
-        {
-            let cipher = decrypt_common_symmetric(
-                entry_key.unwrap_or(keys),
-                iv,
-                ciphertext,
-                mac.as_deref(),
-            )?;
-            cipher
-                .decrypt_padded_vec_mut::<block_padding::Pkcs7>(ciphertext)
-                .map_err(|source| Error::Decrypt { source })
-        } else {
-            Err(Error::InvalidCipherString {
-                reason:
-                    "found an asymmetric cipherstring, expecting symmetric"
-                        .to_string(),
-            })
-        }
+        else {
+            return Err(Error::InvalidCipherString {
+                reason: "found an asymmetric cipherstring, expecting symmetric".to_string(),
+            });
+        };
+
+        let cipher =
+            decrypt_common_symmetric(entry_key.unwrap_or(keys), iv, ciphertext, mac.as_deref())?;
+        cipher
+            .decrypt_padded_vec_mut::<block_padding::Pkcs7>(ciphertext)
+            .map_err(|source| Error::Decrypt { source })
     }
 
     pub fn decrypt_locked_symmetric(
         &self,
         keys: &crate::locked::Keys,
-    ) -> Result<crate::locked::Vec> {
-        if let Self::Symmetric {
+    ) -> Result<crate::locked::LockedVec> {
+        let Self::Symmetric {
             iv,
             ciphertext,
             mac,
         } = self
-        {
-            let mut res = crate::locked::Vec::new();
-            res.extend(ciphertext.iter().copied());
-            let cipher = decrypt_common_symmetric(
-                keys,
-                iv,
-                ciphertext,
-                mac.as_deref(),
-            )?;
-            cipher
-                .decrypt_padded_mut::<block_padding::Pkcs7>(res.data_mut())
-                .map_err(|source| Error::Decrypt { source })?;
-            Ok(res)
-        } else {
-            Err(Error::InvalidCipherString {
-                reason:
-                    "found an asymmetric cipherstring, expecting symmetric"
-                        .to_string(),
-            })
-        }
+        else {
+            return Err(Error::InvalidCipherString {
+                reason: "found an asymmetric cipherstring, expecting symmetric".to_string(),
+            });
+        };
+
+        let mut res = crate::locked::LockedVec::new();
+        res.extend(ciphertext.iter().copied());
+        let cipher = decrypt_common_symmetric(keys, iv, ciphertext, mac.as_deref())?;
+        cipher
+            .decrypt_padded_mut::<block_padding::Pkcs7>(&mut res)
+            .map_err(|source| Error::Decrypt { source })?;
+        Ok(res)
     }
 
     pub fn decrypt_locked_asymmetric(
         &self,
         private_key: &crate::locked::PrivateKey,
-    ) -> Result<crate::locked::Vec> {
-        if let Self::Asymmetric { ciphertext } = self {
-            let privkey_data = private_key.private_key();
-            let privkey_data =
-                pkcs7_unpad(privkey_data).ok_or(Error::Padding)?;
-            let pkey = rsa::RsaPrivateKey::from_pkcs8_der(privkey_data)
-                .map_err(|source| Error::RsaPkcs8 { source })?;
-            let mut bytes = pkey
-                .decrypt(rsa::Oaep::new::<sha1::Sha1>(), ciphertext)
-                .map_err(|source| Error::Rsa { source })?;
+    ) -> Result<crate::locked::LockedVec> {
+        let Self::Asymmetric { ciphertext } = self else {
+            return Err(Error::InvalidCipherString {
+                reason: "found a symmetric cipherstring, expecting asymmetric".to_string(),
+            });
+        };
 
-            // XXX it'd be great if the rsa crate would let us decrypt
-            // into a preallocated buffer directly to avoid the
-            // intermediate vec that needs to be manually zeroized, etc
-            let mut res = crate::locked::Vec::new();
-            res.extend(bytes.iter().copied());
-            bytes.zeroize();
+        let privkey_data = private_key.private_key();
+        let privkey_data = pkcs7_unpad(privkey_data).ok_or(Error::Padding)?;
+        let pkey = rsa::RsaPrivateKey::from_pkcs8_der(privkey_data)
+            .map_err(|source| Error::RsaPkcs8 { source })?;
+        let mut bytes = pkey
+            .decrypt(rsa::Oaep::new::<sha1::Sha1>(), ciphertext)
+            .map_err(|source| Error::Rsa { source })?;
 
-            Ok(res)
-        } else {
-            Err(Error::InvalidCipherString {
-                reason:
-                    "found a symmetric cipherstring, expecting asymmetric"
-                        .to_string(),
-            })
-        }
+        // XXX it'd be great if the rsa crate would let us decrypt
+        // into a preallocated buffer directly to avoid the
+        // intermediate vec that needs to be manually zeroized, etc
+        let mut res = crate::locked::LockedVec::new();
+        res.extend(bytes.iter().copied());
+        bytes.zeroize();
+
+        Ok(res)
     }
 }
 
@@ -219,9 +189,8 @@ fn decrypt_common_symmetric(
     mac: Option<&[u8]>,
 ) -> Result<cbc::Decryptor<aes::Aes256>> {
     if let Some(mac) = mac {
-        let mut key =
-            hmac::Hmac::<sha2::Sha256>::new_from_slice(keys.mac_key())
-                .map_err(|source| Error::CreateHmac { source })?;
+        let mut key = hmac::Hmac::<sha2::Sha256>::new_from_slice(keys.mac_key())
+            .map_err(|source| Error::CreateHmac { source })?;
         key.update(iv);
         key.update(ciphertext);
 

@@ -1,20 +1,46 @@
-use std::{fmt::Write as _, io::Write as _, os::unix::ffi::OsStrExt as _};
+use std::{
+    fmt::Display, io::Write as _, os::unix::ffi::OsStrExt as _, path::PathBuf, str::FromStr,
+    time::SystemTime,
+};
 
 use anyhow::Context as _;
+use rbw::db::{Decrypted, Decrypter, Encrypted, Encrypter, EntryData};
 
-// The default number of seconds the generated TOTP
-// code lasts for before a new one must be generated
-const TOTP_DEFAULT_STEP: u64 = 30;
+use crate::FindArgs;
 
-const MISSING_CONFIG_HELP: &str =
-    "Before using rbw, you must configure the email address you would like to \
-    use to log in to the server by running:\n\n    \
-        rbw config set email <email>\n\n\
-    Additionally, if you are using a self-hosted installation, you should \
-    run:\n\n    \
-        rbw config set base_url <url>\n\n\
-    and, if your server has a non-default identity url:\n\n    \
-        rbw config set identity_url <url>\n";
+/// This Encrypter implementation will send the decrypted string to the agent and wait for it to
+/// encrypt it.
+struct RemoteEncrypter {}
+
+impl<T> rbw::db::Encrypter<T> for RemoteEncrypter {
+    fn encrypt_field(
+        &mut self,
+        entry: Option<&rbw::db::Entry<T>>,
+        field: &str,
+    ) -> rbw::error::Result<String> {
+        crate::actions::encrypt(field, entry.and_then(|e| e.org_id.as_deref()))
+            .map_err(|_e| rbw::error::Error::EncryptRemote)
+    }
+}
+
+/// This Decrypter implementation will send the encrypted string to the agent and wait for it to
+/// decrypt it.
+struct RemoteDecrypter {}
+
+impl<T> rbw::db::Decrypter<T> for RemoteDecrypter {
+    fn decrypt_field(
+        &mut self,
+        entry: Option<&rbw::db::Entry<T>>,
+        field: &str,
+    ) -> rbw::error::Result<String> {
+        crate::actions::decrypt(
+            field,
+            entry.and_then(|e| e.key.as_deref()),
+            entry.and_then(|e| e.org_id.as_deref()),
+        )
+        .map_err(|_e| rbw::error::Error::DecryptRemote)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Needle {
@@ -23,7 +49,7 @@ pub enum Needle {
     Uuid(uuid::Uuid, String),
 }
 
-impl std::fmt::Display for Needle {
+impl Display for Needle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match &self {
             Self::Name(name) => name.clone(),
@@ -34,164 +60,26 @@ impl std::fmt::Display for Needle {
     }
 }
 
-#[allow(clippy::unnecessary_wraps)]
-pub fn parse_needle(arg: &str) -> Result<Needle, std::convert::Infallible> {
-    if let Ok(uuid) = uuid::Uuid::parse_str(arg) {
-        return Ok(Needle::Uuid(uuid, arg.to_string()));
-    }
-    if let Ok(url) = url::Url::parse(arg) {
-        if url.is_special() {
-            return Ok(Needle::Uri(url));
-        }
-    }
-
-    Ok(Needle::Name(arg.to_string()))
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Field {
-    Notes,
-    Username,
-    Password,
-    Totp,
-    Uris,
-    IdentityName,
-    City,
-    State,
-    PostalCode,
-    Country,
-    Phone,
-    Ssn,
-    License,
-    Passport,
-    CardNumber,
-    Expiration,
-    ExpMonth,
-    ExpYear,
-    Cvv,
-    Cardholder,
-    Brand,
-    Name,
-    Email,
-    Address,
-    Address1,
-    Address2,
-    Address3,
-    Fingerprint,
-    PublicKey,
-    PrivateKey,
-    Title,
-    FirstName,
-    MiddleName,
-    LastName,
-}
-
-impl std::str::FromStr for Field {
-    type Err = anyhow::Error;
+impl FromStr for Needle {
+    type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.to_lowercase().as_str() {
-            "notes" | "note" => Self::Notes,
-            "username" | "user" => Self::Username,
-            "password" => Self::Password,
-            "totp" | "code" => Self::Totp,
-            "uris" | "urls" | "sites" => Self::Uris,
-            "identityname" => Self::IdentityName,
-            "city" => Self::City,
-            "state" => Self::State,
-            "postcode" | "zipcode" | "zip" => Self::PostalCode,
-            "country" => Self::Country,
-            "phone" => Self::Phone,
-            "ssn" => Self::Ssn,
-            "license" => Self::License,
-            "passport" => Self::Passport,
-            "number" | "card" => Self::CardNumber,
-            "exp" => Self::Expiration,
-            "exp_month" | "month" => Self::ExpMonth,
-            "exp_year" | "year" => Self::ExpYear,
-            // the word "code" got preceeded by Totp
-            "cvv" => Self::Cvv,
-            "cardholder" | "cardholder_name" => Self::Cardholder,
-            "brand" | "type" => Self::Brand,
-            "name" => Self::Name,
-            "email" => Self::Email,
-            "address1" => Self::Address1,
-            "address2" => Self::Address2,
-            "address3" => Self::Address3,
-            "address" => Self::Address,
-            "fingerprint" => Self::Fingerprint,
-            "public_key" => Self::PublicKey,
-            "private_key" => Self::PrivateKey,
-            "title" => Self::Title,
-            "first_name" => Self::FirstName,
-            "middle_name" => Self::MiddleName,
-            "last_name" => Self::LastName,
-            _ => anyhow::bail!("unknown field {s}"),
-        })
-    }
-}
-
-impl Field {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Notes => "notes",
-            Self::Username => "username",
-            Self::Password => "password",
-            Self::Totp => "totp",
-            Self::Uris => "uris",
-            Self::IdentityName => "identityname",
-            Self::City => "city",
-            Self::State => "state",
-            Self::PostalCode => "postcode",
-            Self::Country => "country",
-            Self::Phone => "phone",
-            Self::Ssn => "ssn",
-            Self::License => "license",
-            Self::Passport => "passport",
-            Self::CardNumber => "number",
-            Self::Expiration => "exp",
-            Self::ExpMonth => "exp_month",
-            Self::ExpYear => "exp_year",
-            Self::Cvv => "cvv",
-            Self::Cardholder => "cardholder",
-            Self::Brand => "brand",
-            Self::Name => "name",
-            Self::Email => "email",
-            Self::Address1 => "address1",
-            Self::Address2 => "address2",
-            Self::Address3 => "address3",
-            Self::Address => "address",
-            Self::Fingerprint => "fingerprint",
-            Self::PublicKey => "public_key",
-            Self::PrivateKey => "private_key",
-            Self::Title => "title",
-            Self::FirstName => "first_name",
-            Self::MiddleName => "middle_name",
-            Self::LastName => "last_name",
+        if let Ok(uuid) = uuid::Uuid::parse_str(s) {
+            return Ok(Needle::Uuid(uuid, s.to_string()));
         }
-    }
-}
+        if let Ok(url) = url::Url::parse(s) {
+            if url.is_special() {
+                return Ok(Needle::Uri(url));
+            }
+        }
 
-impl std::fmt::Display for Field {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        Ok(Needle::Name(s.to_string()))
     }
-}
-
-#[derive(Debug, serde::Serialize)]
-struct DecryptedListCipher {
-    id: String,
-    name: Option<String>,
-    user: Option<String>,
-    folder: Option<String>,
-    uris: Option<Vec<String>>,
-    #[serde(rename = "type")]
-    entry_type: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedSearchCipher {
+struct SearchEntry {
     id: String,
     #[serde(rename = "type")]
     entry_type: String,
@@ -203,12 +91,11 @@ struct DecryptedSearchCipher {
     notes: Option<String>,
 }
 
-impl DecryptedSearchCipher {
+impl SearchEntry {
     fn display_name(&self) -> String {
-        self.user.as_ref().map_or_else(
-            || self.name.clone(),
-            |user| format!("{user}@{}", self.name),
-        )
+        self.user
+            .as_ref()
+            .map_or_else(|| self.name.clone(), |user| format!("{user}@{}", self.name))
     }
 
     fn matches(
@@ -222,18 +109,14 @@ impl DecryptedSearchCipher {
         exact: bool,
     ) -> bool {
         let match_str = match (ignore_case, exact) {
-            (true, true) => |field: &str, search_term: &str| {
-                field.to_lowercase() == search_term.to_lowercase()
-            },
+            (true, true) => {
+                |field: &str, search_term: &str| field.to_lowercase() == search_term.to_lowercase()
+            }
             (true, false) => |field: &str, search_term: &str| {
                 field.to_lowercase().contains(&search_term.to_lowercase())
             },
-            (false, true) => {
-                |field: &str, search_term: &str| field == search_term
-            }
-            (false, false) => {
-                |field: &str, search_term: &str| field.contains(search_term)
-            }
+            (false, true) => |field: &str, search_term: &str| field == search_term,
+            (false, false) => |field: &str, search_term: &str| field.contains(search_term),
         };
 
         match (self.folder.as_deref(), folder) {
@@ -272,9 +155,7 @@ impl DecryptedSearchCipher {
 
         match needle {
             Needle::Uuid(uuid, s) => {
-                if uuid::Uuid::parse_str(&self.id) != Ok(*uuid)
-                    && !match_str(&self.name, s)
-                {
+                if uuid::Uuid::parse_str(&self.id) != Ok(*uuid) && !match_str(&self.name, s) {
                     return false;
                 }
             }
@@ -284,9 +165,11 @@ impl DecryptedSearchCipher {
                 }
             }
             Needle::Uri(given_uri) => {
-                if self.uris.iter().all(|(uri, match_type)| {
-                    !matches_url(uri, *match_type, given_uri)
-                }) {
+                if self
+                    .uris
+                    .iter()
+                    .all(|(uri, match_type)| !matches_url(uri, *match_type, given_uri))
+                {
                     return false;
                 }
             }
@@ -296,816 +179,82 @@ impl DecryptedSearchCipher {
     }
 
     fn search_match(&self, term: &str, folder: Option<&str>) -> bool {
-        if let Some(folder) = folder {
-            if self.folder.as_deref() != Some(folder) {
-                return false;
-            }
+        if folder.is_some() && self.folder.as_deref() != folder {
+            return false;
         }
 
-        let mut fields = vec![self.name.clone()];
-        if let Some(notes) = &self.notes {
-            fields.push(notes.clone());
-        }
-        if let Some(user) = &self.user {
-            fields.push(user.clone());
-        }
-        fields.extend(self.uris.iter().map(|(uri, _)| uri).cloned());
-        fields.extend(self.fields.iter().cloned());
+        let term = term.to_lowercase();
 
-        for field in fields {
-            if field.to_lowercase().contains(&term.to_lowercase()) {
-                return true;
-            }
-        }
-
-        false
+        [Some(&self.name), self.notes.as_ref(), self.user.as_ref()]
+            .into_iter()
+            .flatten()
+            .chain(self.uris.iter().map(|(uri, _)| uri))
+            .chain(self.fields.iter())
+            .any(|f| f.to_lowercase().contains(&term))
     }
 }
 
-impl From<DecryptedSearchCipher> for DecryptedListCipher {
-    fn from(value: DecryptedSearchCipher) -> Self {
-        Self {
-            id: value.id,
-            entry_type: Some(value.entry_type),
-            name: Some(value.name),
-            user: value.user,
-            folder: value.folder,
-            uris: Some(value.uris.into_iter().map(|(s, _)| s).collect()),
-        }
-    }
-}
+impl TryFrom<&rbw::db::Entry<Encrypted>> for SearchEntry {
+    type Error = anyhow::Error;
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedCipher {
-    id: String,
-    folder: Option<String>,
-    name: String,
-    data: DecryptedData,
-    fields: Vec<DecryptedField>,
-    notes: Option<String>,
-    history: Vec<DecryptedHistoryEntry>,
-}
+    fn try_from(entry: &rbw::db::Entry<Encrypted>) -> Result<Self, Self::Error> {
+        let mut dec = RemoteDecrypter {};
 
-impl DecryptedCipher {
-    fn display_short(&self, desc: &str, clipboard: bool) -> bool {
-        match &self.data {
-            DecryptedData::Login { password, .. } => {
-                password.as_ref().map_or_else(
-                    || {
-                        eprintln!("entry for '{desc}' had no password");
-                        false
-                    },
-                    |password| val_display_or_store(clipboard, password),
-                )
-            }
-            DecryptedData::Card { number, .. } => {
-                number.as_ref().map_or_else(
-                    || {
-                        eprintln!("entry for '{desc}' had no card number");
-                        false
-                    },
-                    |number| val_display_or_store(clipboard, number),
-                )
-            }
-            DecryptedData::Identity {
-                title,
-                first_name,
-                middle_name,
-                last_name,
-                ..
-            } => {
-                let names: Vec<_> =
-                    [title, first_name, middle_name, last_name]
-                        .iter()
-                        .copied()
-                        .flatten()
-                        .cloned()
-                        .collect();
-                if names.is_empty() {
-                    eprintln!("entry for '{desc}' had no name");
-                    false
+        let user = match &entry.data {
+            EntryData::Login { username, .. } => entry.decrypt_optstring(username, &mut dec)?,
+            _ => None,
+        };
+
+        let name = entry.decrypt_string(&entry.name, &mut dec)?;
+        let folder = entry.decrypt_optstring(&entry.folder, &mut dec)?;
+        let notes = entry.decrypt_optstring(&entry.notes, &mut dec)?;
+
+        let uris = entry
+            .decrypt_uris(&mut dec)?
+            .into_iter()
+            .map(|u| (u.uri, u.match_type))
+            .collect();
+
+        let fields = entry
+            .decrypt_custom_fields(&mut dec)?
+            .into_iter()
+            .filter_map(|f| {
+                if f.ty == Some(rbw::api::FieldType::Hidden) {
+                    None
                 } else {
-                    val_display_or_store(clipboard, &names.join(" "))
+                    f.value
                 }
-            }
-            DecryptedData::SecureNote => self.notes.as_ref().map_or_else(
-                || {
-                    eprintln!("entry for '{desc}' had no notes");
-                    false
-                },
-                |notes| val_display_or_store(clipboard, notes),
-            ),
-            DecryptedData::SshKey { public_key, .. } => {
-                public_key.as_ref().map_or_else(
-                    || {
-                        eprintln!("entry for '{desc}' had no public key");
-                        false
-                    },
-                    |public_key| val_display_or_store(clipboard, public_key),
-                )
-            }
-        }
-    }
+            })
+            .collect();
 
-    fn display_field(&self, desc: &str, field: &str, clipboard: bool) {
-        let field = field.to_lowercase();
-        let field = field.as_str();
-        match &self.data {
-            DecryptedData::Login {
-                username,
-                totp,
-                uris,
-                ..
-            } => match field.parse() {
-                Ok(Field::Notes) => {
-                    if let Some(notes) = &self.notes {
-                        val_display_or_store(clipboard, notes);
-                    }
-                }
-                Ok(Field::Username) => {
-                    if let Some(username) = &username {
-                        val_display_or_store(clipboard, username);
-                    }
-                }
-                Ok(Field::Totp) => {
-                    if let Some(totp) = totp {
-                        match generate_totp(totp) {
-                            Ok(code) => {
-                                val_display_or_store(clipboard, &code);
-                            }
-                            Err(e) => {
-                                eprintln!("{e}");
-                            }
-                        }
-                    }
-                }
-                Ok(Field::Uris) => {
-                    if let Some(uris) = uris {
-                        let uri_strs: Vec<_> =
-                            uris.iter().map(|uri| uri.uri.clone()).collect();
-                        val_display_or_store(clipboard, &uri_strs.join("\n"));
-                    }
-                }
-                Ok(Field::Password) => {
-                    self.display_short(desc, clipboard);
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-            DecryptedData::Card {
-                cardholder_name,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-                ..
-            } => match field.parse() {
-                Ok(Field::CardNumber) => {
-                    self.display_short(desc, clipboard);
-                }
-                Ok(Field::Expiration) => {
-                    if let (Some(month), Some(year)) = (exp_month, exp_year) {
-                        val_display_or_store(
-                            clipboard,
-                            &format!("{month}/{year}"),
-                        );
-                    }
-                }
-                Ok(Field::ExpMonth) => {
-                    if let Some(exp_month) = exp_month {
-                        val_display_or_store(clipboard, exp_month);
-                    }
-                }
-                Ok(Field::ExpYear) => {
-                    if let Some(exp_year) = exp_year {
-                        val_display_or_store(clipboard, exp_year);
-                    }
-                }
-                Ok(Field::Cvv) => {
-                    if let Some(code) = code {
-                        val_display_or_store(clipboard, code);
-                    }
-                }
-                Ok(Field::Name | Field::Cardholder) => {
-                    if let Some(cardholder_name) = cardholder_name {
-                        val_display_or_store(clipboard, cardholder_name);
-                    }
-                }
-                Ok(Field::Brand) => {
-                    if let Some(brand) = brand {
-                        val_display_or_store(clipboard, brand);
-                    }
-                }
-                Ok(Field::Notes) => {
-                    if let Some(notes) = &self.notes {
-                        val_display_or_store(clipboard, notes);
-                    }
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-            DecryptedData::Identity {
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-                ..
-            } => match field.parse() {
-                Ok(Field::Name) => {
-                    self.display_short(desc, clipboard);
-                }
-                Ok(Field::Email) => {
-                    if let Some(email) = email {
-                        val_display_or_store(clipboard, email);
-                    }
-                }
-                Ok(Field::Address) => {
-                    let mut strs = vec![];
-                    if let Some(address1) = address1 {
-                        strs.push(address1.clone());
-                    }
-                    if let Some(address2) = address2 {
-                        strs.push(address2.clone());
-                    }
-                    if let Some(address3) = address3 {
-                        strs.push(address3.clone());
-                    }
-                    if !strs.is_empty() {
-                        val_display_or_store(clipboard, &strs.join("\n"));
-                    }
-                }
-                Ok(Field::City) => {
-                    if let Some(city) = city {
-                        val_display_or_store(clipboard, city);
-                    }
-                }
-                Ok(Field::State) => {
-                    if let Some(state) = state {
-                        val_display_or_store(clipboard, state);
-                    }
-                }
-                Ok(Field::PostalCode) => {
-                    if let Some(postal_code) = postal_code {
-                        val_display_or_store(clipboard, postal_code);
-                    }
-                }
-                Ok(Field::Country) => {
-                    if let Some(country) = country {
-                        val_display_or_store(clipboard, country);
-                    }
-                }
-                Ok(Field::Phone) => {
-                    if let Some(phone) = phone {
-                        val_display_or_store(clipboard, phone);
-                    }
-                }
-                Ok(Field::Ssn) => {
-                    if let Some(ssn) = ssn {
-                        val_display_or_store(clipboard, ssn);
-                    }
-                }
-                Ok(Field::License) => {
-                    if let Some(license_number) = license_number {
-                        val_display_or_store(clipboard, license_number);
-                    }
-                }
-                Ok(Field::Passport) => {
-                    if let Some(passport_number) = passport_number {
-                        val_display_or_store(clipboard, passport_number);
-                    }
-                }
-                Ok(Field::Username) => {
-                    if let Some(username) = username {
-                        val_display_or_store(clipboard, username);
-                    }
-                }
-                Ok(Field::Notes) => {
-                    if let Some(notes) = &self.notes {
-                        val_display_or_store(clipboard, notes);
-                    }
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-            DecryptedData::SecureNote => match field.parse() {
-                Ok(Field::Notes) => {
-                    self.display_short(desc, clipboard);
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-            DecryptedData::SshKey {
-                fingerprint,
-                private_key,
-                ..
-            } => match field.parse() {
-                Ok(Field::Fingerprint) => {
-                    if let Some(fingerprint) = fingerprint {
-                        val_display_or_store(clipboard, fingerprint);
-                    }
-                }
-                Ok(Field::PublicKey) => {
-                    self.display_short(desc, clipboard);
-                }
-                Ok(Field::PrivateKey) => {
-                    if let Some(private_key) = private_key {
-                        val_display_or_store(clipboard, private_key);
-                    }
-                }
-                Ok(Field::Notes) => {
-                    if let Some(notes) = &self.notes {
-                        val_display_or_store(clipboard, notes);
-                    }
-                }
-                _ => {
-                    for f in &self.fields {
-                        if let Some(name) = &f.name {
-                            if name.to_lowercase().as_str().contains(field) {
-                                val_display_or_store(
-                                    clipboard,
-                                    f.value.as_deref().unwrap_or(""),
-                                );
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
-        }
-    }
+        let entry_type = (match &entry.data {
+            rbw::db::EntryData::Login { .. } => "Login",
+            rbw::db::EntryData::Identity { .. } => "Identity",
+            rbw::db::EntryData::SshKey { .. } => "SSH Key",
+            rbw::db::EntryData::SecureNote => "Note",
+            rbw::db::EntryData::Card { .. } => "Card",
+        })
+        .to_string();
 
-    fn display_long(&self, desc: &str, clipboard: bool) {
-        match &self.data {
-            DecryptedData::Login {
-                username,
-                totp,
-                uris,
-                ..
-            } => {
-                let mut displayed = self.display_short(desc, clipboard);
-                displayed |=
-                    display_field("Username", username.as_deref(), clipboard);
-                displayed |=
-                    display_field("TOTP Secret", totp.as_deref(), clipboard);
-
-                if let Some(uris) = uris {
-                    for uri in uris {
-                        displayed |=
-                            display_field("URI", Some(&uri.uri), clipboard);
-                        let match_type =
-                            uri.match_type.map(|ty| format!("{ty}"));
-                        displayed |= display_field(
-                            "Match type",
-                            match_type.as_deref(),
-                            clipboard,
-                        );
-                    }
-                }
-
-                for field in &self.fields {
-                    displayed |= display_field(
-                        field.name.as_deref().unwrap_or("(null)"),
-                        Some(field.value.as_deref().unwrap_or("")),
-                        clipboard,
-                    );
-                }
-
-                if let Some(notes) = &self.notes {
-                    if displayed {
-                        println!();
-                    }
-                    println!("{notes}");
-                }
-            }
-            DecryptedData::Card {
-                cardholder_name,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-                ..
-            } => {
-                let mut displayed = false;
-
-                displayed |= self.display_short(desc, clipboard);
-                if let (Some(exp_month), Some(exp_year)) =
-                    (exp_month, exp_year)
-                {
-                    println!("Expiration: {exp_month}/{exp_year}");
-                    displayed = true;
-                }
-                displayed |= display_field("CVV", code.as_deref(), clipboard);
-                displayed |= display_field(
-                    "Name",
-                    cardholder_name.as_deref(),
-                    clipboard,
-                );
-                displayed |=
-                    display_field("Brand", brand.as_deref(), clipboard);
-
-                if let Some(notes) = &self.notes {
-                    if displayed {
-                        println!();
-                    }
-                    println!("{notes}");
-                }
-            }
-            DecryptedData::Identity {
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-                ..
-            } => {
-                let mut displayed = self.display_short(desc, clipboard);
-
-                displayed |=
-                    display_field("Address", address1.as_deref(), clipboard);
-                displayed |=
-                    display_field("Address", address2.as_deref(), clipboard);
-                displayed |=
-                    display_field("Address", address3.as_deref(), clipboard);
-                displayed |=
-                    display_field("City", city.as_deref(), clipboard);
-                displayed |=
-                    display_field("State", state.as_deref(), clipboard);
-                displayed |= display_field(
-                    "Postcode",
-                    postal_code.as_deref(),
-                    clipboard,
-                );
-                displayed |=
-                    display_field("Country", country.as_deref(), clipboard);
-                displayed |=
-                    display_field("Phone", phone.as_deref(), clipboard);
-                displayed |=
-                    display_field("Email", email.as_deref(), clipboard);
-                displayed |= display_field("SSN", ssn.as_deref(), clipboard);
-                displayed |= display_field(
-                    "License",
-                    license_number.as_deref(),
-                    clipboard,
-                );
-                displayed |= display_field(
-                    "Passport",
-                    passport_number.as_deref(),
-                    clipboard,
-                );
-                displayed |=
-                    display_field("Username", username.as_deref(), clipboard);
-
-                if let Some(notes) = &self.notes {
-                    if displayed {
-                        println!();
-                    }
-                    println!("{notes}");
-                }
-            }
-            DecryptedData::SecureNote => {
-                self.display_short(desc, clipboard);
-            }
-            DecryptedData::SshKey { fingerprint, .. } => {
-                let mut displayed = self.display_short(desc, clipboard);
-                displayed |= display_field(
-                    "Fingerprint",
-                    fingerprint.as_deref(),
-                    clipboard,
-                );
-
-                for field in &self.fields {
-                    displayed |= display_field(
-                        field.name.as_deref().unwrap_or("(null)"),
-                        Some(field.value.as_deref().unwrap_or("")),
-                        clipboard,
-                    );
-                }
-
-                if let Some(notes) = &self.notes {
-                    if displayed {
-                        println!();
-                    }
-                    println!("{notes}");
-                }
-            }
-        }
-    }
-
-    /// This implementation mirror the `fn display_fied` method on which field to list
-    fn display_fields_list(&self) {
-        match &self.data {
-            DecryptedData::Login {
-                username,
-                password,
-                totp,
-                uris,
-                ..
-            } => {
-                if username.is_some() {
-                    println!("{}", Field::Username);
-                }
-                if totp.is_some() {
-                    println!("{}", Field::Totp);
-                }
-                if uris.is_some() {
-                    println!("{}", Field::Uris);
-                }
-                if password.is_some() {
-                    println!("{}", Field::Password);
-                }
-            }
-            DecryptedData::Card {
-                cardholder_name,
-                number,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-                ..
-            } => {
-                if number.is_some() {
-                    println!("{}", Field::CardNumber);
-                }
-                if exp_month.is_some() {
-                    println!("{}", Field::ExpMonth);
-                }
-                if exp_year.is_some() {
-                    println!("{}", Field::ExpYear);
-                }
-                if code.is_some() {
-                    println!("{}", Field::Cvv);
-                }
-                if cardholder_name.is_some() {
-                    println!("{}", Field::Cardholder);
-                }
-                if brand.is_some() {
-                    println!("{}", Field::Brand);
-                }
-            }
-
-            DecryptedData::Identity {
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-                title,
-                first_name,
-                middle_name,
-                last_name,
-                ..
-            } => {
-                if [title, first_name, middle_name, last_name]
-                    .iter()
-                    .any(|f| f.is_some())
-                {
-                    // the display_field combines all these fields together.
-                    println!("name");
-                }
-                if email.is_some() {
-                    println!("{}", Field::Email);
-                }
-                if [address1, address2, address3].iter().any(|f| f.is_some())
-                {
-                    // the display_field combines all these fields together.
-                    println!("address");
-                }
-                if city.is_some() {
-                    println!("{}", Field::City);
-                }
-                if state.is_some() {
-                    println!("{}", Field::State);
-                }
-                if postal_code.is_some() {
-                    println!("{}", Field::PostalCode);
-                }
-                if country.is_some() {
-                    println!("{}", Field::Country);
-                }
-                if phone.is_some() {
-                    println!("{}", Field::Phone);
-                }
-                if ssn.is_some() {
-                    println!("{}", Field::Ssn);
-                }
-                if license_number.is_some() {
-                    println!("{}", Field::License);
-                }
-                if passport_number.is_some() {
-                    println!("{}", Field::Passport);
-                }
-                if username.is_some() {
-                    println!("{}", Field::Username);
-                }
-            }
-
-            DecryptedData::SecureNote => (), // handled at the end
-            DecryptedData::SshKey {
-                fingerprint,
-                public_key,
-                ..
-            } => {
-                if fingerprint.is_some() {
-                    println!("{}", Field::Fingerprint);
-                }
-                if public_key.is_some() {
-                    println!("{}", Field::PublicKey);
-                }
-            }
-        }
-
-        if self.notes.is_some() {
-            println!("{}", Field::Notes);
-        }
-        for f in &self.fields {
-            if let Some(name) = &f.name {
-                println!("{name}");
-            }
-        }
-    }
-
-    fn display_json(&self, desc: &str) -> anyhow::Result<()> {
-        serde_json::to_writer_pretty(std::io::stdout(), &self)
-            .context(format!("failed to write entry '{desc}' to stdout"))?;
-        println!();
-
-        Ok(())
+        Ok(SearchEntry {
+            id: entry.id.clone(),
+            entry_type,
+            folder,
+            name,
+            user,
+            uris,
+            fields,
+            notes,
+        })
     }
 }
 
-fn val_display_or_store(clipboard: bool, password: &str) -> bool {
-    if clipboard {
-        match clipboard_store(password) {
-            Ok(()) => true,
-            Err(e) => {
-                eprintln!("{e}");
-                false
-            }
-        }
-    } else {
-        println!("{password}");
-        true
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(untagged)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-enum DecryptedData {
-    Login {
-        username: Option<String>,
-        password: Option<String>,
-        totp: Option<String>,
-        uris: Option<Vec<DecryptedUri>>,
-    },
-    Card {
-        cardholder_name: Option<String>,
-        number: Option<String>,
-        brand: Option<String>,
-        exp_month: Option<String>,
-        exp_year: Option<String>,
-        code: Option<String>,
-    },
-    Identity {
-        title: Option<String>,
-        first_name: Option<String>,
-        middle_name: Option<String>,
-        last_name: Option<String>,
-        address1: Option<String>,
-        address2: Option<String>,
-        address3: Option<String>,
-        city: Option<String>,
-        state: Option<String>,
-        postal_code: Option<String>,
-        country: Option<String>,
-        phone: Option<String>,
-        email: Option<String>,
-        ssn: Option<String>,
-        license_number: Option<String>,
-        passport_number: Option<String>,
-        username: Option<String>,
-    },
-    SecureNote,
-    SshKey {
-        public_key: Option<String>,
-        fingerprint: Option<String>,
-        private_key: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedField {
-    name: Option<String>,
-    value: Option<String>,
-    #[serde(serialize_with = "serialize_field_type", rename = "type")]
-    ty: Option<rbw::api::FieldType>,
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref, clippy::ref_option)]
-fn serialize_field_type<S>(
-    ty: &Option<rbw::api::FieldType>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    match ty {
-        Some(ty) => {
-            let s = match ty {
-                rbw::api::FieldType::Text => "text",
-                rbw::api::FieldType::Hidden => "hidden",
-                rbw::api::FieldType::Boolean => "boolean",
-                rbw::api::FieldType::Linked => "linked",
-            };
-            serializer.serialize_some(&Some(s))
-        }
-        None => serializer.serialize_none(),
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedHistoryEntry {
-    last_used_date: String,
-    password: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[cfg_attr(test, derive(Eq, PartialEq))]
-struct DecryptedUri {
-    uri: String,
-    match_type: Option<rbw::api::UriMatchType>,
+fn host_port(url: &url::Url) -> Option<String> {
+    let host = url.host_str()?;
+    Some(
+        url.port()
+            .map_or_else(|| host.to_string(), |port| format!("{host}:{port}")),
+    )
 }
 
 fn matches_url(
@@ -1114,7 +263,11 @@ fn matches_url(
     given_url: &url::Url,
 ) -> bool {
     match match_type.unwrap_or(rbw::api::UriMatchType::Domain) {
-        rbw::api::UriMatchType::Domain => {
+        rbw::api::UriMatchType::Domain | rbw::api::UriMatchType::Host => {
+            let is_domain = matches!(
+                match_type.unwrap_or(rbw::api::UriMatchType::Domain),
+                rbw::api::UriMatchType::Domain
+            );
             let Some(given_host_port) = host_port(given_url) else {
                 return false;
             };
@@ -1122,62 +275,27 @@ fn matches_url(
                 if let Some(self_host_port) = host_port(&self_url) {
                     if self_url.scheme() == given_url.scheme()
                         && (self_host_port == given_host_port
-                            || given_host_port
-                                .ends_with(&format!(".{self_host_port}")))
+                            || (is_domain
+                                && given_host_port.ends_with(&format!(".{self_host_port}"))))
                     {
                         return true;
                     }
                 }
             }
-            url == given_host_port
-                || given_host_port.ends_with(&format!(".{url}"))
+            url == given_host_port || (is_domain && given_host_port.ends_with(&format!(".{url}")))
         }
-        rbw::api::UriMatchType::Host => {
-            let Some(given_host_port) = host_port(given_url) else {
-                return false;
-            };
-            if let Ok(self_url) = url::Url::parse(url) {
-                if let Some(self_host_port) = host_port(&self_url) {
-                    if self_url.scheme() == given_url.scheme()
-                        && self_host_port == given_host_port
-                    {
-                        return true;
-                    }
-                }
-            }
-            url == given_host_port
-        }
-        rbw::api::UriMatchType::StartsWith => {
-            given_url.to_string().starts_with(url)
-        }
+        rbw::api::UriMatchType::StartsWith => given_url.to_string().starts_with(url),
         rbw::api::UriMatchType::Exact => {
-            if given_url.path() == "/" {
-                given_url.to_string().trim_end_matches('/')
-                    == url.trim_end_matches('/')
-            } else {
-                given_url.to_string() == url
-            }
+            given_url.to_string().trim_end_matches('/') == url.trim_end_matches('/')
         }
         rbw::api::UriMatchType::RegularExpression => {
-            let Ok(rx) = regex::Regex::new(url) else {
-                return false;
-            };
-            rx.is_match(given_url.as_ref())
+            regex::Regex::new(url).is_ok_and(|rx| rx.is_match(given_url.as_ref()))
         }
         rbw::api::UriMatchType::Never => false,
     }
 }
 
-fn host_port(url: &url::Url) -> Option<String> {
-    let host = url.host_str()?;
-    Some(
-        url.port().map_or_else(
-            || host.to_string(),
-            |port| format!("{host}:{port}"),
-        ),
-    )
-}
-
+// TODO: This could be a dup of FieldType?
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ListField {
     Id,
@@ -1189,8 +307,8 @@ enum ListField {
 }
 
 impl ListField {
-    fn all() -> Vec<Self> {
-        vec![
+    fn all() -> &'static [Self] {
+        &[
             Self::Id,
             Self::Name,
             Self::User,
@@ -1201,7 +319,7 @@ impl ListField {
     }
 }
 
-impl std::convert::TryFrom<&String> for ListField {
+impl TryFrom<&String> for ListField {
     type Error = anyhow::Error;
 
     fn try_from(s: &String) -> anyhow::Result<Self> {
@@ -1216,17 +334,6 @@ impl std::convert::TryFrom<&String> for ListField {
     }
 }
 
-const HELP_PW: &str = r"
-# The first line of this file will be the password, and the remainder of the
-# file (after any blank lines after the password) will be stored as a note.
-# Lines with leading # will be ignored.
-";
-
-const HELP_NOTES: &str = r"
-# The content of this file will be stored as a note.
-# Lines with leading # will be ignored.
-";
-
 pub fn config_show() -> anyhow::Result<()> {
     let config = rbw::config::Config::load()?;
     serde_json::to_writer_pretty(std::io::stdout(), &config)
@@ -1236,9 +343,9 @@ pub fn config_show() -> anyhow::Result<()> {
     Ok(())
 }
 
+// TODO: Make this a Config method
 pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
-    let mut config = rbw::config::Config::load()
-        .unwrap_or_else(|_| rbw::config::Config::new());
+    let mut config = rbw::config::Config::load().unwrap_or_else(|_| rbw::config::Config::new());
     match key {
         "email" => config.email = Some(value.to_string()),
         "sso_id" => config.sso_id = Some(value.to_string()),
@@ -1249,8 +356,7 @@ pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
             config.notifications_url = Some(value.to_string());
         }
         "client_cert_path" => {
-            config.client_cert_path =
-                Some(std::path::PathBuf::from(value.to_string()));
+            config.client_cert_path = Some(PathBuf::from(value.to_string()));
         }
         "lock_timeout" => {
             let timeout = value
@@ -1269,6 +375,7 @@ pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
             config.sync_interval = interval;
         }
         "pinentry" => config.pinentry = value.to_string(),
+        "confirm_ssh" => config.confirm_ssh = Some(value == "true"),
         _ => return Err(anyhow::anyhow!("invalid config key: {key}")),
     }
     config.save()?;
@@ -1278,14 +385,11 @@ pub fn config_set(key: &str, value: &str) -> anyhow::Result<()> {
     // be running (since this may be the user running `rbw config set
     // base_url` as the first operation), and stop_agent() already handles the
     // agent not running case gracefully.
-    stop_agent()?;
-
-    Ok(())
+    stop_agent()
 }
 
 pub fn config_unset(key: &str) -> anyhow::Result<()> {
-    let mut config = rbw::config::Config::load()
-        .unwrap_or_else(|_| rbw::config::Config::new());
+    let mut config = rbw::config::Config::load().unwrap_or_else(|_| rbw::config::Config::new());
     match key {
         "email" => config.email = None,
         "sso_id" => config.sso_id = None,
@@ -1298,6 +402,7 @@ pub fn config_unset(key: &str) -> anyhow::Result<()> {
             config.lock_timeout = rbw::config::default_lock_timeout();
         }
         "pinentry" => config.pinentry = rbw::config::default_pinentry(),
+        "confirm_ssh" => config.confirm_ssh = rbw::config::default_confirm_ssh(),
         _ => return Err(anyhow::anyhow!("invalid config key: {key}")),
     }
     config.save()?;
@@ -1307,707 +412,41 @@ pub fn config_unset(key: &str) -> anyhow::Result<()> {
     // be running (since this may be the user running `rbw config set
     // base_url` as the first operation), and stop_agent() already handles the
     // agent not running case gracefully.
-    stop_agent()?;
-
-    Ok(())
+    stop_agent()
 }
 
 fn clipboard_store(val: &str) -> anyhow::Result<()> {
     ensure_agent()?;
-    crate::actions::clipboard_store(val)?;
-
-    Ok(())
+    crate::actions::clipboard_store(val)
 }
 
 pub fn register() -> anyhow::Result<()> {
     ensure_agent()?;
-    crate::actions::register()?;
-
-    Ok(())
+    crate::actions::register()
 }
 
 pub fn login() -> anyhow::Result<()> {
     ensure_agent()?;
-    crate::actions::login()?;
-
-    Ok(())
+    crate::actions::login()
 }
 
 pub fn unlock() -> anyhow::Result<()> {
     ensure_agent()?;
     crate::actions::login()?;
-    crate::actions::unlock()?;
-
-    Ok(())
+    crate::actions::unlock()
 }
 
 pub fn unlocked() -> anyhow::Result<()> {
     // not ensure_agent, because we don't want `rbw unlocked` to start the
     // agent if it's not running
     let _ = check_agent_version();
-    crate::actions::unlocked()?;
-
-    Ok(())
+    crate::actions::unlocked()
 }
 
 pub fn sync() -> anyhow::Result<()> {
     ensure_agent()?;
     crate::actions::login()?;
-    crate::actions::sync()?;
-
-    Ok(())
-}
-
-pub fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
-    let fields: Vec<ListField> = if raw {
-        ListField::all()
-    } else {
-        fields
-            .iter()
-            .map(std::convert::TryFrom::try_from)
-            .collect::<anyhow::Result<_>>()?
-    };
-
-    unlock()?;
-
-    let db = load_db()?;
-    let mut entries: Vec<DecryptedListCipher> = db
-        .entries
-        .iter()
-        .map(|entry| decrypt_list_cipher(entry, &fields))
-        .collect::<anyhow::Result<_>>()?;
-    entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-
-    print_entry_list(&entries, &fields, raw)?;
-
-    Ok(())
-}
-
-#[allow(clippy::fn_params_excessive_bools)]
-pub fn get(
-    needle: Needle,
-    user: Option<&str>,
-    folder: Option<&str>,
-    field: Option<&str>,
-    full: bool,
-    raw: bool,
-    clipboard: bool,
-    ignore_case: bool,
-    list_fields: bool,
-) -> anyhow::Result<()> {
-    unlock()?;
-
-    let db = load_db()?;
-
-    let desc = format!(
-        "{}{}",
-        user.map_or_else(String::new, |s| format!("{s}@")),
-        needle
-    );
-
-    let (_, decrypted) =
-        find_entry(&db, needle, user, folder, ignore_case)
-            .with_context(|| format!("couldn't find entry for '{desc}'"))?;
-    if list_fields {
-        decrypted.display_fields_list();
-    } else if raw {
-        decrypted.display_json(&desc)?;
-    } else if full {
-        decrypted.display_long(&desc, clipboard);
-    } else if let Some(field) = field {
-        decrypted.display_field(&desc, field, clipboard);
-    } else {
-        decrypted.display_short(&desc, clipboard);
-    }
-
-    Ok(())
-}
-
-fn print_entry_list(
-    entries: &[DecryptedListCipher],
-    fields: &[ListField],
-    raw: bool,
-) -> anyhow::Result<()> {
-    if raw {
-        serde_json::to_writer_pretty(std::io::stdout(), &entries)
-            .context("failed to write entries to stdout".to_string())?;
-        println!();
-    } else {
-        for entry in entries {
-            let values: Vec<String> = fields
-                .iter()
-                .map(|field| match field {
-                    ListField::Id => entry.id.clone(),
-                    ListField::Name => entry.name.as_ref().map_or_else(
-                        String::new,
-                        std::string::ToString::to_string,
-                    ),
-                    ListField::User => entry.user.as_ref().map_or_else(
-                        String::new,
-                        std::string::ToString::to_string,
-                    ),
-                    ListField::Folder => entry.folder.as_ref().map_or_else(
-                        String::new,
-                        std::string::ToString::to_string,
-                    ),
-                    ListField::Uri => {
-                        // "uri" is not listed in the TryFrom
-                        // implementation, so there's no way to try to
-                        // print it (and it's not clear what that would
-                        // look like, since it's a list and not a single
-                        // string)
-                        unreachable!()
-                    }
-                    ListField::EntryType => {
-                        entry.entry_type.as_ref().map_or_else(
-                            String::new,
-                            std::string::ToString::to_string,
-                        )
-                    }
-                })
-                .collect();
-
-            // write to stdout but don't panic when pipe get's closed
-            // this happens when piping stdout in a shell
-            match writeln!(&mut std::io::stdout(), "{}", values.join("\t")) {
-                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                    Ok(())
-                }
-                res => res,
-            }?;
-        }
-    }
-
-    Ok(())
-}
-
-pub fn search(
-    term: &str,
-    fields: &[String],
-    folder: Option<&str>,
-    raw: bool,
-) -> anyhow::Result<()> {
-    let fields: Vec<ListField> = if raw {
-        ListField::all()
-    } else {
-        fields
-            .iter()
-            .map(std::convert::TryFrom::try_from)
-            .collect::<anyhow::Result<_>>()?
-    };
-
-    unlock()?;
-
-    let db = load_db()?;
-
-    let mut entries: Vec<DecryptedListCipher> = db
-        .entries
-        .iter()
-        .map(decrypt_search_cipher)
-        .filter(|entry| {
-            entry
-                .as_ref()
-                .map(|entry| entry.search_match(term, folder))
-                .unwrap_or(true)
-        })
-        .map(|entry| entry.map(std::convert::Into::into))
-        .collect::<Result<_, anyhow::Error>>()?;
-    entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-
-    print_entry_list(&entries, &fields, raw)?;
-
-    Ok(())
-}
-
-pub fn code(
-    needle: Needle,
-    user: Option<&str>,
-    folder: Option<&str>,
-    clipboard: bool,
-    ignore_case: bool,
-) -> anyhow::Result<()> {
-    unlock()?;
-
-    let db = load_db()?;
-
-    let desc = format!(
-        "{}{}",
-        user.map_or_else(String::new, |s| format!("{s}@")),
-        needle
-    );
-
-    let (_, decrypted) =
-        find_entry(&db, needle, user, folder, ignore_case)
-            .with_context(|| format!("couldn't find entry for '{desc}'"))?;
-
-    if let DecryptedData::Login { totp, .. } = decrypted.data {
-        if let Some(totp) = totp {
-            val_display_or_store(clipboard, &generate_totp(&totp)?);
-        } else {
-            return Err(anyhow::anyhow!(
-                "entry does not contain a totp secret"
-            ));
-        }
-    } else {
-        return Err(anyhow::anyhow!("not a login entry"));
-    }
-
-    Ok(())
-}
-
-pub fn add(
-    name: &str,
-    username: Option<&str>,
-    uris: &[(String, Option<rbw::api::UriMatchType>)],
-    folder: Option<&str>,
-) -> anyhow::Result<()> {
-    unlock()?;
-
-    let mut db = load_db()?;
-    // unwrap is safe here because the call to unlock above is guaranteed to
-    // populate these or error
-    let mut access_token = db.access_token.as_ref().unwrap().clone();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
-
-    let name = crate::actions::encrypt(name, None)?;
-
-    let username = username
-        .map(|username| crate::actions::encrypt(username, None))
-        .transpose()?;
-
-    let contents = rbw::edit::edit("", HELP_PW)?;
-
-    let (password, notes) = parse_editor(&contents);
-    let password = password
-        .map(|password| crate::actions::encrypt(&password, None))
-        .transpose()?;
-    let notes = notes
-        .map(|notes| crate::actions::encrypt(&notes, None))
-        .transpose()?;
-    let uris: Vec<_> = uris
-        .iter()
-        .map(|uri| {
-            Ok(rbw::db::Uri {
-                uri: crate::actions::encrypt(&uri.0, None)?,
-                match_type: uri.1,
-            })
-        })
-        .collect::<anyhow::Result<_>>()?;
-
-    let mut folder_id = None;
-    if let Some(folder_name) = folder {
-        let (new_access_token, folders) =
-            rbw::actions::list_folders(&access_token, refresh_token)?;
-        if let Some(new_access_token) = new_access_token {
-            access_token.clone_from(&new_access_token);
-            db.access_token = Some(new_access_token);
-            save_db(&db)?;
-        }
-
-        let folders: Vec<(String, String)> = folders
-            .iter()
-            .cloned()
-            .map(|(id, name)| {
-                Ok((id, crate::actions::decrypt(&name, None, None)?))
-            })
-            .collect::<anyhow::Result<_>>()?;
-
-        for (id, name) in folders {
-            if name == folder_name {
-                folder_id = Some(id);
-            }
-        }
-        if folder_id.is_none() {
-            let (new_access_token, id) = rbw::actions::create_folder(
-                &access_token,
-                refresh_token,
-                &crate::actions::encrypt(folder_name, None)?,
-            )?;
-            if let Some(new_access_token) = new_access_token {
-                access_token.clone_from(&new_access_token);
-                db.access_token = Some(new_access_token);
-                save_db(&db)?;
-            }
-            folder_id = Some(id);
-        }
-    }
-
-    if let (Some(access_token), ()) = rbw::actions::add(
-        &access_token,
-        refresh_token,
-        &name,
-        &rbw::db::EntryData::Login {
-            username,
-            password,
-            uris,
-            totp: None,
-        },
-        notes.as_deref(),
-        folder_id.as_deref(),
-    )? {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
-    }
-
-    crate::actions::sync()?;
-
-    Ok(())
-}
-
-pub fn generate(
-    name: Option<&str>,
-    username: Option<&str>,
-    uris: &[(String, Option<rbw::api::UriMatchType>)],
-    folder: Option<&str>,
-    len: usize,
-    ty: rbw::pwgen::Type,
-) -> anyhow::Result<()> {
-    let password = rbw::pwgen::pwgen(ty, len);
-    println!("{password}");
-
-    if let Some(name) = name {
-        unlock()?;
-
-        let mut db = load_db()?;
-        // unwrap is safe here because the call to unlock above is guaranteed
-        // to populate these or error
-        let mut access_token = db.access_token.as_ref().unwrap().clone();
-        let refresh_token = db.refresh_token.as_ref().unwrap();
-
-        let name = crate::actions::encrypt(name, None)?;
-        let username = username
-            .map(|username| crate::actions::encrypt(username, None))
-            .transpose()?;
-        let password = crate::actions::encrypt(&password, None)?;
-        let uris: Vec<_> = uris
-            .iter()
-            .map(|uri| {
-                Ok(rbw::db::Uri {
-                    uri: crate::actions::encrypt(&uri.0, None)?,
-                    match_type: uri.1,
-                })
-            })
-            .collect::<anyhow::Result<_>>()?;
-
-        let mut folder_id = None;
-        if let Some(folder_name) = folder {
-            let (new_access_token, folders) =
-                rbw::actions::list_folders(&access_token, refresh_token)?;
-            if let Some(new_access_token) = new_access_token {
-                access_token.clone_from(&new_access_token);
-                db.access_token = Some(new_access_token);
-                save_db(&db)?;
-            }
-
-            let folders: Vec<(String, String)> = folders
-                .iter()
-                .cloned()
-                .map(|(id, name)| {
-                    Ok((id, crate::actions::decrypt(&name, None, None)?))
-                })
-                .collect::<anyhow::Result<_>>()?;
-
-            for (id, name) in folders {
-                if name == folder_name {
-                    folder_id = Some(id);
-                }
-            }
-            if folder_id.is_none() {
-                let (new_access_token, id) = rbw::actions::create_folder(
-                    &access_token,
-                    refresh_token,
-                    &crate::actions::encrypt(folder_name, None)?,
-                )?;
-                if let Some(new_access_token) = new_access_token {
-                    access_token.clone_from(&new_access_token);
-                    db.access_token = Some(new_access_token);
-                    save_db(&db)?;
-                }
-                folder_id = Some(id);
-            }
-        }
-
-        if let (Some(access_token), ()) = rbw::actions::add(
-            &access_token,
-            refresh_token,
-            &name,
-            &rbw::db::EntryData::Login {
-                username,
-                password: Some(password),
-                uris,
-                totp: None,
-            },
-            None,
-            folder_id.as_deref(),
-        )? {
-            db.access_token = Some(access_token);
-            save_db(&db)?;
-        }
-
-        crate::actions::sync()?;
-    }
-
-    Ok(())
-}
-
-pub fn edit(
-    name: Needle,
-    username: Option<&str>,
-    folder: Option<&str>,
-    ignore_case: bool,
-) -> anyhow::Result<()> {
-    unlock()?;
-
-    let mut db = load_db()?;
-    let access_token = db.access_token.as_ref().unwrap();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
-
-    let desc = format!(
-        "{}{}",
-        username.map_or_else(String::new, |s| format!("{s}@")),
-        name
-    );
-
-    let (entry, decrypted) =
-        find_entry(&db, name, username, folder, ignore_case)
-            .with_context(|| format!("couldn't find entry for '{desc}'"))?;
-
-    let (data, fields, notes, history) = match &decrypted.data {
-        DecryptedData::Login { password, .. } => {
-            let mut contents =
-                format!("{}\n", password.as_deref().unwrap_or(""));
-            if let Some(notes) = decrypted.notes {
-                write!(contents, "\n{notes}\n").unwrap();
-            }
-
-            let contents = rbw::edit::edit(&contents, HELP_PW)?;
-
-            let (password, notes) = parse_editor(&contents);
-            let password = password
-                .map(|password| {
-                    crate::actions::encrypt(
-                        &password,
-                        entry.org_id.as_deref(),
-                    )
-                })
-                .transpose()?;
-            let notes = notes
-                .map(|notes| {
-                    crate::actions::encrypt(&notes, entry.org_id.as_deref())
-                })
-                .transpose()?;
-            let mut history = entry.history.clone();
-            let rbw::db::EntryData::Login {
-                username: entry_username,
-                password: entry_password,
-                uris: entry_uris,
-                totp: entry_totp,
-            } = &entry.data
-            else {
-                unreachable!();
-            };
-
-            if let Some(prev_password) = entry_password.clone() {
-                let new_history_entry = rbw::db::HistoryEntry {
-                    last_used_date: format!(
-                        "{}",
-                        humantime::format_rfc3339(
-                            std::time::SystemTime::now()
-                        )
-                    ),
-                    password: prev_password,
-                };
-                history.insert(0, new_history_entry);
-            }
-
-            let data = rbw::db::EntryData::Login {
-                username: entry_username.clone(),
-                password,
-                uris: entry_uris.clone(),
-                totp: entry_totp.clone(),
-            };
-            (data, entry.fields, notes, history)
-        }
-        DecryptedData::SecureNote => {
-            let data = rbw::db::EntryData::SecureNote {};
-
-            let editor_content = decrypted.notes.map_or_else(
-                || "\n".to_string(),
-                |notes| format!("{notes}\n"),
-            );
-            let contents = rbw::edit::edit(&editor_content, HELP_NOTES)?;
-
-            // prepend blank line to be parsed as pw by `parse_editor`
-            let (_, notes) = parse_editor(&format!("\n{contents}\n"));
-
-            let notes = notes
-                .map(|notes| {
-                    crate::actions::encrypt(&notes, entry.org_id.as_deref())
-                })
-                .transpose()?;
-
-            (data, entry.fields, notes, entry.history)
-        }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "modifications are only supported for login and note entries"
-            ));
-        }
-    };
-
-    if let (Some(access_token), ()) = rbw::actions::edit(
-        access_token,
-        refresh_token,
-        &entry.id,
-        entry.org_id.as_deref(),
-        &entry.name,
-        &data,
-        &fields,
-        notes.as_deref(),
-        entry.folder_id.as_deref(),
-        &history,
-    )? {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
-    }
-
-    crate::actions::sync()?;
-    Ok(())
-}
-
-pub fn remove(
-    name: Needle,
-    username: Option<&str>,
-    folder: Option<&str>,
-    ignore_case: bool,
-) -> anyhow::Result<()> {
-    unlock()?;
-
-    let mut db = load_db()?;
-    let access_token = db.access_token.as_ref().unwrap();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
-
-    let desc = format!(
-        "{}{}",
-        username.map_or_else(String::new, |s| format!("{s}@")),
-        name
-    );
-
-    let (entry, _) = find_entry(&db, name, username, folder, ignore_case)
-        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
-
-    if let (Some(access_token), ()) =
-        rbw::actions::remove(access_token, refresh_token, &entry.id)?
-    {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
-    }
-
-    crate::actions::sync()?;
-
-    Ok(())
-}
-
-pub fn history(
-    name: Needle,
-    username: Option<&str>,
-    folder: Option<&str>,
-    ignore_case: bool,
-) -> anyhow::Result<()> {
-    unlock()?;
-
-    let db = load_db()?;
-
-    let desc = format!(
-        "{}{}",
-        username.map_or_else(String::new, |s| format!("{s}@")),
-        name
-    );
-
-    let (_, decrypted) = find_entry(&db, name, username, folder, ignore_case)
-        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
-    for history in decrypted.history {
-        println!("{}: {}", history.last_used_date, history.password);
-    }
-
-    Ok(())
-}
-
-pub fn lock() -> anyhow::Result<()> {
-    ensure_agent()?;
-    crate::actions::lock()?;
-
-    Ok(())
-}
-
-pub fn purge() -> anyhow::Result<()> {
-    stop_agent()?;
-
-    remove_db()?;
-
-    Ok(())
-}
-
-pub fn stop_agent() -> anyhow::Result<()> {
-    crate::actions::quit()?;
-
-    Ok(())
-}
-
-fn ensure_agent() -> anyhow::Result<()> {
-    check_config()?;
-    if matches!(check_agent_version(), Ok(())) {
-        return Ok(());
-    }
-    run_agent()?;
-    check_agent_version()?;
-    Ok(())
-}
-
-fn run_agent() -> anyhow::Result<()> {
-    let agent_path = std::env::var_os("RBW_AGENT");
-    let agent_path = agent_path
-        .as_deref()
-        .unwrap_or_else(|| std::ffi::OsStr::from_bytes(b"rbw-agent"));
-    let status = std::process::Command::new(agent_path)
-        .status()
-        .context("failed to run rbw-agent")?;
-    if !status.success() {
-        if let Some(code) = status.code() {
-            if code != 23 {
-                return Err(anyhow::anyhow!(
-                    "failed to run rbw-agent: {status}"
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn check_config() -> anyhow::Result<()> {
-    rbw::config::Config::validate().map_err(|e| {
-        log::error!("{MISSING_CONFIG_HELP}");
-        anyhow::Error::new(e)
-    })
-}
-
-fn check_agent_version() -> anyhow::Result<()> {
-    let client_version = rbw::protocol::VERSION;
-    let agent_version = version_or_quit()?;
-    if agent_version != client_version {
-        crate::actions::quit()?;
-        return Err(anyhow::anyhow!(
-            "client protocol version is {client_version} but agent protocol version is {agent_version}"
-        ));
-    }
-    Ok(())
-}
-
-fn version_or_quit() -> anyhow::Result<u32> {
-    crate::actions::version().inspect_err(|_| {
-        let _ = crate::actions::quit();
-    })
+    crate::actions::sync()
 }
 
 fn find_entry(
@@ -2016,38 +455,35 @@ fn find_entry(
     username: Option<&str>,
     folder: Option<&str>,
     ignore_case: bool,
-) -> anyhow::Result<(rbw::db::Entry, DecryptedCipher)> {
+) -> anyhow::Result<rbw::db::Entry<Encrypted>> {
     if let Needle::Uuid(uuid, s) = needle {
         for cipher in &db.entries {
             if uuid::Uuid::parse_str(&cipher.id) == Ok(uuid) {
-                return Ok((cipher.clone(), decrypt_cipher(cipher)?));
+                return Ok(cipher.clone());
             }
         }
         needle = Needle::Name(s);
     }
 
-    let ciphers: Vec<(rbw::db::Entry, DecryptedSearchCipher)> = db
+    let ciphers: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = db
         .entries
         .iter()
-        .map(|entry| {
-            decrypt_search_cipher(entry)
-                .map(|decrypted| (entry.clone(), decrypted))
-        })
+        .map(|entry| entry.try_into().map(|decrypted| (entry.clone(), decrypted)))
         .collect::<anyhow::Result<_>>()?;
-    let (entry, _) =
-        find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
-    let decrypted_entry = decrypt_cipher(&entry)?;
-    Ok((entry, decrypted_entry))
+
+    let (entry, _) = find_entry_raw(&ciphers, &needle, username, folder, ignore_case)?;
+
+    Ok(entry)
 }
 
 fn find_entry_raw(
-    entries: &[(rbw::db::Entry, DecryptedSearchCipher)],
+    entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
     needle: &Needle,
     username: Option<&str>,
     folder: Option<&str>,
     ignore_case: bool,
-) -> anyhow::Result<(rbw::db::Entry, DecryptedSearchCipher)> {
-    let mut matches: Vec<(rbw::db::Entry, DecryptedSearchCipher)> = vec![];
+) -> anyhow::Result<(rbw::db::Entry<Encrypted>, SearchEntry)> {
+    let mut matches: Vec<(rbw::db::Entry<Encrypted>, SearchEntry)> = vec![];
 
     let find_matches = |strict_username, strict_folder, exact| {
         entries
@@ -2075,13 +511,9 @@ fn find_entry_raw(
 
         let strict_folder_matches = find_matches(false, true, exact);
         let strict_username_matches = find_matches(true, false, exact);
-        if strict_folder_matches.len() == 1
-            && strict_username_matches.len() != 1
-        {
+        if strict_folder_matches.len() == 1 && strict_username_matches.len() != 1 {
             return Ok(strict_folder_matches[0].clone());
-        } else if strict_folder_matches.len() != 1
-            && strict_username_matches.len() == 1
-        {
+        } else if strict_folder_matches.len() != 1 && strict_username_matches.len() == 1 {
             return Ok(strict_username_matches[0].clone());
         }
 
@@ -2103,588 +535,653 @@ fn find_entry_raw(
     }
 }
 
-fn decrypt_field(
-    name: Field,
-    field: Option<&str>,
-    entry_key: Option<&str>,
-    org_id: Option<&str>,
-) -> Option<String> {
-    let field = field
-        .as_ref()
-        .map(|field| crate::actions::decrypt(field, entry_key, org_id))
-        .transpose();
-    match field {
-        Ok(field) => field,
-        Err(e) => {
-            log::warn!("failed to decrypt {name}: {e}");
-            None
-        }
+pub fn display_entry_field(entry: &rbw::db::Entry<Decrypted>, desc: &str, field: &str) {
+    let fields = entry.get_field(&field.to_lowercase(), generate_totp);
+    if fields.is_empty() {
+        // TODO: This is not 100% compatible text output with the project before refactor.
+        eprintln!("entry for '{desc}' had no {field} field");
+    } else {
+        fields.iter().for_each(|f| {
+            println!("{f}");
+        });
     }
 }
 
-fn decrypt_list_cipher(
-    entry: &rbw::db::Entry,
-    fields: &[ListField],
-) -> anyhow::Result<DecryptedListCipher> {
-    let id = entry.id.clone();
-    let name = if fields.contains(&ListField::Name) {
-        Some(crate::actions::decrypt(
-            &entry.name,
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        )?)
-    } else {
-        None
-    };
-    let user = if fields.contains(&ListField::User) {
-        match &entry.data {
-            rbw::db::EntryData::Login { username, .. } => decrypt_field(
-                Field::Username,
-                username.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            _ => None,
-        }
-    } else {
-        None
-    };
-    let folder = if fields.contains(&ListField::Folder) {
-        // folder name should always be decrypted with the local key because
-        // folders are local to a specific user's vault, not the organization
-        entry
-            .folder
-            .as_ref()
-            .map(|folder| crate::actions::decrypt(folder, None, None))
-            .transpose()?
-    } else {
-        None
-    };
-    let uris = if fields.contains(&ListField::Uri) {
-        match &entry.data {
-            rbw::db::EntryData::Login { uris, .. } => Some(
-                uris.iter()
-                    .filter_map(|s| {
-                        decrypt_field(
-                            Field::Uris,
-                            Some(&s.uri),
-                            entry.key.as_deref(),
-                            entry.org_id.as_deref(),
-                        )
-                    })
-                    .collect(),
-            ),
-            _ => None,
-        }
-    } else {
-        None
-    };
-    let entry_type = fields
-        .contains(&ListField::EntryType)
-        .then_some(match &entry.data {
-            rbw::db::EntryData::Login { .. } => "Login",
-            rbw::db::EntryData::Identity { .. } => "Identity",
-            rbw::db::EntryData::SshKey { .. } => "SSH Key",
-            rbw::db::EntryData::SecureNote => "Note",
-            rbw::db::EntryData::Card { .. } => "Card",
-        })
-        .map(str::to_string);
-
-    Ok(DecryptedListCipher {
-        id,
-        name,
-        user,
-        folder,
-        uris,
-        entry_type,
-    })
-}
-
-fn decrypt_search_cipher(
-    entry: &rbw::db::Entry,
-) -> anyhow::Result<DecryptedSearchCipher> {
-    let id = entry.id.clone();
-    let name = crate::actions::decrypt(
-        &entry.name,
-        entry.key.as_deref(),
-        entry.org_id.as_deref(),
-    )?;
-    let user = match &entry.data {
-        rbw::db::EntryData::Login { username, .. } => decrypt_field(
-            Field::Username,
-            username.as_deref(),
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        ),
-        _ => None,
-    };
-    // folder name should always be decrypted with the local key because
-    // folders are local to a specific user's vault, not the organization
-    let folder = entry
-        .folder
-        .as_ref()
-        .map(|folder| crate::actions::decrypt(folder, None, None))
-        .transpose()?;
-    let notes = entry
-        .notes
-        .as_ref()
-        .map(|notes| {
-            crate::actions::decrypt(
-                notes,
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            )
-        })
-        .transpose();
-    let uris = if let rbw::db::EntryData::Login { uris, .. } = &entry.data {
-        uris.iter()
-            .filter_map(|s| {
-                decrypt_field(
-                    Field::Uris,
-                    Some(&s.uri),
-                    entry.key.as_deref(),
-                    entry.org_id.as_deref(),
-                )
-                .map(|uri| (uri, s.match_type))
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-    let fields = entry
-        .fields
-        .iter()
-        .filter_map(|field| {
-            if field.ty == Some(rbw::api::FieldType::Hidden) {
-                None
-            } else {
-                field.value.as_ref()
+pub fn display_entry_short(entry: &rbw::db::Entry<Decrypted>, desc: &str) -> bool {
+    let short = entry.get_short();
+    let Some(short) = short else {
+        // Would be cool if self.data had a method named main_field_name :D
+        eprintln!(
+            "entry for '{desc}' had no {}",
+            match entry.data {
+                EntryData::Login { .. } => "password",
+                EntryData::Card { .. } => "card number",
+                EntryData::Identity { .. } => "name",
+                EntryData::SecureNote => "notes",
+                EntryData::SshKey { .. } => "public key",
             }
-        })
-        .map(|value| {
-            crate::actions::decrypt(
-                value,
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            )
-        })
-        .collect::<anyhow::Result<_>>()?;
-    let notes = match notes {
-        Ok(notes) => notes,
-        Err(e) => {
-            log::warn!("failed to decrypt notes: {e}");
-            None
-        }
+        );
+        return false;
     };
-    let entry_type = (match &entry.data {
-        rbw::db::EntryData::Login { .. } => "Login",
-        rbw::db::EntryData::Identity { .. } => "Identity",
-        rbw::db::EntryData::SshKey { .. } => "SSH Key",
-        rbw::db::EntryData::SecureNote => "Note",
-        rbw::db::EntryData::Card { .. } => "Card",
-    })
-    .to_string();
 
-    Ok(DecryptedSearchCipher {
-        id,
-        entry_type,
-        folder,
-        name,
-        user,
-        uris,
-        fields,
-        notes,
-    })
+    println!("{short}");
+    true
 }
 
-fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
-    // folder name should always be decrypted with the local key because
-    // folders are local to a specific user's vault, not the organization
-    let folder = entry
-        .folder
-        .as_ref()
-        .map(|folder| crate::actions::decrypt(folder, None, None))
-        .transpose();
-    let folder = match folder {
-        Ok(folder) => folder,
-        Err(e) => {
-            log::warn!("failed to decrypt folder name: {e}");
-            None
-        }
-    };
-    let fields = entry
-        .fields
-        .iter()
-        .map(|field| {
-            Ok(DecryptedField {
-                name: field
-                    .name
-                    .as_ref()
-                    .map(|name| {
-                        crate::actions::decrypt(
-                            name,
-                            entry.key.as_deref(),
-                            entry.org_id.as_deref(),
-                        )
-                    })
-                    .transpose()?,
-                value: field
-                    .value
-                    .as_ref()
-                    .map(|value| {
-                        crate::actions::decrypt(
-                            value,
-                            entry.key.as_deref(),
-                            entry.org_id.as_deref(),
-                        )
-                    })
-                    .transpose()?,
-                ty: field.ty,
-            })
-        })
-        .collect::<anyhow::Result<_>>()?;
-    let notes = entry
-        .notes
-        .as_ref()
-        .map(|notes| {
-            crate::actions::decrypt(
-                notes,
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            )
-        })
-        .transpose();
-    let notes = match notes {
-        Ok(notes) => notes,
-        Err(e) => {
-            log::warn!("failed to decrypt notes: {e}");
-            None
-        }
-    };
-    let history = entry
-        .history
-        .iter()
-        .map(|history_entry| {
-            Ok(DecryptedHistoryEntry {
-                last_used_date: history_entry.last_used_date.clone(),
-                password: crate::actions::decrypt(
-                    &history_entry.password,
-                    entry.key.as_deref(),
-                    entry.org_id.as_deref(),
-                )?,
-            })
-        })
-        .collect::<anyhow::Result<_>>()?;
-
-    let data = match &entry.data {
-        rbw::db::EntryData::Login {
-            username,
-            password,
-            totp,
-            uris,
-        } => DecryptedData::Login {
-            username: decrypt_field(
-                Field::Username,
-                username.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            password: decrypt_field(
-                Field::Password,
-                password.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            totp: decrypt_field(
-                Field::Totp,
-                totp.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            uris: uris
-                .iter()
-                .map(|s| {
-                    decrypt_field(
-                        Field::Uris,
-                        Some(&s.uri),
-                        entry.key.as_deref(),
-                        entry.org_id.as_deref(),
-                    )
-                    .map(|uri| DecryptedUri {
-                        uri,
-                        match_type: s.match_type,
-                    })
-                })
-                .collect(),
-        },
-        rbw::db::EntryData::Card {
-            cardholder_name,
-            number,
-            brand,
-            exp_month,
-            exp_year,
-            code,
-        } => DecryptedData::Card {
-            cardholder_name: decrypt_field(
-                Field::Cardholder,
-                cardholder_name.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            number: decrypt_field(
-                Field::CardNumber,
-                number.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            brand: decrypt_field(
-                Field::Brand,
-                brand.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            exp_month: decrypt_field(
-                Field::ExpMonth,
-                exp_month.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            exp_year: decrypt_field(
-                Field::ExpYear,
-                exp_year.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            code: decrypt_field(
-                Field::Cvv,
-                code.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-        },
-        rbw::db::EntryData::Identity {
-            title,
-            first_name,
-            middle_name,
-            last_name,
-            address1,
-            address2,
-            address3,
-            city,
-            state,
-            postal_code,
-            country,
-            phone,
-            email,
-            ssn,
-            license_number,
-            passport_number,
-            username,
-        } => DecryptedData::Identity {
-            title: decrypt_field(
-                Field::Title,
-                title.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            first_name: decrypt_field(
-                Field::FirstName,
-                first_name.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            middle_name: decrypt_field(
-                Field::MiddleName,
-                middle_name.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            last_name: decrypt_field(
-                Field::LastName,
-                last_name.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            address1: decrypt_field(
-                Field::Address1,
-                address1.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            address2: decrypt_field(
-                Field::Address2,
-                address2.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            address3: decrypt_field(
-                Field::Address3,
-                address3.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            city: decrypt_field(
-                Field::City,
-                city.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            state: decrypt_field(
-                Field::State,
-                state.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            postal_code: decrypt_field(
-                Field::PostalCode,
-                postal_code.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            country: decrypt_field(
-                Field::Country,
-                country.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            phone: decrypt_field(
-                Field::Phone,
-                phone.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            email: decrypt_field(
-                Field::Email,
-                email.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            ssn: decrypt_field(
-                Field::Ssn,
-                ssn.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            license_number: decrypt_field(
-                Field::License,
-                license_number.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            passport_number: decrypt_field(
-                Field::Passport,
-                passport_number.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            username: decrypt_field(
-                Field::Username,
-                username.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-        },
-        rbw::db::EntryData::SecureNote => DecryptedData::SecureNote {},
-        rbw::db::EntryData::SshKey {
-            public_key,
-            fingerprint,
-            private_key,
-        } => DecryptedData::SshKey {
-            public_key: decrypt_field(
-                Field::PublicKey,
-                public_key.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            fingerprint: decrypt_field(
-                Field::Fingerprint,
-                fingerprint.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-            private_key: decrypt_field(
-                Field::PrivateKey,
-                private_key.as_deref(),
-                entry.key.as_deref(),
-                entry.org_id.as_deref(),
-            ),
-        },
-    };
-
-    Ok(DecryptedCipher {
-        id: entry.id.clone(),
+pub async fn get(
+    FindArgs {
+        needle,
+        user,
         folder,
-        name: crate::actions::decrypt(
-            &entry.name,
-            entry.key.as_deref(),
-            entry.org_id.as_deref(),
-        )?,
-        data,
-        fields,
-        notes,
-        history,
-    })
+        ignorecase,
+    }: FindArgs,
+    field: Option<&str>,
+    full: bool,
+    raw: bool,
+    clipboard: bool,
+    list_fields: bool,
+) -> anyhow::Result<()> {
+    unlock()?;
+
+    let db = load_db().await?;
+    let mut dec = RemoteDecrypter {};
+
+    let desc = format!(
+        "{}{}",
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
+        needle
+    );
+
+    let entry = find_entry(&db, needle, user.as_deref(), folder.as_deref(), ignorecase)
+        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+
+    let decrypted = entry.decrypt(&mut dec)?;
+
+    if list_fields {
+        decrypted
+            .get_fields_list()
+            .iter()
+            .for_each(|field| println!("{field}"));
+    } else if raw {
+        serde_json::to_writer_pretty(std::io::stdout(), &decrypted)
+            .context(format!("failed to write entry '{desc}' to stdout"))?;
+        println!();
+    } else {
+        let short = decrypted.get_short();
+
+        if clipboard {
+            if let Some(field) = &field {
+                let value = decrypted.get_field(field, generate_totp);
+                if let Err(e) = clipboard_store(&value.join(" ")) {
+                    eprintln!("{e}");
+                }
+            } else if let Some(short) = &short {
+                if let Err(e) = clipboard_store(short) {
+                    eprintln!("{e}");
+                }
+            }
+        }
+
+        if full {
+            // NOTE: In the previous version this printed "password", etc, the name of the "short"
+            // field.
+            if short.is_none() {
+                eprintln!("entry for '{desc}' had no default field");
+            }
+
+            // NOTE: This printing is 99% backwards compatible, but the previous version was putting
+            // EVERY field in the clipboard sequentially, leaving only the last at the end of course.
+            // This behavior is unwanted, unnecessary and makes the code messy and for these reason
+            // it has been removed. Now when specifying --clipboard, only the "short" field or the
+            // --field value gets copied.
+            print!("{decrypted}");
+        } else if let Some(field) = field {
+            display_entry_field(&decrypted, &desc, field);
+        } else {
+            display_entry_short(&decrypted, &desc);
+        }
+    }
+
+    Ok(())
+}
+
+/// Used in "search" and "list"
+fn print_entry_list(
+    entries: &[SearchEntry],
+    fields: &[ListField],
+    raw: bool,
+) -> anyhow::Result<()> {
+    if raw {
+        serde_json::to_writer_pretty(std::io::stdout(), &entries)
+            .context("failed to write entries to stdout".to_string())?;
+        println!();
+    } else {
+        for entry in entries {
+            let values: Vec<&str> = fields
+                .iter()
+                .map(|field| match field {
+                    ListField::Id => &entry.id,
+                    ListField::Name => &entry.name,
+                    ListField::User => entry.user.as_deref().unwrap_or(""),
+                    ListField::Folder => entry.folder.as_deref().unwrap_or(""),
+                    ListField::Uri => {
+                        // "uri" is not listed in the TryFrom
+                        // implementation, so there's no way to try to
+                        // print it (and it's not clear what that would
+                        // look like, since it's a list and not a single
+                        // string)
+                        unreachable!()
+                    }
+                    ListField::EntryType => &entry.entry_type,
+                })
+                .collect();
+
+            // write to stdout but don't panic when pipe get's closed
+            // this happens when piping stdout in a shell
+            match writeln!(&mut std::io::stdout(), "{}", values.join("\t")) {
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+                res => res,
+            }?;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn search(
+    term: &str,
+    fields: &[String],
+    folder: Option<&str>,
+    raw: bool,
+) -> anyhow::Result<()> {
+    let fields: Vec<ListField> = if raw {
+        ListField::all().to_vec()
+    } else {
+        fields
+            .iter()
+            .map(TryFrom::try_from)
+            .collect::<anyhow::Result<_>>()?
+    };
+
+    unlock()?;
+
+    let db = load_db().await?;
+
+    let mut entries: Vec<SearchEntry> = db
+        .entries
+        .iter()
+        .map(TryInto::try_into)
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .map(|entry: &SearchEntry| entry.search_match(term, folder))
+                .unwrap_or(true)
+        })
+        .collect::<Result<_, anyhow::Error>>()?;
+
+    entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+
+    print_entry_list(&entries, &fields, raw)
+}
+
+pub async fn list(fields: &[String], raw: bool) -> anyhow::Result<()> {
+    search("", fields, None, raw).await
+}
+
+pub async fn code(
+    FindArgs {
+        needle,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
+    clipboard: bool,
+) -> anyhow::Result<()> {
+    unlock()?;
+
+    let db = load_db().await?;
+    let mut dec = RemoteDecrypter {};
+
+    let desc = format!(
+        "{}{}",
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
+        needle
+    );
+
+    let entry = find_entry(&db, needle, user.as_deref(), folder.as_deref(), ignorecase)
+        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+
+    if let EntryData::Login { totp, .. } = &entry.data {
+        let totp = entry.decrypt_optstring(totp, &mut dec)?;
+
+        if let Some(totp) = totp {
+            let code = generate_totp(&totp)?;
+            if clipboard {
+                if let Err(e) = clipboard_store(&code) {
+                    eprintln!("{e}");
+                }
+            } else {
+                println!("{code}");
+            }
+        } else {
+            return Err(anyhow::anyhow!("entry does not contain a totp secret"));
+        }
+    } else {
+        return Err(anyhow::anyhow!("not a login entry"));
+    }
+
+    Ok(())
+}
+
+async fn find_or_create_folder(db: &mut rbw::db::Db, folder: &str) -> anyhow::Result<String> {
+    let enc: &mut dyn Encrypter<()> = &mut RemoteEncrypter {}; // fat ptr trick
+    let dec: &mut dyn Decrypter<()> = &mut RemoteDecrypter {};
+
+    let (new_access_token, folders) = rbw::actions::list_folders(
+        db.access_token.as_ref().unwrap(),
+        db.refresh_token.as_ref().unwrap(),
+    )
+    .await?;
+
+    update_token(db, new_access_token).await?;
+
+    let folders: Vec<(String, String)> = folders
+        .into_iter()
+        .map(|(id, name)| Ok((id, dec.decrypt_field(None, &name)?)))
+        .collect::<anyhow::Result<_>>()?;
+
+    let folder_id = folders
+        .into_iter()
+        .find_map(|(id, name)| if name == folder { Some(id) } else { None });
+
+    let folder_id = if let Some(folder_id) = folder_id {
+        folder_id
+    } else {
+        let (new_access_token, id) = rbw::actions::create_folder(
+            db.access_token.as_ref().unwrap(),
+            db.refresh_token.as_ref().unwrap(),
+            &enc.encrypt_field(None, folder)?,
+        )
+        .await?;
+
+        update_token(db, new_access_token).await?;
+
+        id
+    };
+
+    Ok(folder_id)
 }
 
 fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
     let mut lines = contents.lines();
 
-    let password = lines.next().map(std::string::ToString::to_string);
+    let password = lines.next().map(ToString::to_string);
 
     let mut notes: String = lines
         .skip_while(|line| line.is_empty())
         .filter(|line| !line.starts_with('#'))
-        .fold(String::new(), |mut notes, line| {
-            notes.push_str(line);
-            notes.push('\n');
-            notes
-        });
-    while notes.ends_with('\n') {
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if notes.ends_with("\n") {
         notes.pop();
     }
+
     let notes = if notes.is_empty() { None } else { Some(notes) };
 
     (password, notes)
 }
 
-fn load_db() -> anyhow::Result<rbw::db::Db> {
-    let config = rbw::config::Config::load()?;
-    config.email.as_ref().map_or_else(
-        || Err(anyhow::anyhow!("failed to find email address in config")),
-        |email| {
-            rbw::db::Db::load(&config.server_name(), email)
-                .map_err(anyhow::Error::new)
-        },
-    )
+async fn update_token(db: &mut rbw::db::Db, new_token: Option<String>) -> anyhow::Result<()> {
+    if db.update_access_token(new_token) {
+        save_db(db).await?;
+    }
+
+    Ok(())
 }
 
-fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {
-    let config = rbw::config::Config::load()?;
-    config.email.as_ref().map_or_else(
-        || Err(anyhow::anyhow!("failed to find email address in config")),
-        |email| {
-            db.save(&config.server_name(), email)
-                .map_err(anyhow::Error::new)
+const HELP_PW: &str = r"
+# The first line of this file will be the password, and the remainder of the
+# file (after any blank lines after the password) will be stored as a note.
+# Lines with leading # will be ignored.
+";
+
+const HELP_NOTES: &str = r"
+# The content of this file will be stored as a note.
+# Lines with leading # will be ignored.
+";
+
+pub async fn add(
+    name: &str,
+    username: Option<&str>,
+    uris: &[(String, Option<rbw::api::UriMatchType>)],
+    folder: Option<&str>,
+    password: Option<&str>,
+) -> anyhow::Result<()> {
+    let enc: &mut dyn Encrypter<()> = &mut RemoteEncrypter {}; // fat ptr trick
+
+    unlock()?;
+
+    let mut db = load_db().await?;
+    // unwrap is safe here because the call to unlock above is guaranteed to
+    // populate these or error
+
+    let name = enc.encrypt_field(None, name)?;
+
+    let username = username
+        .map(|username| enc.encrypt_field(None, username))
+        .transpose()?;
+
+    let (password, notes) = match password {
+        Some(password) => (Some(password.to_string()), None),
+        None => {
+            let contents = rbw::edit::edit("", HELP_PW)?;
+            parse_editor(&contents)
+        }
+    };
+
+    let password = password
+        .map(|password| enc.encrypt_field(None, &password))
+        .transpose()?;
+    let notes = notes
+        .map(|notes| enc.encrypt_field(None, &notes))
+        .transpose()?;
+    let uris: Vec<_> = uris
+        .iter()
+        .map(|uri| {
+            Ok(rbw::db::Uri {
+                uri: enc.encrypt_field(None, &uri.0)?,
+                match_type: uri.1,
+            })
+        })
+        .collect::<anyhow::Result<_>>()?;
+
+    let folder_id = match folder {
+        Some(folder) => Some(find_or_create_folder(&mut db, folder).await?),
+        None => None,
+    };
+
+    let (new_token, ()) = rbw::actions::add(
+        db.access_token.as_ref().unwrap(),
+        db.refresh_token.as_ref().unwrap(),
+        &name,
+        &rbw::db::EntryData::Login {
+            username,
+            password,
+            uris,
+            totp: None,
         },
+        notes.as_deref(),
+        folder_id.as_deref(),
     )
+    .await?;
+
+    update_token(&mut db, new_token).await?;
+
+    crate::actions::sync()
+}
+
+pub async fn generate(
+    name: Option<&str>,
+    username: Option<&str>,
+    uris: &[(String, Option<rbw::api::UriMatchType>)],
+    folder: Option<&str>,
+    len: usize,
+    ty: rbw::pwgen::Type,
+) -> anyhow::Result<()> {
+    let password = rbw::pwgen::pwgen(ty, len);
+    println!("{password}");
+
+    match name {
+        Some(name) => add(name, username, uris, folder, Some(&password)).await,
+        None => Ok(()),
+    }
+}
+
+pub async fn edit(
+    FindArgs {
+        needle,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
+) -> anyhow::Result<()> {
+    unlock()?;
+
+    let mut db = load_db().await?;
+
+    let mut enc = RemoteEncrypter {};
+    let mut dec = RemoteDecrypter {};
+
+    let desc = format!(
+        "{}{}",
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
+        needle
+    );
+
+    let mut entry = find_entry(&db, needle, user.as_deref(), folder.as_deref(), ignorecase)
+        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+
+    let dec_notes = entry
+        .decrypt_optstring(&entry.notes, &mut dec)?
+        .map_or_else(String::new, |n| format!("\n{n}\n"));
+
+    // NOTE: Editing, previously, was limited to Login and SecureNote types. Now it's not limited
+    // anymore. This behavior is not 100% backwards compatible, but it's hardly noticeable
+    let (contents, help) = if let EntryData::Login { password, .. } = &entry.data {
+        let dec_password = entry
+            .decrypt_optstring(password, &mut dec)?
+            .unwrap_or_else(String::new);
+
+        (format!("{dec_password}\n{dec_notes}"), HELP_PW)
+    } else {
+        (dec_notes, HELP_NOTES)
+    };
+
+    let (dec_password, dec_notes) = parse_editor(&rbw::edit::edit(&contents, help)?);
+
+    let new_enc_password = entry.encrypt_optstring(&dec_password, &mut enc)?;
+
+    if let EntryData::Login { password, .. } = &mut entry.data {
+        if let Some(prev_password) = password {
+            entry.history.insert(
+                0,
+                rbw::db::HistoryEntry {
+                    last_used_date: format!("{}", humantime::format_rfc3339(SystemTime::now())),
+                    password: prev_password.clone(),
+                },
+            );
+        }
+
+        password.clone_from(&new_enc_password);
+    }
+
+    entry.notes = entry.encrypt_optstring(&dec_notes, &mut enc)?;
+
+    let (new_token, ()) = rbw::actions::edit(
+        db.access_token.as_ref().unwrap(),
+        db.refresh_token.as_ref().unwrap(),
+        &entry,
+    )
+    .await?;
+
+    update_token(&mut db, new_token).await?;
+
+    crate::actions::sync()
+}
+
+pub async fn remove(
+    FindArgs {
+        needle,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
+) -> anyhow::Result<()> {
+    unlock()?;
+
+    let mut db = load_db().await?;
+
+    let desc = format!(
+        "{}{}",
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
+        needle
+    );
+
+    let entry = find_entry(&db, needle, user.as_deref(), folder.as_deref(), ignorecase)
+        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+
+    let (new_access_token, ()) = rbw::actions::remove(
+        db.access_token.as_ref().unwrap(),
+        db.refresh_token.as_ref().unwrap(),
+        &entry.id,
+    )
+    .await?;
+
+    update_token(&mut db, new_access_token).await?;
+
+    crate::actions::sync()
+}
+
+pub async fn history(
+    FindArgs {
+        needle: name,
+        user,
+        folder,
+        ignorecase,
+    }: FindArgs,
+) -> anyhow::Result<()> {
+    unlock()?;
+
+    let db = load_db().await?;
+    let mut dec = RemoteDecrypter {};
+
+    let desc = format!(
+        "{}{}",
+        user.as_ref().map_or_else(String::new, |s| format!("{s}@")),
+        name
+    );
+
+    let entry = find_entry(&db, name, user.as_deref(), folder.as_deref(), ignorecase)
+        .with_context(|| format!("couldn't find entry for '{desc}'"))?;
+
+    for history in entry.decrypt_history(&mut dec)? {
+        println!("{}: {}", history.last_used_date, history.password);
+    }
+
+    Ok(())
+}
+
+pub fn lock() -> anyhow::Result<()> {
+    ensure_agent()?;
+    crate::actions::lock()
+}
+
+pub fn purge() -> anyhow::Result<()> {
+    stop_agent()?;
+
+    remove_db()
+}
+
+pub fn stop_agent() -> anyhow::Result<()> {
+    crate::actions::quit()
+}
+
+fn ensure_agent() -> anyhow::Result<()> {
+    check_config()?;
+    if matches!(check_agent_version(), Ok(())) {
+        return Ok(());
+    }
+    run_agent()?;
+    check_agent_version()
+}
+
+fn run_agent() -> anyhow::Result<()> {
+    let agent_path = std::env::var_os("RBW_AGENT");
+    let agent_path = agent_path
+        .as_deref()
+        .unwrap_or_else(|| std::ffi::OsStr::from_bytes(b"rbw-agent"));
+    let status = std::process::Command::new(agent_path)
+        .status()
+        .context("failed to run rbw-agent")?;
+    if !status.success() {
+        if let Some(code) = status.code() {
+            if code != 23 {
+                return Err(anyhow::anyhow!("failed to run rbw-agent: {status}"));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+const MISSING_CONFIG_HELP: &str =
+    "Before using rbw, you must configure the email address you would like to \
+    use to log in to the server by running:\n\n    \
+        rbw config set email <email>\n\n\
+    Additionally, if you are using a self-hosted installation, you should \
+    run:\n\n    \
+        rbw config set base_url <url>\n\n\
+    and, if your server has a non-default identity url:\n\n    \
+        rbw config set identity_url <url>\n";
+
+fn check_config() -> anyhow::Result<()> {
+    rbw::config::Config::validate().map_err(|e| {
+        log::error!("{MISSING_CONFIG_HELP}");
+        anyhow::Error::new(e)
+    })
+}
+
+fn check_agent_version() -> anyhow::Result<()> {
+    let client_version = rbw::protocol::VERSION;
+    let agent_version = version_or_quit()?;
+    if agent_version != client_version {
+        crate::actions::quit()?;
+        anyhow::bail!(
+            "client protocol version is {client_version} but agent protocol version is {agent_version}"
+        );
+    }
+    Ok(())
+}
+
+fn version_or_quit() -> anyhow::Result<u32> {
+    crate::actions::version().inspect_err(|_| {
+        let _ = crate::actions::quit();
+    })
+}
+
+async fn load_db() -> anyhow::Result<rbw::db::Db> {
+    let config = rbw::config::Config::load()?;
+
+    let Some(email) = &config.email else {
+        anyhow::bail!("failed to find email address in config");
+    };
+
+    rbw::db::Db::load_async(&config.server_name(), email)
+        .await
+        .map_err(anyhow::Error::new)
+}
+
+async fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {
+    let config = rbw::config::Config::load()?;
+
+    let Some(email) = &config.email else {
+        anyhow::bail!("failed to find email address in config");
+    };
+
+    db.save_async(&config.server_name(), email)
+        .await
+        .map_err(anyhow::Error::new)
 }
 
 fn remove_db() -> anyhow::Result<()> {
     let config = rbw::config::Config::load()?;
-    config.email.as_ref().map_or_else(
-        || Err(anyhow::anyhow!("failed to find email address in config")),
-        |email| {
-            rbw::db::Db::remove(&config.server_name(), email)
-                .map_err(anyhow::Error::new)
-        },
-    )
-}
 
-struct TotpParams {
-    secret: Vec<u8>,
-    algorithm: String,
-    digits: usize,
-    period: u64,
+    let Some(email) = &config.email else {
+        anyhow::bail!("failed to find email address in config");
+    };
+
+    rbw::db::Db::remove(&config.server_name(), email).map_err(anyhow::Error::new)
 }
 
 fn decode_totp_secret(secret: &str) -> anyhow::Result<Vec<u8>> {
@@ -2703,112 +1200,29 @@ fn decode_totp_secret(secret: &str) -> anyhow::Result<Vec<u8>> {
     Err(anyhow::anyhow!("totp secret was not valid base32"))
 }
 
-fn parse_totp_secret(secret: &str) -> anyhow::Result<TotpParams> {
-    if let Ok(u) = url::Url::parse(secret) {
-        match u.scheme() {
-            "otpauth" => {
-                if u.host_str() != Some("totp") {
-                    return Err(anyhow::anyhow!(
-                        "totp secret url must have totp host"
-                    ));
-                }
-
-                let query: std::collections::HashMap<_, _> =
-                    u.query_pairs().collect();
-
-                let secret = decode_totp_secret(
-                    query.get("secret").ok_or_else(|| {
-                        anyhow::anyhow!("totp secret url must have secret")
-                    })?,
-                )?;
-                let algorithm = query.get("algorithm").map_or_else(
-                    || String::from("SHA1"),
-                    std::string::ToString::to_string,
-                );
-                let digits = match query.get("digits") {
-                    Some(dig) => dig
-                        .parse::<usize>()
-                        .map_err(|_| anyhow::anyhow!("digits parameter in totp url must be a valid integer."))?,
-                    None => 6,
-                };
-                let period = match query.get("period") {
-                    Some(dig) => {
-                        dig.parse::<u64>().map_err(|_| anyhow::anyhow!("period parameter in totp url must be a valid integer."))?
-                    }
-                    None => TOTP_DEFAULT_STEP,
-                };
-
-                Ok(TotpParams {
-                    secret,
-                    algorithm,
-                    digits,
-                    period,
-                })
-            }
-            "steam" => {
-                let steam_secret = u.host_str().unwrap();
-
-                Ok(TotpParams {
-                    secret: decode_totp_secret(steam_secret)?,
-                    algorithm: String::from("STEAM"),
-                    digits: 5,
-                    period: TOTP_DEFAULT_STEP,
-                })
-            }
-            _ => Err(anyhow::anyhow!(
-                "totp secret url must have 'otpauth' or 'steam' scheme"
-            )),
-        }
-    } else {
-        Ok(TotpParams {
-            secret: decode_totp_secret(secret)?,
-            algorithm: String::from("SHA1"),
-            digits: 6,
-            period: TOTP_DEFAULT_STEP,
-        })
-    }
-}
-
-// This function exists for the sake of making the generate_totp function less
-// densely packed and more readable
-fn generate_totp_algorithm_type(
-    alg: &str,
-) -> anyhow::Result<totp_rs::Algorithm> {
-    match alg {
-        "SHA1" => Ok(totp_rs::Algorithm::SHA1),
-        "SHA256" => Ok(totp_rs::Algorithm::SHA256),
-        "SHA512" => Ok(totp_rs::Algorithm::SHA512),
-        "STEAM" => Ok(totp_rs::Algorithm::Steam),
-        _ => Err(anyhow::anyhow!(format!("{alg} is not a valid algorithm"))),
-    }
-}
+// The default number of seconds the generated TOTP
+// code lasts for before a new one must be generated
+const TOTP_DEFAULT_STEP: u64 = 30;
 
 fn generate_totp(secret: &str) -> anyhow::Result<String> {
-    let totp_params = parse_totp_secret(secret)?;
-    let alg = totp_params.algorithm.as_str();
+    // Small hack that is not RFC compliant but helps with some services.
+    // Most authenticators have this built-in, included official Bitwarden clients.
+    let secret = secret.replace("algorithm=sha", "algorithm=SHA");
 
-    match alg {
-        "SHA1" | "SHA256" | "SHA512" => Ok(totp_rs::TOTP::new_unchecked(
-            generate_totp_algorithm_type(alg)?,
-            totp_params.digits,
-            1, // the library docs say this should be a 1
-            totp_params.period,
-            totp_params.secret,
-        )
-        .generate_current()?),
-        "STEAM" => Ok(totp_rs::TOTP::new_steam(totp_params.secret)
-            .generate_current()?),
-        _ => Err(anyhow::anyhow!(format!(
-            "{alg} is not a valid totp algorithm"
-        ))),
-    }
-}
+    let totp = match totp_rs::TOTP::from_url(&secret) {
+        Ok(totp) => totp,
+        Err(_e) => totp_rs::TOTP::new_unchecked(
+            totp_rs::Algorithm::SHA1,
+            6,
+            1,
+            TOTP_DEFAULT_STEP,
+            decode_totp_secret(&secret)?,
+            None,
+            "".to_string(),
+        ),
+    };
 
-fn display_field(name: &str, field: Option<&str>, clipboard: bool) -> bool {
-    field.map_or_else(
-        || false,
-        |field| val_display_or_store(clipboard, &format!("{name}: {field}")),
-    )
+    Ok(totp.generate_current()?)
 }
 
 #[cfg(test)]
@@ -2886,25 +1300,11 @@ mod test {
             "BITWARDEN"
         );
         assert!(
-            one_match(
-                entries,
-                "github",
-                Some("foo"),
-                Some("websites"),
-                6,
-                false
-            ),
+            one_match(entries, "github", Some("foo"), Some("websites"), 6, false),
             "websites/foo@github"
         );
         assert!(
-            one_match(
-                entries,
-                "GITHUB",
-                Some("foo"),
-                Some("websites"),
-                6,
-                true
-            ),
+            one_match(entries, "GITHUB", Some("foo"), Some("websites"), 6, true),
             "websites/foo@GITHUB"
         );
         assert!(
@@ -3009,18 +1409,8 @@ mod test {
             make_entry("github", Some("foo"), None, &[]),
             make_entry("gitlab", Some("foo"), None, &[]),
             make_entry("gitlab", Some("bar"), None, &[]),
-            make_entry(
-                "12345678-1234-1234-1234-1234567890ab",
-                None,
-                None,
-                &[],
-            ),
-            make_entry(
-                "12345678-1234-1234-1234-1234567890AC",
-                None,
-                None,
-                &[],
-            ),
+            make_entry("12345678-1234-1234-1234-1234567890ab", None, None, &[]),
+            make_entry("12345678-1234-1234-1234-1234567890AC", None, None, &[]),
             make_entry("123456781234123412341234567890AD", None, None, &[]),
         ];
 
@@ -3109,19 +1499,9 @@ mod test {
         let entries = &[
             make_entry("one", None, None, &[("https://one.com/", None)]),
             make_entry("two", None, None, &[("https://two.com/login", None)]),
-            make_entry(
-                "three",
-                None,
-                None,
-                &[("https://login.three.com/", None)],
-            ),
+            make_entry("three", None, None, &[("https://login.three.com/", None)]),
             make_entry("four", None, None, &[("four.com", None)]),
-            make_entry(
-                "five",
-                None,
-                None,
-                &[("https://five.com:8080/", None)],
-            ),
+            make_entry("five", None, None, &[("https://five.com:8080/", None)]),
             make_entry("six", None, None, &[("six.com:8080", None)]),
             make_entry("seven", None, None, &[("192.168.0.128:8080", None)]),
         ];
@@ -3131,14 +1511,7 @@ mod test {
             "one"
         );
         assert!(
-            one_match(
-                entries,
-                "https://login.one.com/",
-                None,
-                None,
-                0,
-                false
-            ),
+            one_match(entries, "https://login.one.com/", None, None, 0, false),
             "one"
         );
         assert!(
@@ -3158,26 +1531,12 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/other-page", None, None, 1, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3191,14 +1550,7 @@ mod test {
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://five.com:8080/",
-                None,
-                None,
-                4,
-                false
-            ),
+            one_match(entries, "https://five.com:8080/", None, None, 4, false),
             "five"
         );
         assert!(
@@ -3215,14 +1567,7 @@ mod test {
             "six"
         );
         assert!(
-            one_match(
-                entries,
-                "https://192.168.0.128:8080/",
-                None,
-                None,
-                6,
-                false
-            ),
+            one_match(entries, "https://192.168.0.128:8080/", None, None, 6, false),
             "seven"
         );
         assert!(
@@ -3283,10 +1628,7 @@ mod test {
                 "seven",
                 None,
                 None,
-                &[(
-                    "192.168.0.128:8080",
-                    Some(rbw::api::UriMatchType::Domain),
-                )],
+                &[("192.168.0.128:8080", Some(rbw::api::UriMatchType::Domain))],
             ),
         ];
 
@@ -3295,14 +1637,7 @@ mod test {
             "one"
         );
         assert!(
-            one_match(
-                entries,
-                "https://login.one.com/",
-                None,
-                None,
-                0,
-                false
-            ),
+            one_match(entries, "https://login.one.com/", None, None, 0, false),
             "one"
         );
         assert!(
@@ -3322,26 +1657,12 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/other-page", None, None, 1, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3355,14 +1676,7 @@ mod test {
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://five.com:8080/",
-                None,
-                None,
-                4,
-                false
-            ),
+            one_match(entries, "https://five.com:8080/", None, None, 4, false),
             "five"
         );
         assert!(
@@ -3379,14 +1693,7 @@ mod test {
             "six"
         );
         assert!(
-            one_match(
-                entries,
-                "https://192.168.0.128:8080/",
-                None,
-                None,
-                6,
-                false
-            ),
+            one_match(entries, "https://192.168.0.128:8080/", None, None, 6, false),
             "seven"
         );
         assert!(
@@ -3408,10 +1715,7 @@ mod test {
                 "two",
                 None,
                 None,
-                &[(
-                    "https://two.com/login",
-                    Some(rbw::api::UriMatchType::Host),
-                )],
+                &[("https://two.com/login", Some(rbw::api::UriMatchType::Host))],
             ),
             make_entry(
                 "three",
@@ -3432,10 +1736,7 @@ mod test {
                 "five",
                 None,
                 None,
-                &[(
-                    "https://five.com:8080/",
-                    Some(rbw::api::UriMatchType::Host),
-                )],
+                &[("https://five.com:8080/", Some(rbw::api::UriMatchType::Host))],
             ),
             make_entry(
                 "six",
@@ -3476,26 +1777,12 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/other-page", None, None, 1, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3509,14 +1796,7 @@ mod test {
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://five.com:8080/",
-                None,
-                None,
-                4,
-                false
-            ),
+            one_match(entries, "https://five.com:8080/", None, None, 4, false),
             "five"
         );
         assert!(
@@ -3533,14 +1813,7 @@ mod test {
             "six"
         );
         assert!(
-            one_match(
-                entries,
-                "https://192.168.0.128:8080/",
-                None,
-                None,
-                6,
-                false
-            ),
+            one_match(entries, "https://192.168.0.128:8080/", None, None, 6, false),
             "seven"
         );
         assert!(
@@ -3556,10 +1829,7 @@ mod test {
                 "one",
                 None,
                 None,
-                &[(
-                    "https://one.com/",
-                    Some(rbw::api::UriMatchType::StartsWith),
-                )],
+                &[("https://one.com/", Some(rbw::api::UriMatchType::StartsWith))],
             ),
             make_entry(
                 "two",
@@ -3606,14 +1876,7 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/login/sso",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/login/sso", None, None, 1, false),
             "two"
         );
         assert!(
@@ -3621,25 +1884,12 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/other-page", None, None, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3661,10 +1911,7 @@ mod test {
                 "two",
                 None,
                 None,
-                &[(
-                    "https://two.com/login",
-                    Some(rbw::api::UriMatchType::Exact),
-                )],
+                &[("https://two.com/login", Some(rbw::api::UriMatchType::Exact))],
             ),
             make_entry(
                 "three",
@@ -3716,13 +1963,7 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/login/sso",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/login/sso", None, None, false),
             "two"
         );
         assert!(
@@ -3730,25 +1971,12 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/other-page", None, None, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3830,14 +2058,7 @@ mod test {
             "two"
         );
         assert!(
-            one_match(
-                entries,
-                "https://two.com/login/sso",
-                None,
-                None,
-                1,
-                false
-            ),
+            one_match(entries, "https://two.com/login/sso", None, None, 1, false),
             "two"
         );
         assert!(
@@ -3845,25 +2066,12 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/other-page", None, None, false),
             "two"
         );
 
         assert!(
-            one_match(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                2,
-                false
-            ),
+            one_match(entries, "https://login.three.com/", None, None, 2, false),
             "three"
         );
         assert!(
@@ -3889,10 +2097,7 @@ mod test {
                 "two",
                 None,
                 None,
-                &[(
-                    "https://two.com/login",
-                    Some(rbw::api::UriMatchType::Never),
-                )],
+                &[("https://two.com/login", Some(rbw::api::UriMatchType::Never))],
             ),
             make_entry(
                 "three",
@@ -3951,24 +2156,12 @@ mod test {
             "two"
         );
         assert!(
-            no_matches(
-                entries,
-                "https://two.com/other-page",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://two.com/other-page", None, None, false),
             "two"
         );
 
         assert!(
-            no_matches(
-                entries,
-                "https://login.three.com/",
-                None,
-                None,
-                false
-            ),
+            no_matches(entries, "https://login.three.com/", None, None, false),
             "three"
         );
         assert!(
@@ -4008,14 +2201,8 @@ mod test {
                 None,
                 None,
                 &[
-                    (
-                        "https://one.com/",
-                        Some(rbw::api::UriMatchType::Domain),
-                    ),
-                    (
-                        "https://two.com/",
-                        Some(rbw::api::UriMatchType::Domain),
-                    ),
+                    ("https://one.com/", Some(rbw::api::UriMatchType::Domain)),
+                    ("https://two.com/", Some(rbw::api::UriMatchType::Domain)),
                 ],
             ),
             make_entry(
@@ -4052,7 +2239,7 @@ mod test {
 
     #[track_caller]
     fn one_match(
-        entries: &[(rbw::db::Entry, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -4062,7 +2249,7 @@ mod test {
         entries_eq(
             &find_entry_raw(
                 entries,
-                &parse_needle(needle).unwrap(),
+                &needle.parse().unwrap(),
                 username,
                 folder,
                 ignore_case,
@@ -4074,7 +2261,7 @@ mod test {
 
     #[track_caller]
     fn no_matches(
-        entries: &[(rbw::db::Entry, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -4082,7 +2269,7 @@ mod test {
     ) -> bool {
         let res = find_entry_raw(
             entries,
-            &parse_needle(needle).unwrap(),
+            &needle.parse().unwrap(),
             username,
             folder,
             ignore_case,
@@ -4096,7 +2283,7 @@ mod test {
 
     #[track_caller]
     fn many_matches(
-        entries: &[(rbw::db::Entry, DecryptedSearchCipher)],
+        entries: &[(rbw::db::Entry<Encrypted>, SearchEntry)],
         needle: &str,
         username: Option<&str>,
         folder: Option<&str>,
@@ -4104,7 +2291,7 @@ mod test {
     ) -> bool {
         let res = find_entry_raw(
             entries,
-            &parse_needle(needle).unwrap(),
+            &needle.parse().unwrap(),
             username,
             folder,
             ignore_case,
@@ -4118,8 +2305,8 @@ mod test {
 
     #[track_caller]
     fn entries_eq(
-        a: &(rbw::db::Entry, DecryptedSearchCipher),
-        b: &(rbw::db::Entry, DecryptedSearchCipher),
+        a: &(rbw::db::Entry<Encrypted>, SearchEntry),
+        b: &(rbw::db::Entry<Encrypted>, SearchEntry),
     ) -> bool {
         a.0 == b.0 && a.1 == b.1
     }
@@ -4129,19 +2316,17 @@ mod test {
         username: Option<&str>,
         folder: Option<&str>,
         uris: &[(&str, Option<rbw::api::UriMatchType>)],
-    ) -> (rbw::db::Entry, DecryptedSearchCipher) {
+    ) -> (rbw::db::Entry<Encrypted>, SearchEntry) {
         let id = uuid::Uuid::new_v4();
         (
-            rbw::db::Entry {
+            rbw::db::Entry::<Encrypted> {
                 id: id.to_string(),
                 org_id: None,
                 folder: folder.map(|_| "encrypted folder name".to_string()),
                 folder_id: None,
                 name: "this is the encrypted name".to_string(),
                 data: rbw::db::EntryData::Login {
-                    username: username.map(|_| {
-                        "this is the encrypted username".to_string()
-                    }),
+                    username: username.map(|_| "this is the encrypted username".to_string()),
                     password: None,
                     uris: uris
                         .iter()
@@ -4157,18 +2342,17 @@ mod test {
                 history: vec![],
                 key: None,
                 master_password_reprompt: rbw::api::CipherRepromptType::None,
+                _state: std::marker::PhantomData,
             },
-            DecryptedSearchCipher {
+            SearchEntry {
                 id: id.to_string(),
                 entry_type: "Login".to_string(),
-                folder: folder.map(std::string::ToString::to_string),
+                folder: folder.map(ToString::to_string),
                 name: name.to_string(),
-                user: username.map(std::string::ToString::to_string),
+                user: username.map(ToString::to_string),
                 uris: uris
                     .iter()
-                    .map(|(uri, match_type)| {
-                        ((*uri).to_string(), *match_type)
-                    })
+                    .map(|(uri, match_type)| ((*uri).to_string(), *match_type))
                     .collect(),
                 fields: vec![],
                 notes: None,
