@@ -94,19 +94,6 @@ impl Agent {
         state
     }
 
-    pub async fn key(&self, org_id: Option<&str>) -> Option<Arc<rbw::locked::Keys>> {
-        match org_id {
-            Some(id) => self
-                .inner
-                .org_keys
-                .read()
-                .await
-                .as_ref()
-                .and_then(|h| h.get(id).cloned()),
-            None => self.inner.priv_key.read().await.clone(),
-        }
-    }
-
     pub async fn set_keys(
         &self,
         priv_key: rbw::locked::Keys,

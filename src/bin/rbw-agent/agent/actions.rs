@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{collections::HashMap, future::Future, sync::Arc};
 
 use anyhow::Context as _;
 use rbw::{
@@ -412,10 +412,10 @@ impl Agent {
 
     async fn refresh_decrypted_entries(&self) -> anyhow::Result<()> {
         let db = self.inner.db.read().await;
+        let mut dec = self.decrypter().await?;
         let mut decrypted = Vec::with_capacity(db.entries.len());
 
         for entry in &db.entries {
-            let mut dec = self.decrypter_for_entry(entry).await?;
             decrypted.push(entry.decrypt_non_sensitive(&mut dec)?);
         }
 
@@ -433,31 +433,28 @@ impl Agent {
         self.inner.decrypted_entries.read().await
     }
 
-    async fn decrypter_for_entry(&self, entry: &rbw::db::Entry) -> anyhow::Result<LocalDecrypter> {
-        let org_id = entry.org_id.as_deref();
-        let keys = self
-            .key(org_id)
+    async fn decrypter(&self) -> anyhow::Result<LocalDecrypter> {
+        let priv_key = self
+            .inner
+            .priv_key
+            .read()
             .await
-            .ok_or_else(|| anyhow::anyhow!("failed to find decryption keys"))?;
-        let entry_key = decrypt_entry_key(entry.key.as_deref(), keys.as_ref())?;
-        Ok(LocalDecrypter { keys, entry_key })
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("no personal keys"))?;
+        let org_keys = self.inner.org_keys.read().await.clone().unwrap_or_default();
+        Ok(LocalDecrypter { priv_key, org_keys })
     }
 
-    async fn encrypter_for_entry(&self, entry: &rbw::db::Entry) -> anyhow::Result<LocalEncrypter> {
-        let org_id = entry.org_id.as_deref();
-        let keys = self
-            .key(org_id)
+    async fn encrypter(&self) -> anyhow::Result<LocalEncrypter> {
+        let priv_key = self
+            .inner
+            .priv_key
+            .read()
             .await
-            .ok_or_else(|| anyhow::anyhow!("failed to find encryption keys"))?;
-        Ok(LocalEncrypter { keys })
-    }
-
-    async fn encrypter_for_none(&self) -> anyhow::Result<LocalEncrypter> {
-        let keys = self
-            .key(None)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("failed to find encryption keys"))?;
-        Ok(LocalEncrypter { keys })
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("no personal keys"))?;
+        let org_keys = self.inner.org_keys.read().await.clone().unwrap_or_default();
+        Ok(LocalEncrypter { priv_key, org_keys })
     }
 
     async fn update_token(&self, new_token: Option<String>) -> anyhow::Result<()> {
@@ -485,14 +482,7 @@ impl Agent {
         drop(db);
         self.update_token(new_access_token).await?;
 
-        let keys = self
-            .key(None)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("no keys"))?;
-        let mut dec = LocalDecrypter {
-            keys: keys.clone(),
-            entry_key: None,
-        };
+        let mut dec = self.decrypter().await?;
 
         let mut folder_id = None;
         for (id, name) in folders {
@@ -515,7 +505,7 @@ impl Agent {
                 .refresh_token
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("no refresh token"))?;
-            let mut enc = LocalEncrypter { keys };
+            let mut enc = self.encrypter().await?;
             let enc_folder = enc.encrypt_field(None, folder)?;
             let (new_access_token, id) =
                 rbw::actions::create_folder(access_token, refresh_token, &enc_folder).await?;
@@ -542,7 +532,7 @@ impl Agent {
         drop(guard);
 
         let mut entry = partial_entry.clone();
-        let mut dec = self.decrypter_for_entry(&entry).await?;
+        let mut dec = self.decrypter().await?;
         entry
             .fill_sensitive_fields(&mut dec)
             .map_err(anyhow::Error::new)?;
@@ -601,7 +591,7 @@ impl Agent {
             return Err(anyhow::anyhow!("not a login entry or no totp secret"));
         };
 
-        let mut dec = self.decrypter_for_entry(&partial_entry).await?;
+        let mut dec = self.decrypter().await?;
         let totp = partial_entry
             .decrypt_string(totp_enc, &mut dec)
             .map_err(anyhow::Error::new)?;
@@ -623,7 +613,7 @@ impl Agent {
     ) -> anyhow::Result<()> {
         self.unlock_state(environment).await?;
 
-        let mut enc = self.encrypter_for_none().await?;
+        let mut enc = self.encrypter().await?;
         let name = enc.encrypt_field(None, name)?;
         let username = username
             .map(|username| enc.encrypt_field(None, username))
@@ -705,7 +695,7 @@ impl Agent {
         drop(db);
 
         let mut entry = entry;
-        let mut enc = self.encrypter_for_entry(&entry).await?;
+        let mut enc = self.encrypter().await?;
 
         if let Some(password) = password {
             if let EntryData::Login { .. } = &entry.data {
@@ -806,7 +796,7 @@ impl Agent {
             .await?;
         drop(guard);
 
-        let mut dec = self.decrypter_for_entry(&partial_entry).await?;
+        let mut dec = self.decrypter().await?;
         let history = partial_entry
             .decrypt_history(&mut dec)
             .map_err(anyhow::Error::new)?;
@@ -923,7 +913,7 @@ impl Agent {
         let mut pubkeys = vec![];
 
         for entry in ssh_entries {
-            let mut dec = self.decrypter_for_entry(&entry).await?;
+            let mut dec = self.decrypter().await?;
             if let EntryData::SshKey {
                 public_key: Some(pubkey),
                 ..
@@ -973,7 +963,7 @@ impl Agent {
         drop(db);
 
         for entry in ssh_entries {
-            let mut dec = self.decrypter_for_entry(&entry).await?;
+            let mut dec = self.decrypter().await?;
 
             let pub_plain = if let EntryData::SshKey {
                 public_key: Some(pubkey),
@@ -1042,18 +1032,34 @@ impl Agent {
 }
 
 struct LocalDecrypter {
-    keys: std::sync::Arc<rbw::locked::Keys>,
-    entry_key: Option<rbw::locked::Keys>,
+    priv_key: Arc<rbw::locked::Keys>,
+    org_keys: HashMap<String, Arc<rbw::locked::Keys>>,
 }
 
 impl rbw::db::Decrypter for LocalDecrypter {
     fn decrypt_field(
         &mut self,
-        _entry: Option<&rbw::db::Entry>,
+        entry: Option<&rbw::db::Entry>,
         field: &str,
     ) -> rbw::error::Result<String> {
+        let keys = match entry.and_then(|e| e.org_id.as_deref()) {
+            Some(org_id) => self
+                .org_keys
+                .get(org_id)
+                .ok_or_else(|| rbw::error::Error::UnavailableDbSessionParameters("org key"))?,
+            None => &self.priv_key,
+        };
+        let entry_key = entry
+            .and_then(|e| e.key.as_deref())
+            .map(|ek| {
+                let cs = rbw::cipherstring::CipherString::new(ek)?;
+                Ok::<_, rbw::error::Error>(rbw::locked::Keys::new(
+                    cs.decrypt_locked_symmetric(keys.as_ref())?,
+                ))
+            })
+            .transpose()?;
         let cs = rbw::cipherstring::CipherString::new(field)?;
-        let plaintext = cs.decrypt_symmetric(self.keys.as_ref(), self.entry_key.as_ref())?;
+        let plaintext = cs.decrypt_symmetric(keys.as_ref(), entry_key.as_ref())?;
         String::from_utf8(plaintext).map_err(|e| rbw::error::Error::Utf8Error {
             source: e.utf8_error(),
         })
@@ -1061,37 +1067,27 @@ impl rbw::db::Decrypter for LocalDecrypter {
 }
 
 struct LocalEncrypter {
-    keys: std::sync::Arc<rbw::locked::Keys>,
+    priv_key: Arc<rbw::locked::Keys>,
+    org_keys: HashMap<String, Arc<rbw::locked::Keys>>,
 }
 
 impl rbw::db::Encrypter for LocalEncrypter {
     fn encrypt_field(
         &mut self,
-        _entry: Option<&rbw::db::Entry>,
+        entry: Option<&rbw::db::Entry>,
         field: &str,
     ) -> rbw::error::Result<String> {
-        let cs = rbw::cipherstring::CipherString::encrypt_symmetric(
-            self.keys.as_ref(),
-            field.as_bytes(),
-        )?;
+        let keys = match entry.and_then(|e| e.org_id.as_deref()) {
+            Some(org_id) => self
+                .org_keys
+                .get(org_id)
+                .ok_or_else(|| rbw::error::Error::UnavailableDbSessionParameters("org key"))?,
+            None => &self.priv_key,
+        };
+        let cs =
+            rbw::cipherstring::CipherString::encrypt_symmetric(keys.as_ref(), field.as_bytes())?;
         Ok(cs.to_string())
     }
-}
-
-fn decrypt_entry_key(
-    entry_key: Option<&str>,
-    keys: &rbw::locked::Keys,
-) -> anyhow::Result<Option<rbw::locked::Keys>> {
-    entry_key
-        .map(|ek| {
-            let cs = rbw::cipherstring::CipherString::new(ek)
-                .context("failed to parse individual item encryption key")?;
-            Ok(rbw::locked::Keys::new(
-                cs.decrypt_locked_symmetric(keys)
-                    .context("failed to decrypt individual item encryption key")?,
-            ))
-        })
-        .transpose()
 }
 
 async fn respond_ack(sock: &mut crate::sock::Sock) -> anyhow::Result<()> {
