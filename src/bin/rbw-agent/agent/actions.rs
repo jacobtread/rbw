@@ -3,10 +3,9 @@ use std::future::Future;
 use anyhow::Context as _;
 use rbw::{
     actions::SessionParameters,
-    db::{Db, EntryData},
+    db::{Db, Decrypter, Encrypter, EntryData},
     error::{Error, Result},
 };
-use sha2::Digest as _;
 
 use crate::agent::Agent;
 
@@ -256,6 +255,8 @@ impl Agent {
                         .await
                     {
                         Ok(creds) => Ok((creds, password)),
+                        // Handling Err manually instead of letting with_retry handle it, because
+                        // "e" might be "IncorrectPassword" if the user fails to input the TOTP.
                         Err(e) => Err(anyhow::anyhow!("2FA verification failed: {e}")),
                     }?;
 
@@ -348,10 +349,6 @@ impl Agent {
 
         log::trace!("Sync operation finished");
 
-        self.set_master_password_reprompt(&entries).await;
-
-        log::trace!("Set master password reprompt");
-
         // And then update the local cached copy of the db
         {
             let mut db = self.inner.db.write().await;
@@ -370,6 +367,10 @@ impl Agent {
 
         log::trace!("Updated disk db");
 
+        self.refresh_decrypted_entries().await?;
+
+        log::trace!("Refreshed decrypted entries cache");
+
         if let Err(e) = self.subscribe_to_notifications().await {
             eprintln!("failed to subscribe to notifications: {e}");
         }
@@ -381,79 +382,437 @@ impl Agent {
         Ok(())
     }
 
-    async fn decrypt_cipher(
+    async fn maybe_reprompt_password(
         &self,
         environment: &rbw::protocol::Environment,
-        cipherstring: &str,
-        entry_key: Option<&str>,
-        org_id: Option<&str>,
-    ) -> anyhow::Result<String> {
-        self.initialize_mpr().await;
-
-        let Some(keys) = self.key(org_id).await else {
-            return Err(anyhow::anyhow!(
-                "failed to find decryption keys in in-memory state"
-            ));
-        };
-
-        let entry_key = decrypt_entry_key(entry_key, keys.as_ref())?;
-
-        self.maybe_reprompt_password(environment, cipherstring)
-            .await?;
-
-        let cipherstring = rbw::cipherstring::CipherString::new(cipherstring)
-            .context("failed to parse encrypted secret")?;
-
-        // BUG: This is sensible memory and should be handled more carefully (locked)
-        let plaintext = String::from_utf8(
-            cipherstring
-                .decrypt_symmetric(keys.as_ref(), entry_key.as_ref())
-                .context("failed to decrypt encrypted secret")?,
-        )
-        .context("failed to parse decrypted secret")?;
-
-        Ok(plaintext)
-    }
-
-    pub async fn decrypt(
-        &self,
-        sock: &mut crate::sock::Sock,
-        environment: &rbw::protocol::Environment,
-        cipherstring: &str,
-        entry_key: Option<&str>,
-        org_id: Option<&str>,
+        entry: &rbw::db::Entry,
     ) -> anyhow::Result<()> {
-        let plaintext = self
-            .decrypt_cipher(environment, cipherstring, entry_key, org_id)
-            .await?;
+        if entry.master_password_reprompt() {
+            log::trace!("Requesting password reprompt for entry '{}'", entry.name);
 
-        sock.send(&rbw::protocol::Response::Decrypt { plaintext })
-            .await?;
+            with_retry(|err| async move {
+                let password = self
+                    .get_password(
+                        "Accessing this entry requires the master password",
+                        &err,
+                        environment,
+                    )
+                    .await?;
+
+                Ok(self.try_unlock(&password).await?)
+            })
+            .await
+            .context("failed to reprompt for master password")?;
+
+            log::trace!("Password correct, reprompt successful");
+        }
 
         Ok(())
     }
 
-    pub async fn encrypt(
+    async fn refresh_decrypted_entries(&self) -> anyhow::Result<()> {
+        let db = self.inner.db.read().await;
+        let mut decrypted = Vec::with_capacity(db.entries.len());
+
+        for entry in &db.entries {
+            let mut dec = self.decrypter_for_entry(entry).await?;
+            decrypted.push(entry.decrypt_non_sensitive(&mut dec)?);
+        }
+
+        drop(db);
+
+        let mut cache = self.inner.decrypted_entries.write().await;
+        *cache = Some(decrypted);
+
+        Ok(())
+    }
+
+    async fn get_decrypted_entries(
         &self,
-        sock: &mut crate::sock::Sock,
-        plaintext: &str,
-        org_id: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let Some(keys) = self.key(org_id).await else {
-            return Err(anyhow::anyhow!(
-                "failed to find encryption keys in in-memory state"
-            ));
+    ) -> tokio::sync::RwLockReadGuard<'_, Option<Vec<rbw::db::Entry>>> {
+        self.inner.decrypted_entries.read().await
+    }
+
+    async fn decrypter_for_entry(&self, entry: &rbw::db::Entry) -> anyhow::Result<LocalDecrypter> {
+        let org_id = entry.org_id.as_deref();
+        let keys = self
+            .key(org_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("failed to find decryption keys"))?;
+        let entry_key = decrypt_entry_key(entry.key.as_deref(), keys.as_ref())?;
+        Ok(LocalDecrypter { keys, entry_key })
+    }
+
+    async fn encrypter_for_entry(&self, entry: &rbw::db::Entry) -> anyhow::Result<LocalEncrypter> {
+        let org_id = entry.org_id.as_deref();
+        let keys = self
+            .key(org_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("failed to find encryption keys"))?;
+        Ok(LocalEncrypter { keys })
+    }
+
+    async fn encrypter_for_none(&self) -> anyhow::Result<LocalEncrypter> {
+        let keys = self
+            .key(None)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("failed to find encryption keys"))?;
+        Ok(LocalEncrypter { keys })
+    }
+
+    async fn update_token(&self, new_token: Option<String>) -> anyhow::Result<()> {
+        if let Some(new_token) = new_token {
+            let mut db = self.inner.db.write().await;
+            if db.update_access_token(Some(new_token)) {
+                db.save_async(&self.server_name(), self.email()?).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn find_or_create_folder(&self, folder: &str) -> anyhow::Result<String> {
+        let db = self.inner.db.read().await;
+        let access_token = db
+            .access_token
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no access token"))?;
+        let refresh_token = db
+            .refresh_token
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no refresh token"))?;
+        let (new_access_token, folders) =
+            rbw::actions::list_folders(access_token, refresh_token).await?;
+        drop(db);
+        self.update_token(new_access_token).await?;
+
+        let keys = self
+            .key(None)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("no keys"))?;
+        let mut dec = LocalDecrypter {
+            keys: keys.clone(),
+            entry_key: None,
         };
 
-        let cipherstring =
-            rbw::cipherstring::CipherString::encrypt_symmetric(keys.as_ref(), plaintext.as_bytes())
-                .context("failed to encrypt plaintext secret")?;
+        let mut folder_id = None;
+        for (id, name) in folders {
+            let decrypted_name = dec.decrypt_field(None, &name)?;
+            if decrypted_name == folder {
+                folder_id = Some(id);
+                break;
+            }
+        }
 
-        sock.send(&rbw::protocol::Response::Encrypt {
-            cipherstring: cipherstring.to_string(),
-        })
+        if let Some(folder_id) = folder_id {
+            Ok(folder_id)
+        } else {
+            let db = self.inner.db.read().await;
+            let access_token = db
+                .access_token
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("no access token"))?;
+            let refresh_token = db
+                .refresh_token
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("no refresh token"))?;
+            let mut enc = LocalEncrypter { keys };
+            let enc_folder = enc.encrypt_field(None, folder)?;
+            let (new_access_token, id) =
+                rbw::actions::create_folder(access_token, refresh_token, &enc_folder).await?;
+            drop(db);
+            self.update_token(new_access_token).await?;
+            Ok(id)
+        }
+    }
+
+    pub async fn get(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+        find: &rbw::protocol::FindArgs,
+    ) -> anyhow::Result<()> {
+        self.unlock_state(environment).await?;
+        let guard = self.get_decrypted_entries().await;
+        let decrypted_entries = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+        let partial_entry = rbw::search::find_entry(decrypted_entries, find)?;
+        self.maybe_reprompt_password(environment, &partial_entry)
+            .await?;
+        drop(guard);
+
+        let mut entry = partial_entry.clone();
+        let mut dec = self.decrypter_for_entry(&entry).await?;
+        entry
+            .fill_sensitive_fields(&mut dec)
+            .map_err(anyhow::Error::new)?;
+
+        sock.send(&rbw::protocol::Response::Get { entry }).await?;
+        Ok(())
+    }
+
+    pub async fn search(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+        term: &str,
+        folder: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.unlock_state(environment).await?;
+        let guard = self.get_decrypted_entries().await;
+        let decrypted_entries = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+        let mut entries: Vec<rbw::search::SearchEntry> = decrypted_entries
+            .iter()
+            .filter(|entry| {
+                let search_entry: rbw::search::SearchEntry = (*entry).into();
+                search_entry.search_match(term, folder)
+            })
+            .map(|entry| entry.into())
+            .collect();
+        entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+        sock.send(&rbw::protocol::Response::Search { entries })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn code(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+        find: &rbw::protocol::FindArgs,
+    ) -> anyhow::Result<()> {
+        self.unlock_state(environment).await?;
+        let guard = self.get_decrypted_entries().await;
+        let decrypted_entries = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+        let partial_entry = rbw::search::find_entry(decrypted_entries, find)?;
+        self.maybe_reprompt_password(environment, &partial_entry)
+            .await?;
+        drop(guard);
+
+        let EntryData::Login {
+            totp: Some(totp_enc),
+            ..
+        } = &partial_entry.data
+        else {
+            return Err(anyhow::anyhow!("not a login entry or no totp secret"));
+        };
+
+        let mut dec = self.decrypter_for_entry(&partial_entry).await?;
+        let totp = partial_entry
+            .decrypt_string(totp_enc, &mut dec)
+            .map_err(anyhow::Error::new)?;
+        let code = rbw::totp::generate_totp(&totp)?;
+        sock.send(&rbw::protocol::Response::Code { code }).await?;
+        Ok(())
+    }
+
+    pub async fn add(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+        name: &str,
+        username: Option<&str>,
+        uris: &[(String, Option<rbw::api::UriMatchType>)],
+        folder: Option<&str>,
+        password: Option<&str>,
+        notes: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.unlock_state(environment).await?;
+
+        let mut enc = self.encrypter_for_none().await?;
+        let name = enc.encrypt_field(None, name)?;
+        let username = username
+            .map(|username| enc.encrypt_field(None, username))
+            .transpose()?;
+        let password = password
+            .map(|password| enc.encrypt_field(None, password))
+            .transpose()?;
+        let notes = notes
+            .map(|notes| enc.encrypt_field(None, notes))
+            .transpose()?;
+        let uris: Vec<rbw::db::Uri> = uris
+            .iter()
+            .map(|(uri, match_type)| {
+                Ok(rbw::db::Uri {
+                    uri: enc.encrypt_field(None, uri)?,
+                    match_type: *match_type,
+                })
+            })
+            .collect::<anyhow::Result<_>>()?;
+
+        let folder_id = match folder {
+            Some(folder) => Some(self.find_or_create_folder(folder).await?),
+            None => None,
+        };
+
+        let db = self.inner.db.read().await;
+        let access_token = db
+            .access_token
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no access token"))?;
+        let refresh_token = db
+            .refresh_token
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no refresh token"))?;
+        let (new_access_token, ()) = rbw::actions::add(
+            access_token,
+            refresh_token,
+            &name,
+            &rbw::db::EntryData::Login {
+                username,
+                password,
+                uris,
+                totp: None,
+            },
+            notes.as_deref(),
+            folder_id.as_deref(),
+        )
         .await?;
+        drop(db);
+        self.update_token(new_access_token).await?;
+        self.sync(Some(sock)).await
+    }
 
+    pub async fn edit(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+        find: &rbw::protocol::FindArgs,
+        password: Option<&str>,
+        notes: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.unlock_state(environment).await?;
+        let guard = self.get_decrypted_entries().await;
+        let decrypted_entries = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+        let dec_entry = rbw::search::find_entry(decrypted_entries, find)?;
+        self.maybe_reprompt_password(environment, &dec_entry)
+            .await?;
+        let id = dec_entry.id;
+
+        let db = self.inner.db.read().await;
+        let entry = db
+            .entries
+            .iter()
+            .find(|e| e.id == id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("entry not found in database"))?;
+        drop(db);
+
+        let mut entry = entry;
+        let mut enc = self.encrypter_for_entry(&entry).await?;
+
+        if let Some(password) = password {
+            if let EntryData::Login { .. } = &entry.data {
+                let encrypted = if password.is_empty() {
+                    None
+                } else {
+                    Some(enc.encrypt_field(Some(&entry), password)?)
+                };
+                if let EntryData::Login {
+                    password: cur_pw, ..
+                } = &mut entry.data
+                {
+                    if let Some(prev) = cur_pw.take() {
+                        if !prev.is_empty() {
+                            entry.history.insert(
+                                0,
+                                rbw::db::HistoryEntry {
+                                    last_used_date: format!(
+                                        "{}",
+                                        humantime::format_rfc3339(std::time::SystemTime::now())
+                                    ),
+                                    password: prev,
+                                },
+                            );
+                        }
+                    }
+                    *cur_pw = encrypted;
+                }
+            }
+        }
+
+        if let Some(notes) = notes {
+            if notes.is_empty() {
+                entry.notes = None;
+            } else {
+                entry.notes = Some(enc.encrypt_field(Some(&entry), notes)?);
+            }
+        }
+
+        let db = self.inner.db.read().await;
+        let access_token = db
+            .access_token
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no access token"))?;
+        let refresh_token = db
+            .refresh_token
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no refresh token"))?;
+        let (new_access_token, ()) =
+            rbw::actions::edit(access_token, refresh_token, &entry).await?;
+        drop(db);
+        self.update_token(new_access_token).await?;
+        self.sync(Some(sock)).await
+    }
+
+    pub async fn remove(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+        find: &rbw::protocol::FindArgs,
+    ) -> anyhow::Result<()> {
+        self.unlock_state(environment).await?;
+        let guard = self.get_decrypted_entries().await;
+        let decrypted_entries = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+        let entry = rbw::search::find_entry(decrypted_entries, find)?;
+
+        let db = self.inner.db.read().await;
+        let access_token = db
+            .access_token
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no access token"))?;
+        let refresh_token = db
+            .refresh_token
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no refresh token"))?;
+        let (new_access_token, ()) =
+            rbw::actions::remove(access_token, refresh_token, &entry.id).await?;
+        drop(db);
+        self.update_token(new_access_token).await?;
+        self.sync(Some(sock)).await
+    }
+
+    pub async fn history(
+        &self,
+        sock: &mut crate::sock::Sock,
+        environment: &rbw::protocol::Environment,
+        find: &rbw::protocol::FindArgs,
+    ) -> anyhow::Result<()> {
+        self.unlock_state(environment).await?;
+        let guard = self.get_decrypted_entries().await;
+        let decrypted_entries = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+        let partial_entry = rbw::search::find_entry(decrypted_entries, find)?;
+        self.maybe_reprompt_password(environment, &partial_entry)
+            .await?;
+        drop(guard);
+
+        let mut dec = self.decrypter_for_entry(&partial_entry).await?;
+        let history = partial_entry
+            .decrypt_history(&mut dec)
+            .map_err(anyhow::Error::new)?;
+
+        sock.send(&rbw::protocol::Response::History { entries: history })
+            .await?;
         Ok(())
     }
 
@@ -475,7 +834,6 @@ impl Agent {
     }
 
     #[cfg(not(feature = "clipboard"))]
-
     pub async fn clipboard_store(
         &self,
         sock: &mut crate::sock::Sock,
@@ -507,6 +865,12 @@ impl Agent {
 
         self.set_keys(keys, org_keys).await;
 
+        drop(db);
+
+        self.refresh_decrypted_entries()
+            .await
+            .expect("failed to refresh decrypted entries cache");
+
         Ok(())
     }
 
@@ -530,50 +894,6 @@ impl Agent {
         Ok(())
     }
 
-    async fn maybe_reprompt_password(
-        &self,
-        environment: &rbw::protocol::Environment,
-        cipherstring: &str,
-    ) -> anyhow::Result<()> {
-        let mut sha256 = sha2::Sha256::new();
-        sha256.update(cipherstring);
-        let master_password_reprompt: [u8; 32] = sha256.finalize().into();
-
-        if self
-            .inner
-            .master_password_reprompt
-            .read()
-            .await
-            .contains(&master_password_reprompt)
-        {
-            log::trace!(
-                "Requesting password reprompt for item {:#?}",
-                master_password_reprompt
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>()
-            );
-
-            with_retry(|err| async move {
-                let password = self
-                    .get_password(
-                        "Accessing this entry requires the master password",
-                        &err,
-                        environment,
-                    )
-                    .await?;
-
-                Ok(self.try_unlock(&password).await?)
-            })
-            .await
-            .context("failed to unlock database")?;
-
-            log::trace!("Password correct, reprompt successful");
-        }
-
-        Ok(())
-    }
-
     pub async fn get_ssh_public_keys(&self) -> anyhow::Result<Vec<String>> {
         let environment = { self.last_environment().await.clone() };
 
@@ -584,32 +904,37 @@ impl Agent {
         self.unlock_state(&environment).await?;
 
         let db = self.inner.db.read().await;
-
-        let enc_pubkeys: Vec<(String, Option<String>, Option<String>)> = db
+        let ssh_entries: Vec<_> = db
             .entries
             .iter()
-            .filter_map(|e| {
-                if let EntryData::SshKey {
-                    public_key: Some(pubkey),
-                    ..
-                } = &e.data
-                {
-                    Some((pubkey.clone(), e.key.clone(), e.org_id.clone()))
-                } else {
-                    None
-                }
+            .filter(|e| {
+                matches!(
+                    &e.data,
+                    EntryData::SshKey {
+                        public_key: Some(_),
+                        ..
+                    }
+                )
             })
+            .cloned()
             .collect();
-
         drop(db);
 
         let mut pubkeys = vec![];
 
-        for (e, entry_key, org_id) in enc_pubkeys {
-            let pubkey = self
-                .decrypt_cipher(&environment, &e, entry_key.as_deref(), org_id.as_deref())
-                .await?;
-            pubkeys.push(pubkey);
+        for entry in ssh_entries {
+            let mut dec = self.decrypter_for_entry(&entry).await?;
+            if let EntryData::SshKey {
+                public_key: Some(pubkey),
+                ..
+            } = &entry.data
+            {
+                pubkeys.push(
+                    entry
+                        .decrypt_string(pubkey, &mut dec)
+                        .map_err(anyhow::Error::new)?,
+                );
+            }
         }
 
         Ok(pubkeys)
@@ -630,28 +955,37 @@ impl Agent {
         let request_bytes = request_public_key.to_bytes();
 
         let db = self.inner.db.read().await;
-
-        // Collect all ssh keys that are Some()
-        let keys: Vec<(&String, &String, &Option<String>, &Option<String>)> = db
+        let ssh_entries: Vec<_> = db
             .entries
             .iter()
-            .filter_map(|e| match &e.data {
-                rbw::db::EntryData::SshKey {
-                    private_key,
-                    public_key,
-                    ..
-                } => match (public_key, private_key) {
-                    (Some(public), Some(private)) => Some((public, private, &e.key, &e.org_id)),
-                    _ => None,
-                },
-                _ => None,
+            .filter(|e| {
+                matches!(
+                    &e.data,
+                    EntryData::SshKey {
+                        public_key: Some(_),
+                        private_key: Some(_),
+                        ..
+                    }
+                )
             })
+            .cloned()
             .collect();
+        drop(db);
 
-        for (public, private, key, org_id) in keys {
-            let pub_plain = self
-                .decrypt_cipher(&environment, public, key.as_deref(), org_id.as_deref())
-                .await?;
+        for entry in ssh_entries {
+            let mut dec = self.decrypter_for_entry(&entry).await?;
+
+            let pub_plain = if let EntryData::SshKey {
+                public_key: Some(pubkey),
+                ..
+            } = &entry.data
+            {
+                entry
+                    .decrypt_string(pubkey, &mut dec)
+                    .map_err(anyhow::Error::new)?
+            } else {
+                continue;
+            };
 
             let pub_bytes = ssh_agent_lib::ssh_key::PublicKey::from_openssh(&pub_plain)?.to_bytes();
 
@@ -659,11 +993,21 @@ impl Agent {
                 continue;
             }
 
-            let priv_plain = self
-                .decrypt_cipher(&environment, private, key.as_deref(), org_id.as_deref())
-                .await?;
+            self.maybe_reprompt_password(&environment, &entry).await?;
 
-            return ssh_agent_lib::ssh_key::PrivateKey::from_openssh(priv_plain)
+            let priv_plain = if let EntryData::SshKey {
+                private_key: Some(privkey),
+                ..
+            } = &entry.data
+            {
+                entry
+                    .decrypt_string(privkey, &mut dec)
+                    .map_err(anyhow::Error::new)?
+            } else {
+                continue;
+            };
+
+            return ssh_agent_lib::ssh_key::PrivateKey::from_openssh(&priv_plain)
                 .map_err(anyhow::Error::new);
         }
 
@@ -694,6 +1038,43 @@ impl Agent {
             .await
             .err()
             .map_or_else(|| Ok(()), |err| Err(anyhow::anyhow!(err.to_string())))
+    }
+}
+
+struct LocalDecrypter {
+    keys: std::sync::Arc<rbw::locked::Keys>,
+    entry_key: Option<rbw::locked::Keys>,
+}
+
+impl rbw::db::Decrypter for LocalDecrypter {
+    fn decrypt_field(
+        &mut self,
+        _entry: Option<&rbw::db::Entry>,
+        field: &str,
+    ) -> rbw::error::Result<String> {
+        let cs = rbw::cipherstring::CipherString::new(field)?;
+        let plaintext = cs.decrypt_symmetric(self.keys.as_ref(), self.entry_key.as_ref())?;
+        String::from_utf8(plaintext).map_err(|e| rbw::error::Error::Utf8Error {
+            source: e.utf8_error(),
+        })
+    }
+}
+
+struct LocalEncrypter {
+    keys: std::sync::Arc<rbw::locked::Keys>,
+}
+
+impl rbw::db::Encrypter for LocalEncrypter {
+    fn encrypt_field(
+        &mut self,
+        _entry: Option<&rbw::db::Entry>,
+        field: &str,
+    ) -> rbw::error::Result<String> {
+        let cs = rbw::cipherstring::CipherString::encrypt_symmetric(
+            self.keys.as_ref(),
+            field.as_bytes(),
+        )?;
+        Ok(cs.to_string())
     }
 }
 

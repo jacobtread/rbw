@@ -151,6 +151,14 @@ impl Environment {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct FindArgs {
+    pub needle: String,
+    pub user: Option<String>,
+    pub folder: Option<String>,
+    pub ignorecase: bool,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum Action {
@@ -160,15 +168,27 @@ pub enum Action {
     CheckLock,
     Lock,
     Sync,
-    Decrypt {
-        cipherstring: String,
-        entry_key: Option<String>,
-        org_id: Option<String>,
+    Get(FindArgs),
+    Search {
+        term: String,
+        folder: Option<String>,
     },
-    Encrypt {
-        plaintext: String,
-        org_id: Option<String>,
+    Code(FindArgs),
+    Add {
+        name: String,
+        username: Option<String>,
+        uris: Vec<(String, Option<crate::api::UriMatchType>)>,
+        folder: Option<String>,
+        password: Option<String>,
+        notes: Option<String>,
     },
+    Edit {
+        find: FindArgs,
+        password: Option<String>,
+        notes: Option<String>,
+    },
+    Remove(FindArgs),
+    History(FindArgs),
     ClipboardStore {
         text: String,
     },
@@ -180,8 +200,22 @@ pub enum Action {
 #[serde(tag = "type")]
 pub enum Response {
     Ack,
-    Error { error: String },
-    Decrypt { plaintext: String },
-    Encrypt { cipherstring: String },
-    Version { version: u32 },
+    Error {
+        error: String,
+    },
+    Get {
+        entry: crate::db::Entry,
+    },
+    Search {
+        entries: Vec<crate::search::SearchEntry>,
+    },
+    Code {
+        code: String,
+    },
+    History {
+        entries: Vec<crate::db::HistoryEntry>,
+    },
+    Version {
+        version: u32,
+    },
 }
