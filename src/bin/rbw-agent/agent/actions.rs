@@ -367,9 +367,9 @@ impl Agent {
 
         log::trace!("Updated disk db");
 
-        self.refresh_decrypted_entries().await?;
-
-        log::trace!("Refreshed decrypted entries cache");
+        if let Ok(()) = self.refresh_decrypted_entries().await {
+            log::trace!("Refreshed decrypted entries cache");
+        }
 
         if let Err(e) = self.subscribe_to_notifications().await {
             eprintln!("failed to subscribe to notifications: {e}");
