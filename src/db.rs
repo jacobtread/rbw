@@ -489,7 +489,7 @@ impl Entry {
                     name: self.decrypt_optstring(&field.name, decrypter)?,
                     value: self.decrypt_optstring(&field.value, decrypter)?,
                     ty: field.ty,
-                    linked_id: None, // TODO: Check if None here is correct
+                    linked_id: field.linked_id,
                 })
             })
             .collect()
@@ -652,7 +652,7 @@ impl Entry {
                     name: self.decrypt_optstring(&field.name, decrypter)?,
                     value: self.decrypt_optstring(&field.value, decrypter)?,
                     ty: field.ty,
-                    linked_id: None,
+                    linked_id: field.linked_id,
                 })
             })
             .collect::<Result<_>>()?;
