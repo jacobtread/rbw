@@ -676,11 +676,14 @@ impl Agent {
         notes: Option<&str>,
     ) -> anyhow::Result<()> {
         self.unlock_state(environment).await?;
-        let guard = self.get_decrypted_entries().await;
-        let decrypted_entries = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
-        let dec_entry = rbw::search::find_entry(decrypted_entries, find)?;
+
+        let dec_entry = {
+            let guard = self.get_decrypted_entries().await;
+            let decrypted_entries = guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+            rbw::search::find_entry(decrypted_entries, find)?.clone()
+        };
         self.maybe_reprompt_password(environment, &dec_entry)
             .await?;
         let id = dec_entry.id;
@@ -758,11 +761,13 @@ impl Agent {
         find: &rbw::protocol::FindArgs,
     ) -> anyhow::Result<()> {
         self.unlock_state(environment).await?;
-        let guard = self.get_decrypted_entries().await;
-        let decrypted_entries = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
-        let entry = rbw::search::find_entry(decrypted_entries, find)?;
+        let entry_id = {
+            let guard = self.get_decrypted_entries().await;
+            let decrypted_entries = guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+            rbw::search::find_entry(decrypted_entries, find)?.id
+        };
 
         let db = self.inner.db.read().await;
         let access_token = db
@@ -774,7 +779,7 @@ impl Agent {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no refresh token"))?;
         let (new_access_token, ()) =
-            rbw::actions::remove(access_token, refresh_token, &entry.id).await?;
+            rbw::actions::remove(access_token, refresh_token, &entry_id).await?;
         drop(db);
         self.update_token(new_access_token).await?;
         self.sync(Some(sock)).await
