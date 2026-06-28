@@ -159,6 +159,16 @@ pub struct FindArgs {
     pub ignorecase: bool,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct AddEntry {
+    pub name: String,
+    pub username: Option<String>,
+    pub uris: Vec<(String, Option<crate::api::UriMatchType>)>,
+    pub folder: Option<String>,
+    pub password: Option<String>,
+    pub notes: Option<String>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum Action {
@@ -174,14 +184,7 @@ pub enum Action {
         folder: Option<String>,
     },
     Code(FindArgs),
-    Add {
-        name: String,
-        username: Option<String>,
-        uris: Vec<(String, Option<crate::api::UriMatchType>)>,
-        folder: Option<String>,
-        password: Option<String>,
-        notes: Option<String>,
-    },
+    Add(AddEntry),
     Edit {
         find: FindArgs,
         password: Option<String>,
@@ -204,7 +207,7 @@ pub enum Response {
         error: String,
     },
     Get {
-        entry: crate::db::Entry,
+        entry: Box<crate::db::Entry>,
     },
     Search {
         entries: Vec<crate::search::SearchEntry>,

@@ -333,25 +333,8 @@ impl Agent {
             rbw::protocol::Action::Code(find) => {
                 self.code(sock, &environment, find).await?;
             }
-            rbw::protocol::Action::Add {
-                name,
-                username,
-                uris,
-                folder,
-                password,
-                notes,
-            } => {
-                self.add(
-                    sock,
-                    &environment,
-                    name,
-                    username.as_deref(),
-                    uris,
-                    folder.as_deref(),
-                    password.as_deref(),
-                    notes.as_deref(),
-                )
-                .await?;
+            rbw::protocol::Action::Add(add) => {
+                self.add(sock, &environment, add).await?;
             }
             rbw::protocol::Action::Edit {
                 find,
@@ -398,7 +381,7 @@ impl Agent {
             | rbw::protocol::Action::Get(_)
             | rbw::protocol::Action::Search { .. }
             | rbw::protocol::Action::Code(_)
-            | rbw::protocol::Action::Add { .. }
+            | rbw::protocol::Action::Add(_)
             | rbw::protocol::Action::Edit { .. }
             | rbw::protocol::Action::Remove(_)
             | rbw::protocol::Action::History(_)

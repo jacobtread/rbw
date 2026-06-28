@@ -220,7 +220,7 @@ pub async fn get(
         ignorecase,
     })?;
     let entry = match res {
-        rbw::protocol::Response::Get { entry } => entry,
+        rbw::protocol::Response::Get { entry } => *entry,
         rbw::protocol::Response::Error { error } => {
             return Err(anyhow::anyhow!("{error}"));
         }
@@ -480,7 +480,7 @@ pub async fn edit(
         ignorecase,
     })?;
     let entry = match res {
-        rbw::protocol::Response::Get { entry } => entry,
+        rbw::protocol::Response::Get { entry } => *entry,
         rbw::protocol::Response::Error { error } => {
             return Err(anyhow::anyhow!("{error}"));
         }

@@ -94,14 +94,14 @@ pub fn add(
     password: Option<String>,
     notes: Option<String>,
 ) -> anyhow::Result<()> {
-    simple_action(rbw::protocol::Action::Add {
+    simple_action(rbw::protocol::Action::Add(rbw::protocol::AddEntry {
         name,
         username,
         uris,
         folder,
         password,
         notes,
-    })
+    }))
 }
 
 pub fn edit(

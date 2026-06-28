@@ -537,7 +537,10 @@ impl Agent {
             .fill_sensitive_fields(&mut dec)
             .map_err(anyhow::Error::new)?;
 
-        sock.send(&rbw::protocol::Response::Get { entry }).await?;
+        sock.send(&rbw::protocol::Response::Get {
+            entry: Box::new(entry),
+        })
+        .await?;
         Ok(())
     }
 
@@ -604,27 +607,29 @@ impl Agent {
         &self,
         sock: &mut crate::sock::Sock,
         environment: &rbw::protocol::Environment,
-        name: &str,
-        username: Option<&str>,
-        uris: &[(String, Option<rbw::api::UriMatchType>)],
-        folder: Option<&str>,
-        password: Option<&str>,
-        notes: Option<&str>,
+        entry: &rbw::protocol::AddEntry,
     ) -> anyhow::Result<()> {
         self.unlock_state(environment).await?;
 
         let mut enc = self.encrypter().await?;
-        let name = enc.encrypt_field(None, name)?;
-        let username = username
+        let name = enc.encrypt_field(None, &entry.name)?;
+        let username = entry
+            .username
+            .as_deref()
             .map(|username| enc.encrypt_field(None, username))
             .transpose()?;
-        let password = password
+        let password = entry
+            .password
+            .as_deref()
             .map(|password| enc.encrypt_field(None, password))
             .transpose()?;
-        let notes = notes
+        let notes = entry
+            .notes
+            .as_deref()
             .map(|notes| enc.encrypt_field(None, notes))
             .transpose()?;
-        let uris: Vec<rbw::db::Uri> = uris
+        let uris: Vec<rbw::db::Uri> = entry
+            .uris
             .iter()
             .map(|(uri, match_type)| {
                 Ok(rbw::db::Uri {
@@ -634,7 +639,7 @@ impl Agent {
             })
             .collect::<anyhow::Result<_>>()?;
 
-        let folder_id = match folder {
+        let folder_id = match &entry.folder {
             Some(folder) => Some(self.find_or_create_folder(folder).await?),
             None => None,
         };
