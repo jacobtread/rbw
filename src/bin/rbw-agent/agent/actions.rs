@@ -4,7 +4,7 @@ use anyhow::Context as _;
 use rbw::{
     actions::SessionParameters,
     db::{Db, Decrypter, Encrypter, EntryData},
-    error::{Error, Result},
+    error::Error,
 };
 
 use crate::agent::Agent;
@@ -367,6 +367,8 @@ impl Agent {
 
         log::trace!("Updated disk db");
 
+        // This is done on purpose, as the sync might happen while the db is locked, so we don't
+        // care about errors here.
         if let Ok(()) = self.refresh_decrypted_entries().await {
             log::trace!("Refreshed decrypted entries cache");
         }
@@ -399,7 +401,7 @@ impl Agent {
                     )
                     .await?;
 
-                Ok(self.try_unlock(&password).await?)
+                self.try_unlock(&password).await
             })
             .await
             .context("failed to reprompt for master password")?;
@@ -522,14 +524,15 @@ impl Agent {
         find: &rbw::protocol::FindArgs,
     ) -> anyhow::Result<()> {
         self.unlock_state(environment).await?;
-        let guard = self.get_decrypted_entries().await;
-        let decrypted_entries = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
-        let partial_entry = rbw::search::find_entry(decrypted_entries, find)?;
+        let partial_entry = {
+            let guard = self.get_decrypted_entries().await;
+            let decrypted_entries = guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+            rbw::search::find_entry(decrypted_entries, find)?.clone()
+        };
         self.maybe_reprompt_password(environment, &partial_entry)
             .await?;
-        drop(guard);
 
         let mut entry = partial_entry.clone();
         let mut dec = self.decrypter().await?;
@@ -577,14 +580,15 @@ impl Agent {
         find: &rbw::protocol::FindArgs,
     ) -> anyhow::Result<()> {
         self.unlock_state(environment).await?;
-        let guard = self.get_decrypted_entries().await;
-        let decrypted_entries = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
-        let partial_entry = rbw::search::find_entry(decrypted_entries, find)?;
+        let partial_entry = {
+            let guard = self.get_decrypted_entries().await;
+            let decrypted_entries = guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+            rbw::search::find_entry(decrypted_entries, find)?.clone()
+        };
         self.maybe_reprompt_password(environment, &partial_entry)
             .await?;
-        drop(guard);
 
         let EntryData::Login {
             totp: Some(totp_enc),
@@ -797,14 +801,15 @@ impl Agent {
         find: &rbw::protocol::FindArgs,
     ) -> anyhow::Result<()> {
         self.unlock_state(environment).await?;
-        let guard = self.get_decrypted_entries().await;
-        let decrypted_entries = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
-        let partial_entry = rbw::search::find_entry(decrypted_entries, find)?;
+        let partial_entry = {
+            let guard = self.get_decrypted_entries().await;
+            let decrypted_entries = guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("decrypted entries cache not initialized"))?;
+            rbw::search::find_entry(decrypted_entries, find)?.clone()
+        };
         self.maybe_reprompt_password(environment, &partial_entry)
             .await?;
-        drop(guard);
 
         let mut dec = self.decrypter().await?;
         let history = partial_entry
@@ -847,7 +852,7 @@ impl Agent {
         Ok(())
     }
 
-    async fn try_unlock(&self, password: &rbw::locked::Password) -> Result<()> {
+    async fn try_unlock(&self, password: &rbw::locked::Password) -> anyhow::Result<()> {
         let db = self.inner.db.read().await;
 
         let (protected_key, protected_private_key, protected_org_keys) =
@@ -867,9 +872,7 @@ impl Agent {
 
         drop(db);
 
-        self.refresh_decrypted_entries()
-            .await
-            .expect("failed to refresh decrypted entries cache");
+        self.refresh_decrypted_entries().await?;
 
         Ok(())
     }
@@ -885,7 +888,7 @@ impl Agent {
                     )
                     .await?;
 
-                Ok(self.try_unlock(&password).await?)
+                self.try_unlock(&password).await
             })
             .await
             .context("failed to unlock database")?;
