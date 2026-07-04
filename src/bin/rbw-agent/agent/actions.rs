@@ -36,6 +36,11 @@ where
                             err_msg = Some("TOTP code is not a number".to_string());
                             continue;
                         }
+
+                        rbw::error::Error::NewDeviceVerificationRequired => {
+                            err_msg = Some("New device verification code is incorrect".to_string());
+                            continue;
+                        }
                         _ => {}
                     }
                 }
@@ -169,7 +174,7 @@ impl Agent {
             let code = self.get_code(provider, &err, environment).await?;
             let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
 
-            Ok(rbw::actions::login(email, password, Some(code), Some(provider)).await?)
+            Ok(rbw::actions::login(email, password, Some(code), Some(provider), None).await?)
         })
         .await
     }
@@ -239,7 +244,17 @@ impl Agent {
                 .get_password(&format!("Log in to {host}"), &err, environment)
                 .await?;
 
-            let r = match rbw::actions::login(email, &password, None, None).await {
+            let r = match rbw::actions::login(email, &password, None, None, None).await {
+                Err(Error::NewDeviceVerificationRequired) => {
+                    log::trace!("Login requires device verification, performing it.");
+
+                    let ret = match self.device_verification(&password, environment).await {
+                        Ok(creds) => Ok((creds, password)),
+                        Err(e) => Err(anyhow::anyhow!("2FA verification failed: {e}")),
+                    }?;
+
+                    Ok(ret)
+                }
                 Err(Error::TwoFactorRequired {
                     providers,
                     sso_email_2fa_session_token,
@@ -294,6 +309,23 @@ impl Agent {
         respond_ack(sock).await?;
 
         Ok(())
+    }
+
+    async fn device_verification(
+        &self,
+        password: &rbw::locked::Password,
+        environment: &rbw::protocol::Environment,
+    ) -> anyhow::Result<SessionParameters> {
+        let email = self.email()?;
+
+        with_retry(|err| async move {
+            let provider = rbw::api::TwoFactorProviderType::Email;
+            let code = self.get_code(provider, &err, environment).await?;
+            let code = std::str::from_utf8(code.password()).context("code was not valid utf8")?;
+
+            Ok(rbw::actions::login(email, password, None, Some(provider), Some(code)).await?)
+        })
+        .await
     }
 
     pub async fn unlock(

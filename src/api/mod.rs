@@ -260,6 +260,8 @@ struct ConnectTokenReq<'a> {
     two_factor_token: Option<&'a str>,
     #[serde(rename = "twoFactorProvider")]
     two_factor_provider: Option<u32>,
+    #[serde(rename = "newDeviceOtp", skip_serializing_if = "Option::is_none")]
+    device_verification_code: Option<String>,
     #[serde(flatten)]
     auth: ConnectTokenAuth<'a>,
 }
@@ -289,6 +291,7 @@ impl TryFrom<ConnectErrorRes> for Error {
 
     fn try_from(value: ConnectErrorRes) -> std::result::Result<Self, Self::Error> {
         let error_desc = value.error_description.as_deref();
+        dbg!(error_desc);
         match value.error.as_str() {
             "invalid_grant" => match error_desc {
                 Some("invalid_username_or_password") => {
@@ -313,6 +316,9 @@ impl TryFrom<ConnectErrorRes> for Error {
             },
             "invalid_client" => {
                 return Ok(Error::IncorrectApiKey);
+            }
+            "device_error" => {
+                return Ok(Error::NewDeviceVerificationRequired);
             }
             "" if error_desc.is_none() || error_desc == Some("") => {
                 // bitwarden_rs returns an empty error and error_description for

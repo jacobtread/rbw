@@ -257,6 +257,9 @@ pub enum Error {
 
     #[error("the entry has been deleted")]
     DeletedEntry,
+
+    #[error("new device verification required")]
+    NewDeviceVerificationRequired,
 }
 
 impl From<Utf8Error> for Error {

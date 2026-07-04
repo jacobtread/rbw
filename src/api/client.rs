@@ -23,6 +23,7 @@ use crate::{
 // Used for the Bitwarden-Client-Name header. Accepted values:
 // https://github.com/bitwarden/server/blob/main/src/Core/Enums/BitwardenClient.cs
 const BITWARDEN_CLIENT: &str = "cli";
+const BITWARDEN_CLIENT_VERSION: &str = "2024.12.0";
 
 // DeviceType.LinuxDesktop, as per Bitwarden API device types.
 const DEVICE_TYPE: u8 = 8;
@@ -240,7 +241,7 @@ impl Client {
         );
         default_headers.insert(
             "Bitwarden-Client-Version",
-            axum::http::HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+            axum::http::HeaderValue::from_static(BITWARDEN_CLIENT_VERSION),
         );
         default_headers.append(
             "Device-Type",
@@ -248,7 +249,7 @@ impl Client {
             // are valid ASCII
             axum::http::HeaderValue::from_str(&DEVICE_TYPE.to_string()).unwrap(),
         );
-        let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), BITWARDEN_CLIENT_VERSION);
         if let Some(client_cert_path) = self.client_cert_path.as_ref() {
             let buf =
                 tokio::fs::read(client_cert_path)
@@ -341,6 +342,7 @@ impl Client {
             device_push_token: "",
             two_factor_token: None,
             two_factor_provider: None,
+            device_verification_code: None,
         };
 
         let res = ClientRequest::ConnectToken(connect_req).req(self).await?;
@@ -358,6 +360,7 @@ impl Client {
         password_hash: &crate::locked::PasswordHash,
         two_factor_token: Option<&str>,
         two_factor_provider: Option<TwoFactorProviderType>,
+        device_verification_code: Option<&str>,
     ) -> Result<(String, String, String)> {
         let (auth, grant_type, scope) = match sso_id {
             Some(sso_id) => {
@@ -394,6 +397,8 @@ impl Client {
             device_push_token: "",
             two_factor_token,
             two_factor_provider: two_factor_provider.map(|ty| ty as u32),
+            device_verification_code: device_verification_code
+                .map(std::string::ToString::to_string),
         };
 
         let res = ClientRequest::Login(connect_req, email).req(self).await?;
